@@ -1,0 +1,42 @@
+{
+  "name": "tathastu-connect-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/web",
+    "build": "npm run build --workspace=apps/web",
+    "start": "npm run start --workspace=apps/web",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "dev:api": "pwsh -Command \"$env:PATH = 'C:\\Users\\Lenovo\\go_sdk\\bin;' + $env:PATH; cd services/api; go run ./cmd/server\"",
+    "build:web": "npm run build --workspace=apps/web",
+    "lint:web": "npm run lint --workspace=apps/web",
+    "typecheck:web": "npm run typecheck --workspace=apps/web",
+    "typecheck:mobile": "tsc --noEmit --project apps/mobile/tsconfig.json",
+    "test:web": "npm run test --workspace=apps/web",
+    "test:visual": "npm run test:visual --workspace=apps/web",
+    "test:api": "pwsh -Command \"$env:PATH = 'C:\\Users\\Lenovo\\go_sdk\\bin;' + $env:PATH; cd services/api; go test -v ./...\"",
+    "test": "npm run test:web && npm run test:api",
+    "docker:up": "docker compose -f infra/docker/docker-compose.yml up -d",
+    "docker:down": "docker compose -f infra/docker/docker-compose.yml down"
+  },
+  "overrides": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "braces": "^3.0.3",
+    "postcss": "^8.5.29",
+    "next": {
+      "postcss": "^8.5.29"
+    },
+    "postcss-selector-parser": "^7.1.6",
+    "tailwindcss": {
+      "postcss-selector-parser": "^7.1.6"
+    }
+  },
+  "devDependencies": {
+    "prettier": "^3.5.0"
+  }
+}
