@@ -717,6 +717,11 @@ func (s *Service) MuteParticipant(ctx context.Context, code string, user *auth.U
 // PostgreSQL-backed participant leases, updates the participant's persistent role in the database
 // via Compare-And-Swap (preventing stale role updates), and synchronizes track publishing permissions
 // with LiveKit SFU without holding database transactions open during network operations.
+// PromoteSpeaker allows a room host to promote a participant to a speaker in real-time.
+// This serializes concurrent promotion/demotion requests across distributed API instances using
+// PostgreSQL-backed participant leases with unique tokens and monotonic fencing generations,
+// updates the participant's persistent role in the database via CAS and fencing checks, and
+// synchronizes track publishing permissions with LiveKit SFU without holding database transactions open.
 func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.User, targetIdentity, clientIP, reqID string) error {
 	normCode := NormalizeCode(code)
 	rm, err := s.repo.GetRoomByCode(ctx, normCode)
@@ -731,12 +736,12 @@ func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.Us
 		return errors.New("cannot change role of room host")
 	}
 
-	// 1. Acquire distributed lock across API instances (10s TTL)
-	unlock, err := s.repo.AcquireParticipantLock(ctx, rm.ID, targetIdentity, s.instanceID, 10*time.Second)
+	// 1. Acquire distributed lease with unique token and generation (10s TTL)
+	lock, err := s.repo.AcquireParticipantLock(ctx, rm.ID, targetIdentity, s.instanceID, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to acquire distributed lock: %w", err)
 	}
-	defer unlock()
+	defer lock.Release()
 
 	// 2. Fetch authoritative database state under lock
 	part, err := s.repo.GetParticipant(ctx, rm.ID, targetIdentity)
@@ -749,12 +754,13 @@ func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.Us
 		prevRole = livekit.RoleParticipant
 	}
 
-	rpcCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
+	opID := uuid.NewString()
 
-	if prevRole == livekit.RoleSpeaker {
-		// Idempotent duplicate request: re-sync SFU if online and verify success
+	// If already speaker and idle, idempotent re-sync
+	if prevRole == livekit.RoleSpeaker && part.TransitionState == "idle" {
 		if s.roomManager != nil {
+			rpcCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+			defer cancel()
 			if err := s.roomManager.PromoteToSpeaker(rpcCtx, normCode, targetIdentity); err != nil {
 				return fmt.Errorf("%w: idempotent sync failed: %v", ErrSFUSyncFailed, err)
 			}
@@ -762,16 +768,54 @@ func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.Us
 		return nil
 	}
 
-	// 3. Atomically update DB role with CAS (prevents stale updates)
-	if err := s.repo.UpdateParticipantRoleCAS(ctx, rm.ID, targetIdentity, prevRole, livekit.RoleSpeaker); err != nil {
+	// 3. Atomically update DB role with CAS and monotonic fencing generation
+	if err := s.repo.BeginParticipantRoleTransition(ctx, rm.ID, targetIdentity, prevRole, livekit.RoleSpeaker, opID, "promoting", lock.Generation); err != nil {
 		return fmt.Errorf("failed to persist role update: %w", err)
 	}
 
-	// 4. LiveKit RPC without holding database transactions open
+	// 4. LiveKit RPC bounded to 4s (strictly less than 10s lease TTL)
+	rpcCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+
 	if s.roomManager != nil {
-		if err := s.roomManager.PromoteToSpeaker(rpcCtx, normCode, targetIdentity); err != nil {
-			// Roll back database role update using CAS to prevent state divergence
-			rbErr := s.repo.UpdateParticipantRoleCAS(ctx, rm.ID, targetIdentity, livekit.RoleSpeaker, prevRole)
+		rpcErr := s.roomManager.PromoteToSpeaker(rpcCtx, normCode, targetIdentity)
+		if rpcErr != nil {
+			// Check for timeout ambiguity
+			if errors.Is(rpcErr, context.DeadlineExceeded) || strings.Contains(strings.ToLower(rpcErr.Error()), "deadline exceeded") {
+				// Mark transition as unknown for observability
+				_ = s.repo.SetParticipantTransitionUnknown(ctx, rm.ID, targetIdentity, opID, lock.Generation)
+
+				// Active query to SFU to inspect actual permission state
+				reconCtx, reconCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer reconCancel()
+				pInfo, checkErr := s.roomManager.GetParticipant(reconCtx, normCode, targetIdentity)
+				if checkErr == nil && pInfo != nil && pInfo.Permission != nil && pInfo.Permission.CanPublish {
+					// SFU confirmed the participant has publishing permissions! Transition succeeded despite client timeout
+					_ = s.repo.CommitParticipantTransition(ctx, rm.ID, targetIdentity, opID, lock.Generation)
+					return nil
+				}
+
+				// Otherwise SFU did not apply permissions or is unreachable; safely rollback role
+				rbErr := s.repo.RollbackParticipantRole(ctx, rm.ID, targetIdentity, prevRole, opID, lock.Generation)
+				if s.auditService != nil {
+					s.auditService.Record(ctx, audit.AuditParams{
+						EventType: "room.sfu_sync_timeout",
+						Severity:  "WARN",
+						ActorID:   user.ID,
+						RoomID:    rm.ID,
+						ClientIP:  clientIP,
+						RequestID: reqID,
+					})
+				}
+				if rbErr != nil && !errors.Is(rbErr, ErrStaleRoleUpdate) {
+					log.Printf("[CRITICAL] Participant %s role desync in room %s: timeout (%v), rollback error (%v)", targetIdentity, rm.ID, rpcErr, rbErr)
+					return fmt.Errorf("%w: sfu timeout: %v, rollback error: %v", ErrDatabaseRollbackFailed, rpcErr, rbErr)
+				}
+				return fmt.Errorf("%w: timeout: %v", ErrSFUSyncFailed, rpcErr)
+			}
+
+			// Definite RPC failure: Roll back role using fencing
+			rbErr := s.repo.RollbackParticipantRole(ctx, rm.ID, targetIdentity, prevRole, opID, lock.Generation)
 			if s.auditService != nil {
 				s.auditService.Record(ctx, audit.AuditParams{
 					EventType: "room.sfu_sync_failed",
@@ -782,13 +826,16 @@ func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.Us
 					RequestID: reqID,
 				})
 			}
-			if rbErr != nil {
-				log.Printf("[CRITICAL] Participant %s role desynchronization in room %s: initial SFU error (%v), DB rollback error (%v)", targetIdentity, rm.ID, err, rbErr)
-				return fmt.Errorf("%w: sfu error: %v, rollback error: %v", ErrDatabaseRollbackFailed, err, rbErr)
+			if rbErr != nil && !errors.Is(rbErr, ErrStaleRoleUpdate) {
+				log.Printf("[CRITICAL] Participant %s role desynchronization in room %s: initial SFU error (%v), DB rollback error (%v)", targetIdentity, rm.ID, rpcErr, rbErr)
+				return fmt.Errorf("%w: sfu error: %v, rollback error: %v", ErrDatabaseRollbackFailed, rpcErr, rbErr)
 			}
-			return fmt.Errorf("%w: %v", ErrSFUSyncFailed, err)
+			return fmt.Errorf("%w: %v", ErrSFUSyncFailed, rpcErr)
 		}
 	}
+
+	// 5. Commit transition state to 'idle' with generation match
+	_ = s.repo.CommitParticipantTransition(ctx, rm.ID, targetIdentity, opID, lock.Generation)
 
 	if s.auditService != nil {
 		s.auditService.Record(ctx, audit.AuditParams{
@@ -805,8 +852,9 @@ func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.Us
 }
 
 // DemoteSpeaker allows a room host to revoke speaker privileges from a participant in real-time.
-// This serializes concurrent mutations across distributed API instances using PostgreSQL leases,
-// resets the persistent role to participant with CAS, and revokes media publication permissions on LiveKit SFU.
+// This serializes concurrent mutations across distributed API instances using PostgreSQL leases
+// with unique tokens and monotonic fencing generations, resets the persistent role to participant,
+// and revokes media publication permissions on LiveKit SFU.
 func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.User, targetIdentity, clientIP, reqID string) error {
 	normCode := NormalizeCode(code)
 	rm, err := s.repo.GetRoomByCode(ctx, normCode)
@@ -821,12 +869,12 @@ func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.Use
 		return errors.New("cannot change role of room host")
 	}
 
-	// 1. Acquire distributed lock across API instances (10s TTL)
-	unlock, err := s.repo.AcquireParticipantLock(ctx, rm.ID, targetIdentity, s.instanceID, 10*time.Second)
+	// 1. Acquire distributed lease with unique token and generation (10s TTL)
+	lock, err := s.repo.AcquireParticipantLock(ctx, rm.ID, targetIdentity, s.instanceID, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to acquire distributed lock: %w", err)
 	}
-	defer unlock()
+	defer lock.Release()
 
 	// 2. Fetch authoritative database state under lock
 	part, err := s.repo.GetParticipant(ctx, rm.ID, targetIdentity)
@@ -839,12 +887,13 @@ func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.Use
 		prevRole = livekit.RoleParticipant
 	}
 
-	rpcCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
+	opID := uuid.NewString()
 
-	if prevRole == livekit.RoleParticipant {
-		// Idempotent duplicate request: re-sync SFU revocation if online and verify success
+	// If already participant and idle, idempotent re-sync
+	if prevRole == livekit.RoleParticipant && part.TransitionState == "idle" {
 		if s.roomManager != nil {
+			rpcCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+			defer cancel()
 			if err := s.roomManager.DemoteToParticipant(rpcCtx, normCode, targetIdentity); err != nil {
 				return fmt.Errorf("%w: idempotent sync failed: %v", ErrSFUSyncFailed, err)
 			}
@@ -852,16 +901,54 @@ func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.Use
 		return nil
 	}
 
-	// 3. Atomically update DB role with CAS (prevents stale updates)
-	if err := s.repo.UpdateParticipantRoleCAS(ctx, rm.ID, targetIdentity, prevRole, livekit.RoleParticipant); err != nil {
+	// 3. Atomically update DB role with CAS and monotonic fencing generation
+	if err := s.repo.BeginParticipantRoleTransition(ctx, rm.ID, targetIdentity, prevRole, livekit.RoleParticipant, opID, "demoting", lock.Generation); err != nil {
 		return fmt.Errorf("failed to persist role update: %w", err)
 	}
 
-	// 4. LiveKit RPC
+	// 4. LiveKit RPC bounded to 4s (strictly less than 10s lease TTL)
+	rpcCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+
 	if s.roomManager != nil {
-		if err := s.roomManager.DemoteToParticipant(rpcCtx, normCode, targetIdentity); err != nil {
-			// Roll back database role update using CAS to prevent state divergence
-			rbErr := s.repo.UpdateParticipantRoleCAS(ctx, rm.ID, targetIdentity, livekit.RoleParticipant, prevRole)
+		rpcErr := s.roomManager.DemoteToParticipant(rpcCtx, normCode, targetIdentity)
+		if rpcErr != nil {
+			// Check for timeout ambiguity
+			if errors.Is(rpcErr, context.DeadlineExceeded) || strings.Contains(strings.ToLower(rpcErr.Error()), "deadline exceeded") {
+				// Mark transition as unknown for observability
+				_ = s.repo.SetParticipantTransitionUnknown(ctx, rm.ID, targetIdentity, opID, lock.Generation)
+
+				// Active query to SFU to inspect actual permission state
+				reconCtx, reconCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer reconCancel()
+				pInfo, checkErr := s.roomManager.GetParticipant(reconCtx, normCode, targetIdentity)
+				if checkErr == nil && pInfo != nil && pInfo.Permission != nil && !pInfo.Permission.CanPublish {
+					// SFU confirmed the participant has had publishing revoked! Demotion succeeded despite client timeout
+					_ = s.repo.CommitParticipantTransition(ctx, rm.ID, targetIdentity, opID, lock.Generation)
+					return nil
+				}
+
+				// Otherwise SFU did not revoke permissions or is unreachable; safely rollback role
+				rbErr := s.repo.RollbackParticipantRole(ctx, rm.ID, targetIdentity, prevRole, opID, lock.Generation)
+				if s.auditService != nil {
+					s.auditService.Record(ctx, audit.AuditParams{
+						EventType: "room.sfu_sync_timeout",
+						Severity:  "WARN",
+						ActorID:   user.ID,
+						RoomID:    rm.ID,
+						ClientIP:  clientIP,
+						RequestID: reqID,
+					})
+				}
+				if rbErr != nil && !errors.Is(rbErr, ErrStaleRoleUpdate) {
+					log.Printf("[CRITICAL] Participant %s role desync in room %s: timeout (%v), rollback error (%v)", targetIdentity, rm.ID, rpcErr, rbErr)
+					return fmt.Errorf("%w: sfu timeout: %v, rollback error: %v", ErrDatabaseRollbackFailed, rpcErr, rbErr)
+				}
+				return fmt.Errorf("%w: timeout: %v", ErrSFUSyncFailed, rpcErr)
+			}
+
+			// Definite RPC failure: Roll back role using fencing
+			rbErr := s.repo.RollbackParticipantRole(ctx, rm.ID, targetIdentity, prevRole, opID, lock.Generation)
 			if s.auditService != nil {
 				s.auditService.Record(ctx, audit.AuditParams{
 					EventType: "room.sfu_sync_failed",
@@ -872,13 +959,16 @@ func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.Use
 					RequestID: reqID,
 				})
 			}
-			if rbErr != nil {
-				log.Printf("[CRITICAL] Participant %s role desynchronization in room %s: initial SFU error (%v), DB rollback error (%v)", targetIdentity, rm.ID, err, rbErr)
-				return fmt.Errorf("%w: sfu error: %v, rollback error: %v", ErrDatabaseRollbackFailed, err, rbErr)
+			if rbErr != nil && !errors.Is(rbErr, ErrStaleRoleUpdate) {
+				log.Printf("[CRITICAL] Participant %s role desynchronization in room %s: initial SFU error (%v), DB rollback error (%v)", targetIdentity, rm.ID, rpcErr, rbErr)
+				return fmt.Errorf("%w: sfu error: %v, rollback error: %v", ErrDatabaseRollbackFailed, rpcErr, rbErr)
 			}
-			return fmt.Errorf("%w: %v", ErrSFUSyncFailed, err)
+			return fmt.Errorf("%w: %v", ErrSFUSyncFailed, rpcErr)
 		}
 	}
+
+	// 5. Commit transition state to 'idle' with generation match
+	_ = s.repo.CommitParticipantTransition(ctx, rm.ID, targetIdentity, opID, lock.Generation)
 
 	if s.auditService != nil {
 		s.auditService.Record(ctx, audit.AuditParams{
@@ -903,33 +993,36 @@ func (s *Service) ReconcileParticipant(ctx context.Context, code, identity strin
 		return ErrRoomNotFound
 	}
 
-	unlock, err := s.repo.AcquireParticipantLock(ctx, rm.ID, identity, s.instanceID, 10*time.Second)
+	lock, err := s.repo.AcquireParticipantLock(ctx, rm.ID, identity, s.instanceID, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to acquire distributed lock for reconciliation: %w", err)
 	}
-	defer unlock()
+	defer lock.Release()
 
 	part, err := s.repo.GetParticipant(ctx, rm.ID, identity)
 	if err != nil || part == nil || part.LeftAt != nil {
 		return ErrParticipantNotFoundInRoom
 	}
 
-	if s.roomManager == nil {
-		return nil
-	}
+	if s.roomManager != nil {
+		rpcCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		defer cancel()
 
-	rpcCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
-
-	if part.Role == livekit.RoleSpeaker || part.Role == livekit.RoleHost {
-		if err := s.roomManager.PromoteToSpeaker(rpcCtx, normCode, identity); err != nil {
-			return fmt.Errorf("%w: %v", ErrSFUSyncFailed, err)
+		if part.Role == livekit.RoleSpeaker || part.Role == livekit.RoleHost {
+			if err := s.roomManager.PromoteToSpeaker(rpcCtx, normCode, identity); err != nil {
+				return fmt.Errorf("%w: %v", ErrSFUSyncFailed, err)
+			}
+		} else {
+			if err := s.roomManager.DemoteToParticipant(rpcCtx, normCode, identity); err != nil {
+				return fmt.Errorf("%w: %v", ErrSFUSyncFailed, err)
+			}
 		}
-		return nil
 	}
-	if err := s.roomManager.DemoteToParticipant(rpcCtx, normCode, identity); err != nil {
-		return fmt.Errorf("%w: %v", ErrSFUSyncFailed, err)
+
+	if part.TransitionState != "idle" {
+		_ = s.repo.CommitParticipantTransition(ctx, rm.ID, identity, part.TransitionOpID, lock.Generation)
 	}
+
 	return nil
 }
 

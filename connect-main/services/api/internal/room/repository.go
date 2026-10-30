@@ -3,12 +3,15 @@ package room
 import (
 	"context"
 	"errors"
+	"log"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -29,16 +32,29 @@ type Room struct {
 
 // Participant represents a connected user or guest in a room.
 type Participant struct {
-	ID          string
-	RoomID      string
-	UserID      *string
-	Identity    string // 'user:<uuid>' or 'guest:<uuid>'
-	DisplayName string
-	Role        string // 'host' or 'participant'
-	IsGuest     bool
-	JoinedAt    time.Time
-	LeftAt      *time.Time
-	IsRemoved   bool
+	ID              string
+	RoomID          string
+	UserID          *string
+	Identity        string // 'user:<uuid>' or 'guest:<uuid>'
+	DisplayName     string
+	Role            string // 'host', 'participant', or 'speaker'
+	IsGuest         bool
+	JoinedAt        time.Time
+	LeftAt          *time.Time
+	IsRemoved       bool
+	FencingToken    int64
+	TransitionState string
+	TransitionOpID  string
+}
+
+// ParticipantLock represents an acquired distributed lease for a participant.
+type ParticipantLock struct {
+	LockKey    string
+	OwnerID    string
+	LeaseToken string
+	Generation int64
+	ExpiresAt  time.Time
+	Release    func()
 }
 
 // AdmissionRequest represents a guest request to be admitted to a waiting-room-enabled meeting.
@@ -80,7 +96,11 @@ type Repository interface {
 	MarkParticipantLeft(ctx context.Context, roomID, identity string, leftAt time.Time) error
 	UpdateParticipantRole(ctx context.Context, roomID, identity, role string) error
 	UpdateParticipantRoleCAS(ctx context.Context, roomID, identity, expectedRole, newRole string) error
-	AcquireParticipantLock(ctx context.Context, roomID, identity, ownerID string, ttl time.Duration) (func(), error)
+	AcquireParticipantLock(ctx context.Context, roomID, identity, ownerID string, ttl time.Duration) (*ParticipantLock, error)
+	BeginParticipantRoleTransition(ctx context.Context, roomID, identity, expectedRole, targetRole, opID, transitionState string, generation int64) error
+	CommitParticipantTransition(ctx context.Context, roomID, identity, opID string, generation int64) error
+	SetParticipantTransitionUnknown(ctx context.Context, roomID, identity, opID string, generation int64) error
+	RollbackParticipantRole(ctx context.Context, roomID, identity, originalRole, opID string, generation int64) error
 	CreateAdmissionRequest(ctx context.Context, req *AdmissionRequest) error
 	GetAdmissionRequest(ctx context.Context, roomID, identity string) (*AdmissionRequest, error)
 	GetPendingAdmissionRequests(ctx context.Context, roomID string) ([]*AdmissionRequest, error)
@@ -184,18 +204,21 @@ func (r *PgxRepository) UpsertParticipant(ctx context.Context, p *Participant) e
 	}
 	now := time.Now().UTC()
 	p.JoinedAt = now
+	if p.TransitionState == "" {
+		p.TransitionState = "idle"
+	}
 
 	query := `
-		INSERT INTO room_participants (id, room_id, user_id, identity, display_name, role, is_guest, joined_at, left_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL)
+		INSERT INTO room_participants (id, room_id, user_id, identity, display_name, role, is_guest, joined_at, left_at, fencing_token, transition_state, transition_op_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, $11)
 	`
-	_, err := r.pool.Exec(ctx, query, p.ID, p.RoomID, p.UserID, p.Identity, p.DisplayName, p.Role, p.IsGuest, p.JoinedAt)
+	_, err := r.pool.Exec(ctx, query, p.ID, p.RoomID, p.UserID, p.Identity, p.DisplayName, p.Role, p.IsGuest, p.JoinedAt, p.FencingToken, p.TransitionState, p.TransitionOpID)
 	return err
 }
 
 func (r *PgxRepository) GetParticipant(ctx context.Context, roomID, identity string) (*Participant, error) {
 	query := `
-		SELECT id, room_id, user_id, identity, display_name, role, is_guest, joined_at, left_at
+		SELECT id, room_id, user_id, identity, display_name, role, is_guest, joined_at, left_at, fencing_token, transition_state, transition_op_id
 		FROM room_participants
 		WHERE room_id = $1 AND identity = $2 AND left_at IS NULL
 		ORDER BY joined_at DESC
@@ -203,7 +226,7 @@ func (r *PgxRepository) GetParticipant(ctx context.Context, roomID, identity str
 	`
 	row := r.pool.QueryRow(ctx, query, roomID, identity)
 	var p Participant
-	err := row.Scan(&p.ID, &p.RoomID, &p.UserID, &p.Identity, &p.DisplayName, &p.Role, &p.IsGuest, &p.JoinedAt, &p.LeftAt)
+	err := row.Scan(&p.ID, &p.RoomID, &p.UserID, &p.Identity, &p.DisplayName, &p.Role, &p.IsGuest, &p.JoinedAt, &p.LeftAt, &p.FencingToken, &p.TransitionState, &p.TransitionOpID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -215,7 +238,7 @@ func (r *PgxRepository) GetParticipant(ctx context.Context, roomID, identity str
 
 func (r *PgxRepository) GetActiveParticipants(ctx context.Context, roomID string) ([]*Participant, error) {
 	query := `
-		SELECT id, room_id, user_id, identity, display_name, role, is_guest, joined_at, left_at
+		SELECT id, room_id, user_id, identity, display_name, role, is_guest, joined_at, left_at, fencing_token, transition_state, transition_op_id
 		FROM room_participants
 		WHERE room_id = $1 AND left_at IS NULL
 		ORDER BY joined_at ASC
@@ -229,7 +252,7 @@ func (r *PgxRepository) GetActiveParticipants(ctx context.Context, roomID string
 	var result []*Participant
 	for rows.Next() {
 		var p Participant
-		if err := rows.Scan(&p.ID, &p.RoomID, &p.UserID, &p.Identity, &p.DisplayName, &p.Role, &p.IsGuest, &p.JoinedAt, &p.LeftAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.RoomID, &p.UserID, &p.Identity, &p.DisplayName, &p.Role, &p.IsGuest, &p.JoinedAt, &p.LeftAt, &p.FencingToken, &p.TransitionState, &p.TransitionOpID); err != nil {
 			return nil, err
 		}
 		result = append(result, &p)
@@ -271,7 +294,7 @@ func (r *PgxRepository) UpdateParticipantRole(ctx context.Context, roomID, ident
 func (r *PgxRepository) UpdateParticipantRoleCAS(ctx context.Context, roomID, identity, expectedRole, newRole string) error {
 	query := `
 		UPDATE room_participants
-		SET role = $1
+		SET role = $1, transition_state = 'idle', transition_op_id = ''
 		WHERE room_id = $2 AND identity = $3 AND left_at IS NULL AND role = $4
 	`
 	cmdTag, err := r.pool.Exec(ctx, query, newRole, roomID, identity, expectedRole)
@@ -284,52 +307,149 @@ func (r *PgxRepository) UpdateParticipantRoleCAS(ctx context.Context, roomID, id
 	return nil
 }
 
-func (r *PgxRepository) AcquireParticipantLock(ctx context.Context, roomID, identity, ownerID string, ttl time.Duration) (func(), error) {
-	lockKey := roomID + ":" + identity
-	now := time.Now().UTC()
-	expiresAt := now.Add(ttl)
-
-	// Ensure table exists idempotently
-	initQuery := `
-		CREATE TABLE IF NOT EXISTS participant_locks (
-			lock_key VARCHAR(128) PRIMARY KEY,
-			owner_id VARCHAR(64) NOT NULL,
-			acquired_at TIMESTAMPTZ NOT NULL,
-			expires_at TIMESTAMPTZ NOT NULL
-		);
-	`
-	_, _ = r.pool.Exec(ctx, initQuery)
-
+func (r *PgxRepository) BeginParticipantRoleTransition(ctx context.Context, roomID, identity, expectedRole, targetRole, opID, transitionState string, generation int64) error {
 	query := `
-		INSERT INTO participant_locks (lock_key, owner_id, acquired_at, expires_at)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (lock_key) DO UPDATE
-		SET owner_id = EXCLUDED.owner_id,
-		    acquired_at = EXCLUDED.acquired_at,
-		    expires_at = EXCLUDED.expires_at
-		WHERE participant_locks.expires_at < $3
-		RETURNING lock_key;
+		UPDATE room_participants
+		SET role = $1,
+		    transition_state = $2,
+		    transition_op_id = $3,
+		    fencing_token = $4
+		WHERE room_id = $5
+		  AND identity = $6
+		  AND left_at IS NULL
+		  AND role = $7
+		  AND fencing_token < $4
 	`
+	cmdTag, err := r.pool.Exec(ctx, query, targetRole, transitionState, opID, generation, roomID, identity, expectedRole)
+	if err != nil {
+		return err
+	}
+	if cmdTag.RowsAffected() == 0 {
+		return ErrStaleRoleUpdate
+	}
+	return nil
+}
 
+func (r *PgxRepository) CommitParticipantTransition(ctx context.Context, roomID, identity, opID string, generation int64) error {
+	query := `
+		UPDATE room_participants
+		SET transition_state = 'idle',
+		    transition_op_id = ''
+		WHERE room_id = $1
+		  AND identity = $2
+		  AND left_at IS NULL
+		  AND fencing_token = $3
+		  AND transition_op_id = $4
+	`
+	_, err := r.pool.Exec(ctx, query, roomID, identity, generation, opID)
+	return err
+}
+
+func (r *PgxRepository) SetParticipantTransitionUnknown(ctx context.Context, roomID, identity, opID string, generation int64) error {
+	query := `
+		UPDATE room_participants
+		SET transition_state = 'unknown'
+		WHERE room_id = $1
+		  AND identity = $2
+		  AND left_at IS NULL
+		  AND fencing_token = $3
+		  AND transition_op_id = $4
+	`
+	_, err := r.pool.Exec(ctx, query, roomID, identity, generation, opID)
+	return err
+}
+
+func (r *PgxRepository) RollbackParticipantRole(ctx context.Context, roomID, identity, originalRole, opID string, generation int64) error {
+	query := `
+		UPDATE room_participants
+		SET role = $1,
+		    transition_state = 'idle',
+		    transition_op_id = ''
+		WHERE room_id = $2
+		  AND identity = $3
+		  AND left_at IS NULL
+		  AND fencing_token = $4
+		  AND transition_op_id = $5
+	`
+	cmdTag, err := r.pool.Exec(ctx, query, originalRole, roomID, identity, generation, opID)
+	if err != nil {
+		return err
+	}
+	if cmdTag.RowsAffected() == 0 {
+		return ErrStaleRoleUpdate
+	}
+	return nil
+}
+
+func (r *PgxRepository) AcquireParticipantLock(ctx context.Context, roomID, identity, ownerID string, ttl time.Duration) (*ParticipantLock, error) {
+	lockKey := roomID + ":" + identity
 	deadline := time.Now().Add(4 * time.Second)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
 
+	query := `
+		INSERT INTO participant_locks (lock_key, owner_id, lease_token, generation, acquired_at, expires_at)
+		VALUES (
+			$1, $2, $3,
+			COALESCE((SELECT fencing_token FROM room_participants WHERE room_id = CASE WHEN $4 ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN $4::uuid ELSE NULL END AND identity = $5 AND left_at IS NULL ORDER BY joined_at DESC LIMIT 1), 0) + 1,
+			$6, $7
+		)
+		ON CONFLICT (lock_key) DO UPDATE
+		SET owner_id = EXCLUDED.owner_id,
+		    lease_token = EXCLUDED.lease_token,
+		    generation = GREATEST(participant_locks.generation, COALESCE((SELECT fencing_token FROM room_participants WHERE room_id = CASE WHEN $4 ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN $4::uuid ELSE NULL END AND identity = $5 AND left_at IS NULL ORDER BY joined_at DESC LIMIT 1), 0)) + 1,
+		    acquired_at = EXCLUDED.acquired_at,
+		    expires_at = EXCLUDED.expires_at
+		WHERE participant_locks.expires_at < $6
+		RETURNING generation;
+	`
+
 	for {
-		var returnedKey string
-		err := r.pool.QueryRow(ctx, query, lockKey, ownerID, now, expiresAt).Scan(&returnedKey)
-		if err == nil && returnedKey != "" {
-			released := false
-			return func() {
-				if released {
-					return
-				}
-				released = true
-				relCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				_, _ = r.pool.Exec(relCtx, "DELETE FROM participant_locks WHERE lock_key = $1 AND owner_id = $2", lockKey, ownerID)
+		now := time.Now().UTC()
+		expiresAt := now.Add(ttl)
+		leaseToken := uuid.NewString()
+
+		var gen int64
+		err := r.pool.QueryRow(ctx, query, lockKey, ownerID, leaseToken, roomID, identity, now, expiresAt).Scan(&gen)
+		if err == nil {
+			var releaseOnce sync.Once
+			release := func() {
+				releaseOnce.Do(func() {
+					relCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					defer cancel()
+					tag, relErr := r.pool.Exec(relCtx,
+						"UPDATE participant_locks SET expires_at = $4 WHERE lock_key = $1 AND lease_token = $2 AND generation = $3",
+						lockKey, leaseToken, gen, time.Now().UTC())
+					if relErr != nil {
+						log.Printf("[WARN] Failed to release participant lock %s (token=%s, gen=%d): %v", lockKey, leaseToken, gen, relErr)
+					} else if tag.RowsAffected() == 0 {
+						log.Printf("[WARN] Participant lock %s release skipped: lease expired or claimed by newer generation (token=%s, gen=%d)", lockKey, leaseToken, gen)
+					}
+				})
+			}
+
+			return &ParticipantLock{
+				LockKey:    lockKey,
+				OwnerID:    ownerID,
+				LeaseToken: leaseToken,
+				Generation: gen,
+				ExpiresAt:  expiresAt,
+				Release:    release,
 			}, nil
+		}
+
+		if !errors.Is(err, pgx.ErrNoRows) {
+			// Check if error is due to missing table (no runtime DDL allowed)
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "42P01" {
+				return nil, ErrLockInfrastructureUnavailable
+			}
+			if strings.Contains(strings.ToLower(err.Error()), "relation \"participant_locks\" does not exist") ||
+				strings.Contains(strings.ToLower(err.Error()), "table \"participant_locks\" does not exist") {
+				return nil, ErrLockInfrastructureUnavailable
+			}
+			return nil, err
 		}
 
 		if time.Now().After(deadline) {
@@ -340,8 +460,6 @@ func (r *PgxRepository) AcquireParticipantLock(ctx context.Context, roomID, iden
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-time.After(50 * time.Millisecond):
-			now = time.Now().UTC()
-			expiresAt = now.Add(ttl)
 		}
 	}
 }
@@ -485,8 +603,10 @@ func (r *PgxRepository) GetMeetingHistory(ctx context.Context, userID string, li
 }
 
 type memParticipantLock struct {
-	ownerID   string
-	expiresAt time.Time
+	ownerID    string
+	leaseToken string
+	generation int64
+	expiresAt  time.Time
 }
 
 // MemoryRepository provides concurrent safe in-memory storage for rooms.
@@ -605,6 +725,9 @@ func (m *MemoryRepository) UpsertParticipant(_ context.Context, p *Participant) 
 		p.ID = uuid.NewString()
 	}
 	p.JoinedAt = time.Now().UTC()
+	if p.TransitionState == "" {
+		p.TransitionState = "idle"
+	}
 	copied := *p
 
 	list := m.participants[p.RoomID]
@@ -688,13 +811,83 @@ func (m *MemoryRepository) UpdateParticipantRoleCAS(_ context.Context, roomID, i
 				return ErrStaleRoleUpdate
 			}
 			p.Role = newRole
+			p.TransitionState = "idle"
+			p.TransitionOpID = ""
 			return nil
 		}
 	}
 	return ErrParticipantNotFoundInRoom
 }
 
-func (m *MemoryRepository) AcquireParticipantLock(ctx context.Context, roomID, identity, ownerID string, ttl time.Duration) (func(), error) {
+func (m *MemoryRepository) BeginParticipantRoleTransition(_ context.Context, roomID, identity, expectedRole, targetRole, opID, transitionState string, generation int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, p := range m.participants[roomID] {
+		if p.Identity == identity && p.LeftAt == nil {
+			if p.Role != expectedRole || p.FencingToken >= generation {
+				return ErrStaleRoleUpdate
+			}
+			p.Role = targetRole
+			p.TransitionState = transitionState
+			p.TransitionOpID = opID
+			p.FencingToken = generation
+			return nil
+		}
+	}
+	return ErrParticipantNotFoundInRoom
+}
+
+func (m *MemoryRepository) CommitParticipantTransition(_ context.Context, roomID, identity, opID string, generation int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, p := range m.participants[roomID] {
+		if p.Identity == identity && p.LeftAt == nil {
+			if p.FencingToken == generation && p.TransitionOpID == opID {
+				p.TransitionState = "idle"
+				p.TransitionOpID = ""
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *MemoryRepository) SetParticipantTransitionUnknown(_ context.Context, roomID, identity, opID string, generation int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, p := range m.participants[roomID] {
+		if p.Identity == identity && p.LeftAt == nil {
+			if p.FencingToken == generation && p.TransitionOpID == opID {
+				p.TransitionState = "unknown"
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *MemoryRepository) RollbackParticipantRole(_ context.Context, roomID, identity, originalRole, opID string, generation int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, p := range m.participants[roomID] {
+		if p.Identity == identity && p.LeftAt == nil {
+			if p.FencingToken != generation || p.TransitionOpID != opID {
+				return ErrStaleRoleUpdate
+			}
+			p.Role = originalRole
+			p.TransitionState = "idle"
+			p.TransitionOpID = ""
+			return nil
+		}
+	}
+	return ErrParticipantNotFoundInRoom
+}
+
+func (m *MemoryRepository) AcquireParticipantLock(ctx context.Context, roomID, identity, ownerID string, ttl time.Duration) (*ParticipantLock, error) {
 	lockKey := roomID + ":" + identity
 	deadline := time.Now().Add(4 * time.Second)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
@@ -706,22 +899,55 @@ func (m *MemoryRepository) AcquireParticipantLock(ctx context.Context, roomID, i
 		m.lockMu.Lock()
 		cur, exists := m.partLocks[lockKey]
 		if !exists || now.After(cur.expiresAt) {
+			var maxGen int64 = 0
+			m.mu.RLock()
+			for _, p := range m.participants[roomID] {
+				if p.Identity == identity && p.LeftAt == nil {
+					if p.FencingToken > maxGen {
+						maxGen = p.FencingToken
+					}
+				}
+			}
+			m.mu.RUnlock()
+
+			if exists && cur.generation > maxGen {
+				maxGen = cur.generation
+			}
+			gen := maxGen + 1
+
+			leaseToken := uuid.NewString()
+			expiresAt := now.Add(ttl)
 			m.partLocks[lockKey] = memParticipantLock{
-				ownerID:   ownerID,
-				expiresAt: now.Add(ttl),
+				ownerID:    ownerID,
+				leaseToken: leaseToken,
+				generation: gen,
+				expiresAt:  expiresAt,
 			}
 			m.lockMu.Unlock()
 
-			released := false
-			return func() {
-				m.lockMu.Lock()
-				defer m.lockMu.Unlock()
-				if !released {
-					released = true
-					if l, ok := m.partLocks[lockKey]; ok && l.ownerID == ownerID {
-						delete(m.partLocks, lockKey)
+			var releaseOnce sync.Once
+			release := func() {
+				releaseOnce.Do(func() {
+					m.lockMu.Lock()
+					defer m.lockMu.Unlock()
+					if l, ok := m.partLocks[lockKey]; ok {
+						if l.leaseToken == leaseToken && l.generation == gen {
+							l.expiresAt = time.Now().UTC()
+							m.partLocks[lockKey] = l
+						} else {
+							log.Printf("[WARN] Memory participant lock %s release skipped: lease token mismatch or expired (token=%s, gen=%d vs held token=%s, gen=%d)", lockKey, leaseToken, gen, l.leaseToken, l.generation)
+						}
 					}
-				}
+				})
+			}
+
+			return &ParticipantLock{
+				LockKey:    lockKey,
+				OwnerID:    ownerID,
+				LeaseToken: leaseToken,
+				Generation: gen,
+				ExpiresAt:  expiresAt,
+				Release:    release,
 			}, nil
 		}
 		m.lockMu.Unlock()

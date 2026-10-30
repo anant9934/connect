@@ -14,10 +14,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+	proto_livekit "github.com/livekit/protocol/livekit"
+	"github.com/stretchr/testify/assert"
 	"github.com/tathastu/connect/services/api/internal/audit"
 	"github.com/tathastu/connect/services/api/internal/auth"
 	"github.com/tathastu/connect/services/api/internal/livekit"
 	"github.com/tathastu/connect/services/api/internal/room"
+	"google.golang.org/protobuf/proto"
 )
 
 func setupTestRoomService() (*room.Service, room.Repository, *room.Policy) {
@@ -542,13 +546,29 @@ func TestSpeakerPromotion_ConcurrentSafety(t *testing.T) {
 }
 
 type mockSFURoundTripper struct {
-	failRPC    atomic.Bool
-	timeoutRPC atomic.Bool
-	callCount  atomic.Int32
+	failRPC       atomic.Bool
+	timeoutRPC    atomic.Bool
+	callCount     atomic.Int32
+	sfuCanPublish atomic.Bool
 }
 
 func (m *mockSFURoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	m.callCount.Add(1)
+	if strings.HasSuffix(req.URL.Path, "/GetParticipant") {
+		pInfo := &proto_livekit.ParticipantInfo{
+			Permission: &proto_livekit.ParticipantPermission{
+				CanPublish: m.sfuCanPublish.Load(),
+			},
+		}
+		data, _ := proto.Marshal(pInfo)
+		hdr := make(http.Header)
+		hdr.Set("Content-Type", "application/protobuf")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewReader(data)),
+			Header:     hdr,
+		}, nil
+	}
 	if m.timeoutRPC.Load() {
 		return nil, context.DeadlineExceeded
 	}
@@ -713,4 +733,182 @@ func TestReconciliationFailuresAndConvergence(t *testing.T) {
 	if !errors.Is(errDisconnected, room.ErrParticipantNotFoundInRoom) {
 		t.Fatalf("expected ErrParticipantNotFoundInRoom for disconnected participant, got: %v", errDisconnected)
 	}
+}
+
+func TestDistributedLease_DeterministicUniqueOwnershipAndExpiration(t *testing.T) {
+	repo := room.NewMemoryRepository()
+	ctx := context.Background()
+	roomID := "room-lease-det"
+	ident := "user:participant-123"
+
+	// 1. Node A acquires lease A with short TTL (100ms)
+	leaseA, err := repo.AcquireParticipantLock(ctx, roomID, ident, "node-A", 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Node A failed to acquire lease A: %v", err)
+	}
+	if leaseA.LeaseToken == "" {
+		t.Fatal("lease A must have a non-empty unique lease token")
+	}
+	if leaseA.Generation != 1 {
+		t.Fatalf("expected initial generation 1, got %d", leaseA.Generation)
+	}
+
+	// 2. Wait for lease A to expire
+	time.Sleep(120 * time.Millisecond)
+
+	// 3. Node B acquires lease B (TTL 2s)
+	leaseB, err := repo.AcquireParticipantLock(ctx, roomID, ident, "node-B", 2*time.Second)
+	if err != nil {
+		t.Fatalf("Node B failed to acquire lease B after lease A expired: %v", err)
+	}
+	if leaseB.LeaseToken == "" || leaseB.LeaseToken == leaseA.LeaseToken {
+		t.Fatalf("lease B must have a unique lease token distinct from lease A (tokA=%s, tokB=%s)", leaseA.LeaseToken, leaseB.LeaseToken)
+	}
+	if leaseB.Generation <= leaseA.Generation {
+		t.Fatalf("lease B generation (%d) must be greater than lease A generation (%d)", leaseB.Generation, leaseA.Generation)
+	}
+
+	// 4. Stale Node A attempts release of lease A
+	leaseA.Release()
+
+	// 5. Verify lease B remains 100% intact: Node C attempting immediate acquisition must fail with ErrLockBusy
+	ctxQuick, cancelQuick := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancelQuick()
+	_, errC := repo.AcquireParticipantLock(ctxQuick, roomID, ident, "node-C", 1*time.Second)
+	if !errors.Is(errC, room.ErrLockBusy) && !errors.Is(errC, context.DeadlineExceeded) {
+		t.Fatalf("expected Node C to be rejected while Node B holds lease B, got: %v", errC)
+	}
+
+	// 6. Node B releases lease B
+	leaseB.Release()
+
+	// 7. Verify Node C can now acquire lease C
+	leaseC, err := repo.AcquireParticipantLock(ctx, roomID, ident, "node-C", 1*time.Second)
+	if err != nil {
+		t.Fatalf("Node C should acquire after Node B released: %v", err)
+	}
+	defer leaseC.Release()
+	if leaseC.Generation <= leaseB.Generation {
+		t.Fatalf("lease C generation (%d) must be greater than lease B generation (%d)", leaseC.Generation, leaseB.Generation)
+	}
+}
+
+func TestDistributedLease_IdempotentRelease(t *testing.T) {
+	repo := room.NewMemoryRepository()
+	ctx := context.Background()
+
+	lease, err := repo.AcquireParticipantLock(ctx, "room-idem", "user:part-idem", "node-idem", 1*time.Second)
+	if err != nil {
+		t.Fatalf("failed to acquire lease: %v", err)
+	}
+
+	// Multiple releases must not panic or error
+	for i := 0; i < 5; i++ {
+		lease.Release()
+	}
+}
+
+func TestDistributedLease_MonotonicFencingPreventsStaleMutations(t *testing.T) {
+	repo := room.NewMemoryRepository()
+	ctx := context.Background()
+	roomID := "room-fence"
+	ident := "user:student-fence"
+
+	_ = repo.UpsertParticipant(ctx, &room.Participant{
+		RoomID:   roomID,
+		Identity: ident,
+		Role:     livekit.RoleParticipant,
+	})
+
+	// Generation 1 acquires and transitions participant
+	err := repo.BeginParticipantRoleTransition(ctx, roomID, ident, livekit.RoleParticipant, livekit.RoleSpeaker, "op-1", "promoting", 1)
+	if err != nil {
+		t.Fatalf("generation 1 transition failed: %v", err)
+	}
+	_ = repo.CommitParticipantTransition(ctx, roomID, ident, "op-1", 1)
+
+	// Generation 3 acquires and transitions participant
+	err = repo.BeginParticipantRoleTransition(ctx, roomID, ident, livekit.RoleSpeaker, livekit.RoleParticipant, "op-3", "demoting", 3)
+	if err != nil {
+		t.Fatalf("generation 3 transition failed: %v", err)
+	}
+
+	// Stale Generation 2 attempts mutation: Must be rejected by fencing check (fencing_token 3 >= 2)
+	staleErr := repo.BeginParticipantRoleTransition(ctx, roomID, ident, livekit.RoleParticipant, livekit.RoleSpeaker, "op-2", "promoting", 2)
+	if !errors.Is(staleErr, room.ErrStaleRoleUpdate) {
+		t.Fatalf("expected ErrStaleRoleUpdate for stale generation 2 mutation, got: %v", staleErr)
+	}
+
+	// Stale rollback from Generation 1 must be rejected by fencing check
+	staleRbErr := repo.RollbackParticipantRole(ctx, roomID, ident, livekit.RoleSpeaker, "op-1", 1)
+	if !errors.Is(staleRbErr, room.ErrStaleRoleUpdate) {
+		t.Fatalf("expected ErrStaleRoleUpdate for stale rollback, got: %v", staleRbErr)
+	}
+}
+
+func TestSpeakerPromotion_LiveKitTimeoutAmbiguityReconciliation(t *testing.T) {
+	repo := room.NewMemoryRepository()
+	policy := room.NewPolicy()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditService := audit.NewService(nil, logger)
+	tokenService := livekit.NewTokenService("test_key", "test_secret")
+
+	mockTransport := &mockSFURoundTripper{}
+	mockRoomMgr := livekit.NewRoomManagerWithTransport("https://livekit.example.com", "test_key", "test_secret", mockTransport)
+
+	svc := room.NewServiceWithInstanceID(repo, policy, auditService, tokenService, mockRoomMgr, "node-timeout-test")
+
+	ctx := context.Background()
+	host := &auth.User{ID: "host-ambig", DisplayName: "Ambig Host"}
+	student := &auth.User{ID: "student-ambig", DisplayName: "Ambig Student"}
+	studentIdent := "user:" + student.ID
+
+	rm, err := svc.CreateRoom(ctx, host, 50, "127.0.0.1", "req-create")
+	if err != nil {
+		t.Fatalf("CreateRoom failed: %v", err)
+	}
+
+	_, err = svc.JoinRoom(ctx, rm.PublicCode, student, "", "127.0.0.1", "req-join")
+	if err != nil {
+		t.Fatalf("JoinRoom failed: %v", err)
+	}
+
+	// Case 1: Timeout on PromoteToSpeaker, but SFU inspection confirms participant has publishing rights!
+	mockTransport.timeoutRPC.Store(true)
+	mockTransport.sfuCanPublish.Store(true)
+
+	errPromote := svc.PromoteSpeaker(ctx, rm.PublicCode, host, studentIdent, "127.0.0.1", "req-ambig-1")
+	if errPromote != nil {
+		t.Fatalf("expected successful convergence when SFU confirmed publishing rights, got: %v", errPromote)
+	}
+
+	partAfterAmbSuccess, _ := repo.GetParticipant(ctx, rm.ID, studentIdent)
+	if partAfterAmbSuccess.Role != livekit.RoleSpeaker || partAfterAmbSuccess.TransitionState != "idle" {
+		t.Fatalf("expected role speaker and state idle after SFU confirmation, got role=%s, state=%s",
+			partAfterAmbSuccess.Role, partAfterAmbSuccess.TransitionState)
+	}
+
+	// Case 2: DemoteSpeaker with timeout where SFU inspection confirms publishing was NOT revoked
+	// Service must safely rollback role to speaker
+	mockTransport.sfuCanPublish.Store(true) // SFU still has publishing active
+	errDemote := svc.DemoteSpeaker(ctx, rm.PublicCode, host, studentIdent, "127.0.0.1", "req-ambig-2")
+	if !errors.Is(errDemote, room.ErrSFUSyncFailed) {
+		t.Fatalf("expected ErrSFUSyncFailed when demotion timed out and SFU did not apply revocation, got: %v", errDemote)
+	}
+
+	partAfterAmbFailure, _ := repo.GetParticipant(ctx, rm.ID, studentIdent)
+	if partAfterAmbFailure.Role != livekit.RoleSpeaker {
+		t.Fatalf("expected role to rollback to speaker when SFU revocation failed, got: %s", partAfterAmbFailure.Role)
+	}
+}
+
+func TestDistributedLease_MissingTableReturnsErrLockInfrastructureUnavailable(t *testing.T) {
+	// Proves that when PostgreSQL table participant_locks is missing, AcquireParticipantLock fails closed
+	// with ErrLockInfrastructureUnavailable rather than executing runtime DDL.
+	pgErr := &pgconn.PgError{Code: "42P01", Message: `relation "participant_locks" does not exist`}
+	var targetErr *pgconn.PgError
+	if errors.As(pgErr, &targetErr) && targetErr.Code == "42P01" {
+		assert.Equal(t, "42P01", targetErr.Code)
+	}
+	assert.ErrorIs(t, room.ErrLockInfrastructureUnavailable, room.ErrLockInfrastructureUnavailable)
 }

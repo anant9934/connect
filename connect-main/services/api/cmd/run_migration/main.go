@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -14,7 +15,14 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, dbURL)
+	cfg, err := pgxpool.ParseConfig(dbURL)
+	if err != nil {
+		fmt.Printf("Failed to parse config: %v\n", err)
+		os.Exit(1)
+	}
+	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		fmt.Printf("Failed to connect: %v\n", err)
 		os.Exit(1)
@@ -40,46 +48,70 @@ func main() {
 		rows.Close()
 	}
 
-	// 2. Read migration 5 file
-	migration5SQL, err := os.ReadFile("../../migrations/000005_user_profile_and_providers.sql")
-	if err != nil {
-		// Try relative to workspace root
-		migration5SQL, err = os.ReadFile("migrations/000005_user_profile_and_providers.sql")
-		if err != nil {
-			migration5SQL, err = os.ReadFile("e:/Tathastu connect/migrations/000005_user_profile_and_providers.sql")
+	// 2. Read migration 6 file
+	paths := []string{
+		"../../migrations/000006_participant_distributed_locks.sql",
+		"migrations/000006_participant_distributed_locks.sql",
+		"connect-main/migrations/000006_participant_distributed_locks.sql",
+	}
+	var migration6SQL []byte
+	for _, p := range paths {
+		if data, err := os.ReadFile(p); err == nil {
+			migration6SQL = data
+			break
 		}
 	}
-	if err != nil {
-		fmt.Printf("Failed to read migration 5 SQL file: %v\n", err)
+	if len(migration6SQL) == 0 {
+		fmt.Println("Failed to read migration 6 SQL file")
 		os.Exit(1)
 	}
 
-	fmt.Println("\nApplying Migration 000005_user_profile_and_providers.sql...")
-	_, err = pool.Exec(ctx, string(migration5SQL))
+	fmt.Println("\nApplying Migration 000006_participant_distributed_locks.sql...")
+	_, err = pool.Exec(ctx, string(migration6SQL))
 	if err != nil {
 		fmt.Printf("Failed to apply migration: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("SUCCESS: Migration 000005 applied cleanly!")
+	fmt.Println("SUCCESS: Migration 000006 applied cleanly!")
 
-	// 3. Verify columns now present in users table
+	// 3. Verify columns in participant_locks table
 	colRows, err := pool.Query(ctx, `
 		SELECT column_name, data_type, is_nullable
 		FROM information_schema.columns
-		WHERE table_name = 'users'
-		  AND column_name IN ('avatar_id', 'avatar_url', 'google_id', 'auth_provider', 'preferences', 'email_verified')
+		WHERE table_name = 'participant_locks'
 		ORDER BY column_name;
 	`)
 	if err != nil {
-		fmt.Printf("Failed to query columns: %v\n", err)
+		fmt.Printf("Failed to query participant_locks columns: %v\n", err)
 		os.Exit(1)
 	}
 	defer colRows.Close()
 
-	fmt.Println("\nVERIFIED NEW COLUMNS IN 'users' TABLE:")
+	fmt.Println("\nVERIFIED COLUMNS IN 'participant_locks' TABLE:")
 	for colRows.Next() {
 		var col, dtype, nullable string
 		_ = colRows.Scan(&col, &dtype, &nullable)
+		fmt.Printf("  [OK] %-20s %-20s (nullable: %s)\n", col, dtype, nullable)
+	}
+
+	// 4. Verify columns in room_participants table
+	partRows, err := pool.Query(ctx, `
+		SELECT column_name, data_type, is_nullable
+		FROM information_schema.columns
+		WHERE table_name = 'room_participants'
+		  AND column_name IN ('fencing_token', 'transition_state', 'transition_op_id')
+		ORDER BY column_name;
+	`)
+	if err != nil {
+		fmt.Printf("Failed to query room_participants columns: %v\n", err)
+		os.Exit(1)
+	}
+	defer partRows.Close()
+
+	fmt.Println("\nVERIFIED COLUMNS IN 'room_participants' TABLE:")
+	for partRows.Next() {
+		var col, dtype, nullable string
+		_ = partRows.Scan(&col, &dtype, &nullable)
 		fmt.Printf("  [OK] %-20s %-20s (nullable: %s)\n", col, dtype, nullable)
 	}
 }

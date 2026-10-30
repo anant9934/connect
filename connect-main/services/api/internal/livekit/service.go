@@ -287,3 +287,23 @@ func (m *RoomManager) DemoteToParticipant(ctx context.Context, roomCode, identit
 		CanPublishSources: nil,
 	})
 }
+
+// GetParticipant queries LiveKit SFU for live participant details and permissions.
+func (m *RoomManager) GetParticipant(ctx context.Context, roomCode, identity string) (*proto.ParticipantInfo, error) {
+	if m.client == nil {
+		return nil, nil
+	}
+
+	scopedCtx := WithRoomScope(ctx, roomCode)
+	info, err := m.client.GetParticipant(scopedCtx, &proto.RoomParticipantIdentity{
+		Room:     roomCode,
+		Identity: identity,
+	})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("livekit get participant failed: %w", err)
+	}
+	return info, nil
+}
