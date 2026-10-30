@@ -1,0 +1,32 @@
+# --- ATOMIC GIT ENGINE COMMIT TEMPLATE ---
+# Format: <type>(<scope>): <short description in present imperative>
+#
+# <type> must be one of:
+#   feat     : A new feature
+#   fix      : A bug fix
+#   refactor : Code change that neither fixes a bug nor adds a feature
+#   perf     : Performance improvement
+#   test     : Adding missing or correcting existing tests
+#   docs     : Documentation changes only
+#   style    : Formatting, white-space, commas (no production code change)
+#   chore    : Tooling, dependencies, maintenance tasks
+#   build    : Build system or packaging changes
+#   ci       : CI/CD configuration files and scripts
+#   security : Vulnerability fix or security hardening
+#   revert   : Reverts a previous commit
+#
+# <scope> is optional (e.g., auth, api, ui, config, db, test, git)
+#
+# Rules:
+#   1. One independent logical change per atomic commit.
+#   2. Subject line maximum 100 characters.
+#   3. Use imperative, present tense ("add", not "added" or "adds").
+#   4. Do NOT end the subject line with a period.
+#   5. Never use generic titles like "update", "wip", "changes", "fix".
+#
+# --- Optional Body (Explain WHAT and WHY, not HOW) ---
+#
+# --- Optional Footer (Breaking changes, issue references) ---
+# BREAKING CHANGE: <description>
+# Closes #<issue_number>
+

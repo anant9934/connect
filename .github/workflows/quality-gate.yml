@@ -1,0 +1,79 @@
+name: Quality Gate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    name: Code & Security Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify No Conflict Markers
+        run: |
+          echo "Checking for unresolved merge conflict markers..."
+          if git grep -E '^(<<<<<<< .+|=======(\r)?$|>>>>>>> .+)' -- ':!*.md' ':!docs/*' ':!config/*'; then
+            echo "::error::Merge conflict markers detected in codebase!"
+            exit 1
+          fi
+          echo "No conflict markers detected."
+
+      - name: Verify No Sensitive / Credential Files
+        run: |
+          echo "Checking for sensitive files..."
+          BLOCKED=$(git ls-files | grep -E '(\.env$|\.env\.(local|production|development|staging|test)|\.pem$|\.key$|id_rsa|credentials\.json)' || true)
+          if [ -n "$BLOCKED" ]; then
+            echo "::error::Sensitive files committed to repository: $BLOCKED"
+            exit 1
+          fi
+          echo "No sensitive files detected."
+
+      - name: Run Atomic Health Check
+        run: |
+          chmod +x scripts/git/health-check.sh
+          ./scripts/git/health-check.sh --working-tree --skip-tests
+
+      - name: Setup Node.js (if package.json exists)
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Run Node Tests & Checks
+        if: hashFiles('package.json') != ''
+        run: |
+          npm ci || npm install
+          if npm run | grep -q 'lint'; then npm run lint; fi
+          if npm run | grep -q 'typecheck'; then npm run typecheck; fi
+          if npm run | grep -q 'test'; then npm test; fi
+
+      - name: Setup Python (if requirements.txt or pyproject.toml exists)
+        if: hashFiles('requirements.txt', 'pyproject.toml') != ''
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Python Tests & Checks
+        if: hashFiles('requirements.txt', 'pyproject.toml') != ''
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -d tests ]; then python -m unittest discover tests; fi
+

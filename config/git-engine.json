@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "version": "1.0.0",
+  "engine": "Atomic Git Engine",
+  "description": "Configuration specification for continuous atomic commit automation, validation, and quality gates.",
+  "convention": {
+    "format": "type(scope): description",
+    "pattern": "^(feat|fix|refactor|perf|test|docs|style|chore|build|ci|security|revert)(\\([a-zA-Z0-9_\\-\\.\\/]+\\))?!?: .{3,}$",
+    "types": [
+      { "type": "feat", "description": "A new user-facing or system feature" },
+      { "type": "fix", "description": "A bug fix or defect correction" },
+      { "type": "refactor", "description": "Code change that neither fixes a bug nor adds a feature" },
+      { "type": "perf", "description": "A code change that improves system or runtime performance" },
+      { "type": "test", "description": "Adding missing tests or correcting existing tests" },
+      { "type": "docs", "description": "Documentation only changes" },
+      { "type": "style", "description": "Formatting, missing semi-colons, whitespace (no code change)" },
+      { "type": "chore", "description": "Maintenance tasks, tooling changes, non-production code" },
+      { "type": "build", "description": "Changes that affect build system or external dependencies" },
+      { "type": "ci", "description": "Changes to CI/CD configuration files and scripts" },
+      { "type": "security", "description": "Vulnerability fixes, security patches, or audit hardening" },
+      { "type": "revert", "description": "Reverts a previous commit" }
+    ],
+    "scopes": [
+      "core",
+      "auth",
+      "api",
+      "ui",
+      "db",
+      "config",
+      "deps",
+      "infra",
+      "test",
+      "docs",
+      "release",
+      "git",
+      "ci",
+      "security"
+    ],
+    "allowCustomScopes": true,
+    "maxHeaderLength": 100,
+    "minSubjectLength": 3,
+    "prohibitedWords": [
+      "^update$",
+      "^updates$",
+      "^changes$",
+      "^work$",
+      "^wip$",
+      "^final$",
+      "^test123$",
+      "^misc$",
+      "^fixed$",
+      "^stuff$",
+      "^patch$",
+      "^asdf$"
+    ]
+  },
+  "qualityGates": {
+    "detectConflictMarkers": true,
+    "detectWhitespaceErrors": true,
+    "detectSecrets": true,
+    "maxFileSizeKB": 10240,
+    "blockedFilePatterns": [
+      "^\\.env$",
+      "^\\.env\\.(local|production|development|staging|test)$",
+      "^.*\\.pem$",
+      "^.*\\.key$",
+      "^.*id_rsa.*$",
+      "^.*id_ed25519.*$",
+      "^credentials\\.json$",
+      "^serviceAccountKey\\.json$",
+      "^\\.npmrc$",
+      "^.*secret.*\\.json$"
+    ],
+    "secretPatterns": [
+      "(?i)(password|secret|api_key|apikey|access_token|private_key|auth_token)\\s*[:=]\\s*['\"][0-9a-zA-Z\\-_]{8,}['\"]",
+      "AKIA[0-9A-Z]{16}",
+      "ghp_[0-9a-zA-Z]{36}",
+      "gho_[0-9a-zA-Z]{36}",
+      "glpat-[0-9a-zA-Z\\-_]{20}",
+      "slack_api_token|xox[baprs]-[0-9a-zA-Z]{10,48}",
+      "-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
+    ]
+  },
+  "smartStaging": {
+    "enforceExplicitFiles": true,
+    "prohibitBulkAdd": true,
+    "warnUntrackedFiles": true,
+    "preserveExistingStaged": true
+  },
+  "safePush": {
+    "defaultRemote": "origin",
+    "targetRepository": "https://github.com/anant9934/connect",
+    "allowForcePush": false,
+    "allowDirectPushToProtected": false,
+    "protectedBranches": [
+      "main",
+      "master",
+      "production",
+      "release/*"
+    ],
+    "requireTestsPass": true,
+    "requireCleanWorkingTree": true
+  }
+}
+

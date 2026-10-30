@@ -1,0 +1,88 @@
+name: Commit Validation
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: commit-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-commits:
+    name: Validate Conventional Commits
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Make Scripts Executable
+        run: chmod +x scripts/git/*.sh
+
+      - name: Validate Pull Request Commits
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "Validating commits in Pull Request..."
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          COMMITS=$(git log --format="%s" "${BASE_SHA}..${HEAD_SHA}")
+
+          FAILED=0
+          while IFS= read -r msg; do
+            [ -z "$msg" ] && continue
+            echo "Checking: $msg"
+            if ! ./scripts/git/commit-check.sh "$msg"; then
+              FAILED=$((FAILED + 1))
+            fi
+          done <<< "$COMMITS"
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::$FAILED commit(s) failed Conventional Commits validation."
+            exit 1
+          fi
+          echo "All PR commits conform to Conventional Commits."
+
+      - name: Validate Push Commits
+        if: github.event_name == 'push'
+        run: |
+          echo "Validating commits on push..."
+          BEFORE_SHA="${{ github.event.before }}"
+          AFTER_SHA="${{ github.event.after }}"
+
+          if [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            COMMITS=$(git log -1 --pretty=format:"%s")
+          else
+            COMMITS=$(git log --format="%s" "${BEFORE_SHA}..${AFTER_SHA}")
+          fi
+
+          FAILED=0
+          while IFS= read -r msg; do
+            [ -z "$msg" ] && continue
+            echo "Checking: $msg"
+            if ! ./scripts/git/commit-check.sh "$msg"; then
+              FAILED=$((FAILED + 1))
+            fi
+          done <<< "$COMMITS"
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::$FAILED commit(s) failed Conventional Commits validation."
+            exit 1
+          fi
+
