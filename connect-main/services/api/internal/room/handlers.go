@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/tathastu/connect/services/api/internal/livekit"
 	"github.com/tathastu/connect/services/api/internal/middleware"
 	"github.com/tathastu/connect/services/api/internal/model"
 	"github.com/tathastu/connect/services/api/internal/ratelimit"
@@ -718,6 +719,8 @@ func (h *Handlers) PromoteSpeaker(w http.ResponseWriter, r *http.Request) {
 			model.SendJSONError(w, r, http.StatusForbidden, "UNAUTHORIZED", "Only the host can promote participants to speaker")
 		case errors.Is(err, ErrParticipantNotFoundInRoom):
 			model.SendJSONError(w, r, http.StatusNotFound, "NOT_FOUND", "Participant not found in active room")
+		case errors.Is(err, ErrDatabaseRollbackFailed):
+			model.SendJSONError(w, r, http.StatusBadGateway, "SFU_DESYNC_ERROR", "Critical media state divergence detected")
 		case errors.Is(err, ErrSFUSyncFailed):
 			model.SendJSONError(w, r, http.StatusBadGateway, "SFU_SYNC_FAILED", "Failed to synchronize permissions with media server")
 		default:
@@ -751,6 +754,8 @@ func (h *Handlers) DemoteSpeaker(w http.ResponseWriter, r *http.Request) {
 			model.SendJSONError(w, r, http.StatusForbidden, "UNAUTHORIZED", "Only the host can demote speakers")
 		case errors.Is(err, ErrParticipantNotFoundInRoom):
 			model.SendJSONError(w, r, http.StatusNotFound, "NOT_FOUND", "Participant not found in active room")
+		case errors.Is(err, ErrDatabaseRollbackFailed):
+			model.SendJSONError(w, r, http.StatusBadGateway, "SFU_DESYNC_ERROR", "Critical media state divergence detected")
 		case errors.Is(err, ErrSFUSyncFailed):
 			model.SendJSONError(w, r, http.StatusBadGateway, "SFU_SYNC_FAILED", "Failed to synchronize permissions with media server")
 		default:
@@ -764,7 +769,6 @@ func (h *Handlers) DemoteSpeaker(w http.ResponseWriter, r *http.Request) {
 		"role":    livekit.RoleParticipant,
 	})
 }
-
 
 // History handles GET /api/v1/rooms/history
 func (h *Handlers) History(w http.ResponseWriter, r *http.Request) {

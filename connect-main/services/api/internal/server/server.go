@@ -105,7 +105,6 @@ func BuildRouter(
 			}
 		})
 
-
 		// Rooms Routes
 		api.Route("/rooms", func(roomsRouter chi.Router) {
 			if roomHandler != nil && authService != nil {

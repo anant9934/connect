@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 
 	"github.com/tathastu/connect/services/api/internal/audit"
@@ -369,12 +370,12 @@ func TestMeetingHistoryOwnershipScoping(t *testing.T) {
 }
 
 func TestSpeakerPromotionAndDemotionLifecycle(t *testing.T) {
-	svc, repo, _ := setupRoomTest(t)
+	svc, repo, _ := setupTestRoomService()
 	ctx := context.Background()
 
-	host := &auth.User{ID: "host-456", Email: "host@example.com"}
-	student := &auth.User{ID: "student-789", Email: "student@example.com"}
-	eavesdropper := &auth.User{ID: "eaves-123", Email: "eaves@example.com"}
+	host := &auth.User{ID: "host-456", DisplayName: "Host User"}
+	student := &auth.User{ID: "student-789", DisplayName: "Student User"}
+	eavesdropper := &auth.User{ID: "eaves-123", DisplayName: "Eavesdropper"}
 
 	// 1. Host creates room
 	rm, err := svc.CreateRoom(ctx, host, 50, "127.0.0.1", "req-create")
@@ -481,5 +482,55 @@ func TestSpeakerPromotionAndDemotionLifecycle(t *testing.T) {
 	partAfterDupDemote, _ := repo.GetParticipant(ctx, rm.ID, studentIdentity)
 	if partAfterDupDemote.Role != livekit.RoleParticipant {
 		t.Fatalf("expected role participant after duplicate demotion, got %s", partAfterDupDemote.Role)
+	}
+}
+
+func TestSpeakerPromotion_ConcurrentSafety(t *testing.T) {
+	svc, repo, _ := setupTestRoomService()
+	ctx := context.Background()
+
+	host := &auth.User{ID: "host-conc", DisplayName: "Host User"}
+	student := &auth.User{ID: "student-conc", DisplayName: "Student User"}
+
+	rm, err := svc.CreateRoom(ctx, host, 50, "127.0.0.1", "req-create")
+	if err != nil {
+		t.Fatalf("CreateRoom failed: %v", err)
+	}
+
+	_, err = svc.JoinRoom(ctx, rm.PublicCode, student, "", "127.0.0.1", "req-join")
+	if err != nil {
+		t.Fatalf("JoinRoom failed: %v", err)
+	}
+	studentIdentity := "user:" + student.ID
+
+	// Run concurrent promotions and demotions
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(2)
+		go func(idx int) {
+			defer wg.Done()
+			_ = svc.PromoteSpeaker(ctx, rm.PublicCode, host, studentIdentity, "127.0.0.1", "req-p")
+		}(i)
+		go func(idx int) {
+			defer wg.Done()
+			_ = svc.DemoteSpeaker(ctx, rm.PublicCode, host, studentIdentity, "127.0.0.1", "req-d")
+		}(i)
+	}
+	wg.Wait()
+
+	finalPart, err := repo.GetParticipant(ctx, rm.ID, studentIdentity)
+	if err != nil || finalPart == nil {
+		t.Fatalf("participant missing after concurrent operations: %v", err)
+	}
+	if finalPart.Role != livekit.RoleSpeaker && finalPart.Role != livekit.RoleParticipant {
+		t.Fatalf("invalid role after concurrent promotions/demotions: %q", finalPart.Role)
+	}
+
+	// Verify reconciliation heals state cleanly
+	if err := svc.ReconcileParticipant(ctx, rm.PublicCode, studentIdentity); err != nil {
+		t.Fatalf("ReconcileParticipant failed: %v", err)
+	}
+	if err := svc.ReconcileRoom(ctx, rm.PublicCode); err != nil {
+		t.Fatalf("ReconcileRoom failed: %v", err)
 	}
 }

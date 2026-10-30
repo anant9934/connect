@@ -26,7 +26,7 @@ func roomScopeFromContext(ctx context.Context) string {
 	return ""
 }
 
-// authTransport injects short-lived LiveKit administrative JWTs into Twirp HTTP requests.
+// authTransport injects short-lived, least-privilege LiveKit administrative JWTs into Twirp HTTP requests.
 type authTransport struct {
 	base      http.RoundTripper
 	apiKey    string
@@ -34,23 +34,43 @@ type authTransport struct {
 }
 
 func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	path := req.URL.Path
 	roomCode := roomScopeFromContext(req.Context())
 
 	at := auth.NewAccessToken(t.apiKey, t.apiSecret)
-	vg := &auth.VideoGrant{
-		RoomAdmin: true,
-	}
+	vg := &auth.VideoGrant{}
 
-	// Least-Privilege Scoping:
-	// LiveKit SFU requires VideoGrant.Room == req.Room for participant mutations
-	// (UpdateParticipant, RemoveParticipant, MutePublishedTrack).
-	// Global room creation and listing grants are omitted when scoped to a room.
-	if roomCode != "" {
-		vg.Room = roomCode
-	} else {
-		// Unscoped transport used exclusively for cross-room administrative discovery (e.g. ListRooms)
-		vg.RoomCreate = true
+	switch {
+	case strings.HasSuffix(path, "/ListRooms"):
+		// Discovery privilege only; never grant administrative or mutation access
 		vg.RoomList = true
+
+	case strings.HasSuffix(path, "/CreateRoom"):
+		// Creation privilege only; never grant administrative or listing access
+		vg.RoomCreate = true
+
+	case strings.HasSuffix(path, "/UpdateParticipant"),
+		strings.HasSuffix(path, "/RemoveParticipant"),
+		strings.HasSuffix(path, "/MutePublishedTrack"),
+		strings.HasSuffix(path, "/DeleteRoom"),
+		strings.HasSuffix(path, "/GetParticipant"),
+		strings.HasSuffix(path, "/ListParticipants"),
+		strings.HasSuffix(path, "/UpdateSubscriptions"),
+		strings.HasSuffix(path, "/SendData"):
+		// Room mutations require strictly bound room context; fail closed if absent
+		if roomCode == "" {
+			return nil, fmt.Errorf("security violation: livekit operation %s requires explicit room scope", path)
+		}
+		vg.Room = roomCode
+		vg.RoomAdmin = true
+
+	default:
+		// Any other operation must be room-scoped; unscoped operations fail closed
+		if roomCode == "" {
+			return nil, fmt.Errorf("security violation: unscoped livekit administrative request denied for %s", path)
+		}
+		vg.Room = roomCode
+		vg.RoomAdmin = true
 	}
 
 	at.AddGrant(vg).SetValidFor(2 * time.Minute)
@@ -101,23 +121,52 @@ func NewRoomManager(livekitURL, apiKey, apiSecret string) *RoomManager {
 	}
 }
 
-// GenerateAdminToken creates an administrative token with room-scoped or global grants.
-func (m *RoomManager) GenerateAdminToken(roomCode string) (string, error) {
+// GenerateDiscoveryToken creates a least-privilege token restricted strictly to listing rooms.
+func (m *RoomManager) GenerateDiscoveryToken() (string, error) {
 	if m.apiKey == "" || m.apiSecret == "" {
 		return "", errors.New("livekit credentials not configured")
 	}
 	at := auth.NewAccessToken(m.apiKey, m.apiSecret)
-	vg := &auth.VideoGrant{
-		RoomAdmin: true,
-	}
-	if roomCode != "" {
-		vg.Room = roomCode
-	} else {
-		vg.RoomCreate = true
-		vg.RoomList = true
-	}
-	at.AddGrant(vg).SetValidFor(2 * time.Minute)
+	at.AddGrant(&auth.VideoGrant{
+		RoomList: true,
+	}).SetValidFor(2 * time.Minute)
 	return at.ToJWT()
+}
+
+// GenerateRoomCreateToken creates a least-privilege token restricted strictly to creating rooms.
+func (m *RoomManager) GenerateRoomCreateToken() (string, error) {
+	if m.apiKey == "" || m.apiSecret == "" {
+		return "", errors.New("livekit credentials not configured")
+	}
+	at := auth.NewAccessToken(m.apiKey, m.apiSecret)
+	at.AddGrant(&auth.VideoGrant{
+		RoomCreate: true,
+	}).SetValidFor(2 * time.Minute)
+	return at.ToJWT()
+}
+
+// GenerateRoomAdminToken creates a room-scoped administrative token for participant and track mutations.
+// Unscoped calls fail closed to prevent unrestricted global room administration.
+func (m *RoomManager) GenerateRoomAdminToken(roomCode string) (string, error) {
+	if m.apiKey == "" || m.apiSecret == "" {
+		return "", errors.New("livekit credentials not configured")
+	}
+	if roomCode == "" {
+		return "", errors.New("security violation: room scope required for room admin token")
+	}
+	at := auth.NewAccessToken(m.apiKey, m.apiSecret)
+	at.AddGrant(&auth.VideoGrant{
+		Room:      roomCode,
+		RoomAdmin: true,
+	}).SetValidFor(2 * time.Minute)
+	return at.ToJWT()
+}
+
+// GenerateAdminToken creates an administrative token.
+// For backward compatibility, if roomCode is provided, a room-scoped admin token is returned.
+// If roomCode is empty, an error is returned because unrestricted global admin tokens are prohibited.
+func (m *RoomManager) GenerateAdminToken(roomCode string) (string, error) {
+	return m.GenerateRoomAdminToken(roomCode)
 }
 
 // TerminateRoom instructs LiveKit SFU to immediately disconnect all participants and delete the room.
@@ -224,9 +273,9 @@ func (m *RoomManager) PromoteToSpeaker(ctx context.Context, roomCode, identity s
 // DemoteToParticipant revokes publishing permissions from a participant in real-time.
 func (m *RoomManager) DemoteToParticipant(ctx context.Context, roomCode, identity string) error {
 	return m.UpdateParticipantPermissions(ctx, roomCode, identity, &proto.ParticipantPermission{
-		CanSubscribe:     true,
-		CanPublish:       false,
-		CanPublishData:   true,
+		CanSubscribe:      true,
+		CanPublish:        false,
+		CanPublishData:    true,
 		CanPublishSources: nil,
 	})
 }

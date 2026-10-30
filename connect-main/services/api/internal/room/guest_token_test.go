@@ -67,7 +67,9 @@ func TestGuestToken_ProductionUninitializedFailsSafely(t *testing.T) {
 	assert.ErrorIs(t, errGen, room.ErrGuestSecretNotConfigured, "unconfigured guest secret in production must fail closed")
 
 	// Verification must also fail safely
-	dummyToken := "gst.Z3Vlc3Q6cHJvZC11c2VyLTk5OQ.PROD-ROOM-1234.9999999999.aabbcc"
+	encodedIdent := "Z3Vlc3Q6cHJvZC11c2VyLTk5OQ" // base64url("guest:prod-user-999")
+	normCode := room.NormalizeCode(roomCode)
+	dummyToken := "gst." + encodedIdent + "." + normCode + ".9999999999.aabbcc"
 	_, errVer := room.VerifyGuestToken(roomCode, dummyToken)
 	assert.ErrorIs(t, errVer, room.ErrGuestSecretNotConfigured, "verification without configured secret in production must fail closed")
 

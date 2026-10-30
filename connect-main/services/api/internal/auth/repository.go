@@ -337,11 +337,11 @@ func (r *PgxRepository) RevokeAllUserSessions(ctx context.Context, userID string
 
 // MemoryRepository provides a concurrent-safe in-memory store for tests and offline development.
 type MemoryRepository struct {
-	mu             sync.RWMutex
-	usersByID      map[string]*User
-	usersByEmail   map[string]*User
+	mu              sync.RWMutex
+	usersByID       map[string]*User
+	usersByEmail    map[string]*User
 	usersByGoogleID map[string]*User
-	sessions       map[string]*Session // key: tokenHash
+	sessions        map[string]*Session // key: tokenHash
 }
 
 // NewMemoryRepository constructs an in-memory repository instance.
