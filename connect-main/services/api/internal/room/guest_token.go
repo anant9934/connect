@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,14 +16,17 @@ import (
 )
 
 var (
-	ErrInvalidGuestToken = errors.New("invalid or tampered guest token")
-	ErrGuestTokenExpired = errors.New("guest token has expired")
-	ErrGuestTokenScope   = errors.New("guest token is not authorized for this room")
+	ErrInvalidGuestToken        = errors.New("invalid or tampered guest token")
+	ErrGuestTokenExpired        = errors.New("guest token has expired")
+	ErrGuestTokenScope          = errors.New("guest token is not authorized for this room")
+	ErrGuestSecretNotConfigured = errors.New("guest token signing secret not configured")
 )
 
 var (
-	secretMu      sync.RWMutex
-	currentSecret = []byte("tathastu-connect-secure-guest-token-entropy-secret")
+	secretMu       sync.RWMutex
+	currentSecret  []byte
+	isConfigured   bool
+	devFallbackKey = []byte("tathastu-connect-secure-guest-token-entropy-secret")
 )
 
 // SetGuestTokenSecret sets the cryptographically secure signing secret for room-scoped guest credentials.
@@ -30,14 +34,35 @@ func SetGuestTokenSecret(secret []byte) {
 	secretMu.Lock()
 	defer secretMu.Unlock()
 	if len(secret) > 0 {
-		currentSecret = secret
+		currentSecret = make([]byte, len(secret))
+		copy(currentSecret, secret)
+		isConfigured = true
+	} else {
+		currentSecret = nil
+		isConfigured = false
 	}
 }
 
-func getGuestTokenSecret() []byte {
+// ResetGuestTokenSecretForTest resets guest secret state for testing isolation.
+func ResetGuestTokenSecretForTest() {
+	secretMu.Lock()
+	defer secretMu.Unlock()
+	currentSecret = nil
+	isConfigured = false
+}
+
+func getGuestTokenSecret() ([]byte, error) {
 	secretMu.RLock()
 	defer secretMu.RUnlock()
-	return currentSecret
+	if isConfigured && len(currentSecret) > 0 {
+		return currentSecret, nil
+	}
+	if os.Getenv("APP_ENV") == "production" {
+		return nil, ErrGuestSecretNotConfigured
+	}
+	// In development, staging, or unit test environments where SetGuestTokenSecret
+	// was not invoked explicitly, return deterministic test secret so existing test suites pass.
+	return devFallbackKey, nil
 }
 
 // GenerateGuestToken creates a cryptographically signed, room-scoped token for an admitted or joined guest.
@@ -52,8 +77,13 @@ func GenerateGuestToken(roomCode, identity string, validFor time.Duration) (stri
 	}
 	expUnix := time.Now().Add(validFor).Unix()
 
+	secret, err := getGuestTokenSecret()
+	if err != nil {
+		return "", err
+	}
+
 	payload := fmt.Sprintf("%s:%s:%d", normCode, identity, expUnix)
-	mac := hmac.New(sha256.New, getGuestTokenSecret())
+	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(payload))
 	sigHex := hex.EncodeToString(mac.Sum(nil))
 
@@ -95,9 +125,14 @@ func VerifyGuestToken(roomCode, token string) (string, error) {
 		return "", ErrGuestTokenExpired
 	}
 
+	secret, err := getGuestTokenSecret()
+	if err != nil {
+		return "", err
+	}
+
 	sigHex := parts[4]
 	expectedPayload := fmt.Sprintf("%s:%s:%d", normCode, identity, expUnix)
-	mac := hmac.New(sha256.New, getGuestTokenSecret())
+	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(expectedPayload))
 	expectedSig := hex.EncodeToString(mac.Sum(nil))
 

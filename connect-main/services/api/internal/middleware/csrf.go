@@ -57,9 +57,10 @@ func CSRFProtection(allowedOrigins []string) func(http.Handler) http.Handler {
 				return
 			}
 
-			// If neither Origin nor Referer is present, allow only if no session cookie was included
-			// (e.g. non-browser API test clients using pure Authorization header)
-			if r.Header.Get("Cookie") != "" && strings.Contains(r.Header.Get("Cookie"), "tc_session") {
+			// If neither Origin nor Referer is present, allow only if no ambient session or guest cookie was included
+			// (e.g. non-browser API test clients using pure Authorization header, native mobile apps, webhooks)
+			cookieHeader := r.Header.Get("Cookie")
+			if cookieHeader != "" && (strings.Contains(cookieHeader, "tc_session") || strings.Contains(cookieHeader, "tc_guest_")) {
 				model.SendJSONError(w, r, http.StatusForbidden, "ORIGIN_REQUIRED", "Origin or Referer required for cookie-authenticated mutation")
 				return
 			}
