@@ -704,6 +704,8 @@ func (s *Service) MuteParticipant(ctx context.Context, code string, user *auth.U
 // PromoteSpeaker allows a room host to promote a participant to a speaker in real-time.
 // This updates the participant's persistent role in the database and pushes updated
 // track publishing permissions to LiveKit SFU.
+// If LiveKit RPC fails with an unexpected network error, the database update is rolled back
+// to ensure PostgreSQL and SFU permission states remain consistent.
 func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.User, targetIdentity, clientIP, reqID string) error {
 	normCode := NormalizeCode(code)
 	rm, err := s.repo.GetRoomByCode(ctx, normCode)
@@ -718,12 +720,44 @@ func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.Us
 		return errors.New("cannot change role of room host")
 	}
 
+	// Verify participant is an active participant of this room
+	part, err := s.repo.GetParticipant(ctx, rm.ID, targetIdentity)
+	if err != nil || part == nil || part.LeftAt != nil {
+		return ErrParticipantNotFoundInRoom
+	}
+
+	prevRole := part.Role
+	if prevRole == "" {
+		prevRole = livekit.RoleParticipant
+	}
+	if prevRole == livekit.RoleSpeaker {
+		// Idempotent duplicate request: re-sync SFU if online
+		if s.roomManager != nil {
+			_ = s.roomManager.PromoteToSpeaker(ctx, normCode, targetIdentity)
+		}
+		return nil
+	}
+
 	if err := s.repo.UpdateParticipantRole(ctx, rm.ID, targetIdentity, livekit.RoleSpeaker); err != nil {
-		return err
+		return fmt.Errorf("failed to persist role update: %w", err)
 	}
 
 	if s.roomManager != nil {
-		_ = s.roomManager.PromoteToSpeaker(ctx, normCode, targetIdentity)
+		if err := s.roomManager.PromoteToSpeaker(ctx, normCode, targetIdentity); err != nil {
+			// Roll back database role update to prevent state divergence
+			_ = s.repo.UpdateParticipantRole(ctx, rm.ID, targetIdentity, prevRole)
+			if s.auditService != nil {
+				s.auditService.Record(ctx, audit.AuditParams{
+					EventType: "room.sfu_sync_failed",
+					Severity:  "ERROR",
+					ActorID:   user.ID,
+					RoomID:    rm.ID,
+					ClientIP:  clientIP,
+					RequestID: reqID,
+				})
+			}
+			return fmt.Errorf("%w: %v", ErrSFUSyncFailed, err)
+		}
 	}
 
 	if s.auditService != nil {
@@ -743,6 +777,8 @@ func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.Us
 // DemoteSpeaker allows a room host to revoke speaker privileges from a participant in real-time.
 // This resets the participant's persistent role in the database back to participant and
 // revokes their publishing permissions in LiveKit SFU.
+// If LiveKit RPC fails with an unexpected network error, the database update is rolled back
+// to ensure PostgreSQL and SFU permission states remain consistent.
 func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.User, targetIdentity, clientIP, reqID string) error {
 	normCode := NormalizeCode(code)
 	rm, err := s.repo.GetRoomByCode(ctx, normCode)
@@ -757,12 +793,44 @@ func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.Use
 		return errors.New("cannot change role of room host")
 	}
 
+	// Verify participant is an active participant of this room
+	part, err := s.repo.GetParticipant(ctx, rm.ID, targetIdentity)
+	if err != nil || part == nil || part.LeftAt != nil {
+		return ErrParticipantNotFoundInRoom
+	}
+
+	prevRole := part.Role
+	if prevRole == "" {
+		prevRole = livekit.RoleParticipant
+	}
+	if prevRole == livekit.RoleParticipant {
+		// Idempotent duplicate request: re-sync SFU revocation if online
+		if s.roomManager != nil {
+			_ = s.roomManager.DemoteToParticipant(ctx, normCode, targetIdentity)
+		}
+		return nil
+	}
+
 	if err := s.repo.UpdateParticipantRole(ctx, rm.ID, targetIdentity, livekit.RoleParticipant); err != nil {
-		return err
+		return fmt.Errorf("failed to persist role update: %w", err)
 	}
 
 	if s.roomManager != nil {
-		_ = s.roomManager.DemoteToParticipant(ctx, normCode, targetIdentity)
+		if err := s.roomManager.DemoteToParticipant(ctx, normCode, targetIdentity); err != nil {
+			// Roll back database role update to prevent state divergence
+			_ = s.repo.UpdateParticipantRole(ctx, rm.ID, targetIdentity, prevRole)
+			if s.auditService != nil {
+				s.auditService.Record(ctx, audit.AuditParams{
+					EventType: "room.sfu_sync_failed",
+					Severity:  "ERROR",
+					ActorID:   user.ID,
+					RoomID:    rm.ID,
+					ClientIP:  clientIP,
+					RequestID: reqID,
+				})
+			}
+			return fmt.Errorf("%w: %v", ErrSFUSyncFailed, err)
+		}
 	}
 
 	if s.auditService != nil {

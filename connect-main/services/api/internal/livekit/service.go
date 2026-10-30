@@ -2,6 +2,7 @@ package livekit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,6 +12,20 @@ import (
 	proto "github.com/livekit/protocol/livekit"
 )
 
+type roomScopeKey struct{}
+
+// WithRoomScope binds the server-authoritative room identifier to the context for Twirp RPC administration.
+func WithRoomScope(ctx context.Context, roomCode string) context.Context {
+	return context.WithValue(ctx, roomScopeKey{}, roomCode)
+}
+
+func roomScopeFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(roomScopeKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // authTransport injects short-lived LiveKit administrative JWTs into Twirp HTTP requests.
 type authTransport struct {
 	base      http.RoundTripper
@@ -19,12 +34,26 @@ type authTransport struct {
 }
 
 func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	roomCode := roomScopeFromContext(req.Context())
+
 	at := auth.NewAccessToken(t.apiKey, t.apiSecret)
-	at.AddGrant(&auth.VideoGrant{
-		RoomCreate: true,
-		RoomAdmin:  true,
-		RoomList:   true,
-	}).SetValidFor(2 * time.Minute)
+	vg := &auth.VideoGrant{
+		RoomAdmin: true,
+	}
+
+	// Least-Privilege Scoping:
+	// LiveKit SFU requires VideoGrant.Room == req.Room for participant mutations
+	// (UpdateParticipant, RemoveParticipant, MutePublishedTrack).
+	// Global room creation and listing grants are omitted when scoped to a room.
+	if roomCode != "" {
+		vg.Room = roomCode
+	} else {
+		// Unscoped transport used exclusively for cross-room administrative discovery (e.g. ListRooms)
+		vg.RoomCreate = true
+		vg.RoomList = true
+	}
+
+	at.AddGrant(vg).SetValidFor(2 * time.Minute)
 
 	token, err := at.ToJWT()
 	if err != nil {
@@ -37,13 +66,18 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // RoomManager provides authoritative server-side room lifecycle controls against LiveKit SFU.
 type RoomManager struct {
-	client proto.RoomService
+	client    proto.RoomService
+	apiKey    string
+	apiSecret string
 }
 
 // NewRoomManager constructs a RoomManager instance targeting the configured LiveKit SFU.
 func NewRoomManager(livekitURL, apiKey, apiSecret string) *RoomManager {
 	if apiKey == "" || apiSecret == "" || livekitURL == "" {
-		return &RoomManager{}
+		return &RoomManager{
+			apiKey:    apiKey,
+			apiSecret: apiSecret,
+		}
 	}
 
 	// Normalize WebSocket URL to HTTP URL for Twirp RPC
@@ -61,8 +95,29 @@ func NewRoomManager(livekitURL, apiKey, apiSecret string) *RoomManager {
 	}
 
 	return &RoomManager{
-		client: proto.NewRoomServiceProtobufClient(httpURL, httpClient),
+		client:    proto.NewRoomServiceProtobufClient(httpURL, httpClient),
+		apiKey:    apiKey,
+		apiSecret: apiSecret,
 	}
+}
+
+// GenerateAdminToken creates an administrative token with room-scoped or global grants.
+func (m *RoomManager) GenerateAdminToken(roomCode string) (string, error) {
+	if m.apiKey == "" || m.apiSecret == "" {
+		return "", errors.New("livekit credentials not configured")
+	}
+	at := auth.NewAccessToken(m.apiKey, m.apiSecret)
+	vg := &auth.VideoGrant{
+		RoomAdmin: true,
+	}
+	if roomCode != "" {
+		vg.Room = roomCode
+	} else {
+		vg.RoomCreate = true
+		vg.RoomList = true
+	}
+	at.AddGrant(vg).SetValidFor(2 * time.Minute)
+	return at.ToJWT()
 }
 
 // TerminateRoom instructs LiveKit SFU to immediately disconnect all participants and delete the room.
@@ -71,7 +126,8 @@ func (m *RoomManager) TerminateRoom(ctx context.Context, roomCode string) error 
 		return nil // Non-blocking if credentials unconfigured in mock/offline test mode
 	}
 
-	_, err := m.client.DeleteRoom(ctx, &proto.DeleteRoomRequest{
+	scopedCtx := WithRoomScope(ctx, roomCode)
+	_, err := m.client.DeleteRoom(scopedCtx, &proto.DeleteRoomRequest{
 		Room: roomCode,
 	})
 	if err != nil {
@@ -90,7 +146,8 @@ func (m *RoomManager) RemoveParticipant(ctx context.Context, roomCode, identity 
 		return nil
 	}
 
-	_, err := m.client.RemoveParticipant(ctx, &proto.RoomParticipantIdentity{
+	scopedCtx := WithRoomScope(ctx, roomCode)
+	_, err := m.client.RemoveParticipant(scopedCtx, &proto.RoomParticipantIdentity{
 		Room:     roomCode,
 		Identity: identity,
 	})
@@ -109,7 +166,8 @@ func (m *RoomManager) MuteParticipantTrack(ctx context.Context, roomCode, identi
 		return nil
 	}
 
-	_, err := m.client.MutePublishedTrack(ctx, &proto.MuteRoomTrackRequest{
+	scopedCtx := WithRoomScope(ctx, roomCode)
+	_, err := m.client.MutePublishedTrack(scopedCtx, &proto.MuteRoomTrackRequest{
 		Room:     roomCode,
 		Identity: identity,
 		TrackSid: trackSid,
@@ -135,7 +193,8 @@ func (m *RoomManager) UpdateParticipantPermissions(
 		return nil
 	}
 
-	_, err := m.client.UpdateParticipant(ctx, &proto.UpdateParticipantRequest{
+	scopedCtx := WithRoomScope(ctx, roomCode)
+	_, err := m.client.UpdateParticipant(scopedCtx, &proto.UpdateParticipantRequest{
 		Room:       roomCode,
 		Identity:   identity,
 		Permission: permission,

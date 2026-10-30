@@ -452,4 +452,34 @@ func TestSpeakerPromotionAndDemotionLifecycle(t *testing.T) {
 	if err := svc.PromoteSpeaker(ctx, rm.PublicCode, host, hostIdentity, "127.0.0.1", "req-host"); err == nil {
 		t.Fatal("expected error when trying to promote host, got nil")
 	}
+
+	// 9. Unknown participant promotion is rejected
+	errUnknown := svc.PromoteSpeaker(ctx, rm.PublicCode, host, "user:ghost-participant", "127.0.0.1", "req-ghost")
+	if !errors.Is(errUnknown, room.ErrParticipantNotFoundInRoom) {
+		t.Fatalf("expected ErrParticipantNotFoundInRoom for ghost participant, got: %v", errUnknown)
+	}
+
+	// 10. Duplicate promotion is idempotent
+	if err := svc.PromoteSpeaker(ctx, rm.PublicCode, host, studentIdentity, "127.0.0.1", "req-promote-1"); err != nil {
+		t.Fatalf("first promotion failed: %v", err)
+	}
+	if err := svc.PromoteSpeaker(ctx, rm.PublicCode, host, studentIdentity, "127.0.0.1", "req-promote-2"); err != nil {
+		t.Fatalf("duplicate promotion failed: %v", err)
+	}
+	partAfterDup, _ := repo.GetParticipant(ctx, rm.ID, studentIdentity)
+	if partAfterDup.Role != livekit.RoleSpeaker {
+		t.Fatalf("expected role speaker after duplicate promotion, got %s", partAfterDup.Role)
+	}
+
+	// 11. Duplicate demotion is idempotent
+	if err := svc.DemoteSpeaker(ctx, rm.PublicCode, host, studentIdentity, "127.0.0.1", "req-demote-1"); err != nil {
+		t.Fatalf("first demotion failed: %v", err)
+	}
+	if err := svc.DemoteSpeaker(ctx, rm.PublicCode, host, studentIdentity, "127.0.0.1", "req-demote-2"); err != nil {
+		t.Fatalf("duplicate demotion failed: %v", err)
+	}
+	partAfterDupDemote, _ := repo.GetParticipant(ctx, rm.ID, studentIdentity)
+	if partAfterDupDemote.Role != livekit.RoleParticipant {
+		t.Fatalf("expected role participant after duplicate demotion, got %s", partAfterDupDemote.Role)
+	}
 }

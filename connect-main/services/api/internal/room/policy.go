@@ -18,6 +18,8 @@ var (
 	ErrParticipantRemoved       = errors.New("you have been removed from this meeting by the host")
 	ErrAdmissionRequestNotFound = errors.New("admission request not found")
 	ErrAdmissionAlreadyDecided  = errors.New("admission request has already been decided")
+	ErrParticipantNotFoundInRoom = errors.New("participant not found in active room")
+	ErrSFUSyncFailed             = errors.New("failed to synchronize permissions with media server")
 )
 
 // Policy enforces backend-authoritative room permissions and IDOR prevention.

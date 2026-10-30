@@ -716,6 +716,10 @@ func (h *Handlers) PromoteSpeaker(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrUnauthorizedRoomAction):
 			model.SendJSONError(w, r, http.StatusForbidden, "UNAUTHORIZED", "Only the host can promote participants to speaker")
+		case errors.Is(err, ErrParticipantNotFoundInRoom):
+			model.SendJSONError(w, r, http.StatusNotFound, "NOT_FOUND", "Participant not found in active room")
+		case errors.Is(err, ErrSFUSyncFailed):
+			model.SendJSONError(w, r, http.StatusBadGateway, "SFU_SYNC_FAILED", "Failed to synchronize permissions with media server")
 		default:
 			model.SendJSONError(w, r, http.StatusBadRequest, "PROMOTION_FAILED", err.Error())
 		}
@@ -745,6 +749,10 @@ func (h *Handlers) DemoteSpeaker(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrUnauthorizedRoomAction):
 			model.SendJSONError(w, r, http.StatusForbidden, "UNAUTHORIZED", "Only the host can demote speakers")
+		case errors.Is(err, ErrParticipantNotFoundInRoom):
+			model.SendJSONError(w, r, http.StatusNotFound, "NOT_FOUND", "Participant not found in active room")
+		case errors.Is(err, ErrSFUSyncFailed):
+			model.SendJSONError(w, r, http.StatusBadGateway, "SFU_SYNC_FAILED", "Failed to synchronize permissions with media server")
 		default:
 			model.SendJSONError(w, r, http.StatusBadRequest, "DEMOTION_FAILED", err.Error())
 		}
