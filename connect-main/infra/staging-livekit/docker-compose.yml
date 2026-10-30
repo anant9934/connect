@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  # ----------------------------------------------------------------------------
+  # LiveKit SFU Media Server
+  # ----------------------------------------------------------------------------
+  livekit:
+    image: livekit/livekit-server:v1.8.4
+    container_name: livekit-staging-sfu
+    restart: unless-stopped
+    # host networking is mandatory for WebRTC high-throughput UDP packet forwarding
+    network_mode: host
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+      - ./certs:/etc/livekit/certs:ro
+    command: --config /etc/livekit.yaml
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:7880/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ----------------------------------------------------------------------------
+  # Caddy Reverse Proxy & Automated TLS (Binds to Primary Public IP on Port 443)
+  # ----------------------------------------------------------------------------
+  caddy:
+    image: caddy:2.8.4-alpine
+    container_name: livekit-staging-caddy
+    restart: unless-stopped
+    network_mode: host
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/data:/data
+      - ./caddy/config:/config
+      - ./certs:/etc/livekit/certs:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ----------------------------------------------------------------------------
+  # Host Resource Exporter (Telemetry on Port 9100)
+  # ----------------------------------------------------------------------------
+  node-exporter:
+    image: prom/node-exporter:v1.8.1
+    container_name: livekit-staging-node-exporter
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--web.listen-address=127.0.0.1:9100'
+
+  # ----------------------------------------------------------------------------
+  # Prometheus Telemetry Collector (Scrapes LiveKit :6789 and Node :9100)
+  # ----------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    container_name: livekit-staging-prometheus
+    restart: unless-stopped
+    network_mode: host
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.listen-address=127.0.0.1:9090'

@@ -1,0 +1,59 @@
+services:
+  - type: web
+    name: tathastu-connect-api-staging
+    runtime: docker
+    dockerfilePath: ./services/api/Dockerfile
+    dockerContext: ./services/api
+    plan: starter
+    region: singapore # or oregon / frankfurt
+    healthCheckPath: /health/live
+    autoDeploy: false
+    envVars:
+      - key: APP_ENV
+        value: staging
+      - key: PORT
+        value: 8080
+      - key: LOG_LEVEL
+        value: info
+      - key: DATABASE_URL
+        sync: false # Set to Supabase PostgreSQL connection string with sslmode=require
+      - key: DB_MAX_OPEN_CONNS
+        value: 20
+      - key: DB_MAX_IDLE_CONNS
+        value: 5
+      - key: DB_CONN_MAX_LIFETIME_SEC
+        value: 300
+      - key: REDIS_URL
+        sync: false # Set to Upstash Redis rediss:// URL
+      - key: REDIS_TLS_ENABLED
+        value: "true"
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: RATE_LIMIT_RPS
+        value: 100
+      - key: RATE_LIMIT_BURST
+        value: 200
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false # e.g. https://connect.aitathastu.com,https://connect-mauve-nine.vercel.app
+      - key: PUBLIC_APP_ORIGIN
+        sync: false # e.g. https://connect.aitathastu.com
+      - key: LIVEKIT_URL
+        sync: false # wss://tathastu-connect-htzr4167.livekit.cloud
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      - key: STORAGE_PROVIDER
+        value: r2
+      - key: R2_ENDPOINT
+        sync: false # https://<account_id>.r2.cloudflarestorage.com
+      - key: R2_BUCKET
+        sync: false # tathastu-connect-staging-files
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_REGION
+        value: auto
+      - key: CLAMAV_ENABLED
+        value: "false"

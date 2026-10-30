@@ -1,0 +1,70 @@
+# ==============================================================================
+# TATHASTU CONNECT — INDIA STAGING LIVEKIT SFU CONFIGURATION
+# Location: Mumbai (in-bom) Dedicated Host
+# ==============================================================================
+# Port Allocation & Protocol Architecture:
+# - Signaling (HTTP/WSS): 7880/TCP (Proxy terminated by Caddy/NodeBalancer on 443)
+# - ICE/TCP Fallback: 7881/TCP (For clients with UDP blocked)
+# - WebRTC RTP Range: 50000-60000/UDP (Dedicated dynamic range; no UDP mux conflict)
+# - Prometheus Metrics: 6789/TCP (Scraped by Prometheus at :6789/metrics)
+# - Standard STUN/TURN: 3478/UDP
+# - Embedded TURN/TLS: 443/TCP & 443/UDP (Bound to Secondary Dedicated Public IPv4)
+# ==============================================================================
+
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+
+# Prometheus telemetry endpoint (Official LiveKit port: 6789)
+prometheus_port: 6789
+
+rtc:
+  # TCP fallback port for restrictive networks
+  tcp_port: 7881
+
+  # Explicit WebRTC UDP media port range (Do NOT enable udp_port mux simultaneously)
+  port_range_start: 50000
+  port_range_end: 60000
+
+  # Automatic STUN discovery of public IPv4 address
+  use_external_ip: true
+
+  # IP overrides for dual-IP topology
+  # Primary IP handles signaling and general WebRTC; Secondary IP handles TURNS on 443
+  external_ips:
+    - "${LIVEKIT_PRIMARY_PUBLIC_IP}"
+
+  # Enable modern codecs: Opus 48kHz audio + VP8/H.264 simulcast
+  enable_loopback_candidate: false
+
+# Redis Cluster Coordinator (Co-located in Mumbai Data Center via Private VLAN)
+redis:
+  address: "${STAGING_MUMBAI_REDIS_HOST}:${STAGING_MUMBAI_REDIS_PORT}"
+  username: "${STAGING_REDIS_USER}"
+  password: "${STAGING_REDIS_PASSWORD}"
+  db: 0
+
+# Embedded TURN Server for Carrier-Grade NAT (Reliance Jio & Airtel Mobile)
+turn:
+  enabled: true
+  domain: "${STAGING_TURN_DOMAIN}" # e.g. turn-staging.aitathastu.com
+  # Binds to secondary public IP on port 443 to avoid collision with Caddy HTTPS
+  tls_port: 443
+  udp_port: 3478
+  external_tls: false
+  cert_file: "/etc/livekit/certs/fullchain.pem"
+  key_file: "/etc/livekit/certs/privkey.pem"
+
+# API Authentication Keys (Populated via environment variables at runtime)
+keys:
+  ${STAGING_LIVEKIT_API_KEY}: ${STAGING_LIVEKIT_API_SECRET}
+
+logging:
+  level: info
+  pion_level: warn
+
+room:
+  auto_create: true
+  empty_timeout: 300
+  max_participants: 100
+  departure_timeout: 20

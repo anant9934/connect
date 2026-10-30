@@ -1,0 +1,46 @@
+# ==============================================================================
+# TATHASTU CONNECT — CADDY REVERSE PROXY FOR LIVEKIT STAGING
+# Primary Public IP Binding for TLS Termination & WSS Signaling
+# ==============================================================================
+
+{$STAGING_SIGNALING_DOMAIN}:443 {
+  # TLS Configuration: Automated Let's Encrypt / ZeroSSL
+  tls {$ACME_EMAIL}
+
+  # Health Check Probe for Load Balancers and Upstream Monitors
+  handle /healthz {
+    reverse_proxy 127.0.0.1:7880
+  }
+
+  # WebSocket Signaling & HTTP API
+  handle {
+    reverse_proxy 127.0.0.1:7880 {
+      # Enable streaming and WebSockets
+      header_up Host {host}
+      header_up X-Real-IP {remote_host}
+      header_up X-Forwarded-For {remote_host}
+      header_up X-Forwarded-Proto {scheme}
+
+      # WebSocket buffer and timeout settings
+      transport http {
+        dial_timeout 5s
+        response_header_timeout 15s
+      }
+    }
+  }
+
+  # Security Headers
+  header {
+    Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "strict-origin-when-cross-origin"
+  }
+
+  log {
+    output file /var/log/caddy/access.log {
+      roll_size 50mb
+      roll_keep 3
+    }
+  }
+}
