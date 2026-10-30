@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background Canvas Gradient -->
+    <linearGradient id="canvasGrad" x1="512" y1="0" x2="512" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFDF00" />
+      <stop offset="26%" stop-color="#FFC800" />
+      <stop offset="68%" stop-color="#FFA000" />
+      <stop offset="100%" stop-color="#F57C00" />
+    </linearGradient>
+
+    <!-- Left Panel Outer Frame Gradient (Golden Amber Rim) -->
+    <linearGradient id="leftFrameGrad" x1="136" y1="220" x2="424" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFDE7" />
+      <stop offset="22%" stop-color="#FFE082" />
+      <stop offset="58%" stop-color="#FFB300" />
+      <stop offset="100%" stop-color="#FF6F00" />
+    </linearGradient>
+
+    <!-- Left Panel Screen Interior Gradient (Warm Amber / Orange) -->
+    <linearGradient id="leftScreenGrad" x1="150" y1="240" x2="410" y2="740" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFA726" />
+      <stop offset="28%" stop-color="#FB8C00" />
+      <stop offset="65%" stop-color="#E64A19" />
+      <stop offset="100%" stop-color="#BF360C" />
+    </linearGradient>
+
+    <!-- Right Panel Outer Frame Gradient (Indigo / Lavender Rim) -->
+    <linearGradient id="rightFrameGrad" x1="888" y1="220" x2="600" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E8EAF6" />
+      <stop offset="18%" stop-color="#C5CAE9" />
+      <stop offset="48%" stop-color="#5C6BC0" />
+      <stop offset="82%" stop-color="#283593" />
+      <stop offset="100%" stop-color="#1A237E" />
+    </linearGradient>
+
+    <!-- Right Panel Screen Interior Gradient (Deep Midnight Indigo / Purple) -->
+    <linearGradient id="rightScreenGrad" x1="874" y1="240" x2="614" y2="740" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#283593" />
+      <stop offset="28%" stop-color="#1A237E" />
+      <stop offset="68%" stop-color="#140E3E" />
+      <stop offset="100%" stop-color="#0B0624" />
+    </linearGradient>
+
+    <!-- Center 't' Gradient: Polished 3D Gold -->
+    <linearGradient id="tGrad" x1="495" y1="410" x2="525" y2="720" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFF9C4" />
+      <stop offset="18%" stop-color="#FFD54F" />
+      <stop offset="48%" stop-color="#FFB300" />
+      <stop offset="78%" stop-color="#FF8F00" />
+      <stop offset="100%" stop-color="#E65100" />
+    </linearGradient>
+
+    <!-- Center Sphere 3D Radial Highlight -->
+    <radialGradient id="sphereRadial" cx="36%" cy="32%" r="66%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="24%" stop-color="#FFF9C4" />
+      <stop offset="52%" stop-color="#FFCA28" />
+      <stop offset="82%" stop-color="#FF8F00" />
+      <stop offset="100%" stop-color="#D84315" />
+    </radialGradient>
+
+    <!-- Drop Shadows for Optical Depth -->
+    <filter id="panelDropShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#663300" flood-opacity="0.36" />
+      <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#4D2200" flood-opacity="0.24" />
+    </filter>
+
+    <filter id="tDropShadow" x="-18%" y="-18%" width="136%" height="136%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#592800" flood-opacity="0.45" />
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#3D1800" flood-opacity="0.32" />
+    </filter>
+
+    <filter id="avatarDropShadow" x="-14%" y="-14%" width="128%" height="128%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#000000" flood-opacity="0.22" />
+    </filter>
+  </defs>
+
+  
+
+  <!-- Master Artwork Group -->
+  <g transform="translate(0, 0) scale(1)">
+
+    <!-- 1. LEFT PARTICIPANT PANEL (GOLDEN ORANGE SCREEN) -->
+    <g filter="url(#panelDropShadow)">
+      <!-- Outer Bevel Frame -->
+      <path d="
+        M 136, 310
+        C 136, 255  165, 230  210, 245
+        L 396, 315
+        C 416, 322  428, 342  428, 364
+        L 428, 638
+        C 428, 660  416, 680  396, 687
+        L 210, 757
+        C 165, 772  136, 747  136, 692
+        Z
+      " fill="url(#leftFrameGrad)" />
+
+      <!-- Inner Recessed Screen Surface -->
+      <path d="
+        M 152, 320
+        C 152, 276  175, 256  212, 268
+        L 384, 332
+        C 400, 338  410, 354  410, 372
+        L 410, 630
+        C 410, 648  400, 664  384, 670
+        L 212, 734
+        C 175, 746  152, 726  152, 682
+        Z
+      " fill="url(#leftScreenGrad)" />
+
+      <!-- White Silhouette (Participant 1) -->
+      <g filter="url(#avatarDropShadow)">
+        <circle cx="278" cy="435" r="64" fill="#FFFFFF" />
+        <path d="
+          M 186, 678
+          C 186, 574  222, 516  278, 516
+          C 334, 516  368, 574  368, 678
+          C 342, 695  212, 695  186, 678
+          Z
+        " fill="#FFFFFF" />
+      </g>
+    </g>
+
+    <!-- 2. RIGHT PARTICIPANT PANEL (DEEP PURPLE / INDIGO SCREEN) -->
+    <g filter="url(#panelDropShadow)">
+      <!-- Outer Bevel Frame -->
+      <path d="
+        M 888, 310
+        C 888, 255  859, 230  814, 245
+        L 628, 315
+        C 608, 322  596, 342  596, 364
+        L 596, 638
+        C 596, 660  608, 680  628, 687
+        L 814, 757
+        C 859, 772  888, 747  888, 692
+        Z
+      " fill="url(#rightFrameGrad)" />
+
+      <!-- Inner Recessed Screen Surface -->
+      <path d="
+        M 872, 320
+        C 872, 276  849, 256  812, 268
+        L 640, 332
+        C 624, 338  614, 354  614, 372
+        L 614, 630
+        C 614, 648  624, 664  640, 670
+        L 812, 734
+        C 849, 746  872, 726  872, 682
+        Z
+      " fill="url(#rightScreenGrad)" />
+
+      <!-- Top-Right Specular Diamond Star Glint -->
+      <g opacity="0.95">
+        <path d="
+          M 856, 262
+          Q 856, 285  879, 285
+          Q 856, 285  856, 308
+          Q 856, 285  833, 285
+          Q 856, 285  856, 262
+          Z
+        " fill="#FFFFFF" />
+        <circle cx="856" cy="285" r="18" fill="#C5CAE9" opacity="0.6" filter="blur(3px)" />
+        <circle cx="856" cy="285" r="6" fill="#FFFFFF" />
+      </g>
+
+      <!-- White Silhouette (Participant 2) -->
+      <g filter="url(#avatarDropShadow)">
+        <circle cx="746" cy="435" r="64" fill="#FFFFFF" />
+        <path d="
+          M 656, 678
+          C 656, 574  690, 516  746, 516
+          C 802, 516  838, 574  838, 678
+          C 812, 695  682, 695  656, 678
+          Z
+        " fill="#FFFFFF" />
+      </g>
+    </g>
+
+    <!-- 3. CENTER TATHASTU 't' & SPHERE -->
+    <g filter="url(#tDropShadow)">
+      <!-- Golden 3D Sphere -->
+      <circle cx="512" cy="355" r="56" fill="url(#sphereRadial)" stroke="#E65100" stroke-width="2.5" />
+
+      <!-- Lowercase 't' with Sweeping Crossbar & Hooked Tail -->
+      <path d="
+        M 476, 420
+        C 476, 412  484, 408  494, 408
+        L 530, 408
+        C 540, 408  548, 412  548, 420
+        L 548, 456
+        C 572, 454  602, 442  616, 422
+        C 620, 416  628, 416  630, 424
+        C 630, 432  622, 448  608, 466
+        C 588, 490  562, 506  548, 508
+        L 548, 626
+        C 548, 664  570, 686  604, 682
+        C 616, 680  628, 668  634, 654
+        C 636, 648  644, 648  645, 654
+        C 642, 678  618, 712  580, 712
+        C 524, 712  476, 670  476, 612
+        L 476, 508
+        C 458, 506  426, 492  398, 466
+        C 386, 454  388, 440  398, 438
+        C 404, 436  412, 442  422, 452
+        C 440, 470  458, 474  476, 474
+        Z
+      " fill="url(#tGrad)" stroke="#E65100" stroke-width="3.5" stroke-linejoin="round" />
+    </g>
+
+  </g>
+</svg>

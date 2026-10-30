@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tathastu Meet - Meeting room (reference)</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.chip{border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;display:inline-block;background:#F3F2EE;color:#17151F}
+.tl{position:relative;border-radius:20px;background:var(--bg);overflow:hidden;flex:1 1 150px;height:130px}
+.av{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:64px;height:64px;border-radius:999px;display:flex;align-items:center;justify-content:center;font:700 24px 'Bricolage Grotesque',sans-serif;background:var(--a);color:var(--t,#17151F)}
+.vn{position:absolute;left:10px;bottom:10px;background:#FFFFFF;border-radius:999px;padding:4px 11px;font-size:12px;font-weight:600;box-shadow:0 2px 8px rgba(23,21,31,0.08)}
+.cb{width:52px;height:52px;border-radius:999px;border:0;display:flex;align-items:center;justify-content:center;background:var(--a);color:var(--t,#17151F);cursor:pointer}
+.ic{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.res{display:flex;align-items:center;justify-content:space-between;padding:13px 0;border-bottom:1px solid #F0EEE8;font-size:14px}
+.lb{font-size:12px;color:#8A867A;font-weight:600;letter-spacing:0.06em}
+
+@media (max-width:760px){
+ div[style*="height:450px"]{height:260px!important}
+ div[style*="padding:16px 28px"]{padding:14px 16px!important}
+ div[style*="padding:4px 28px 28px"]{padding:4px 12px 20px!important}
+ .cb{width:46px;height:46px}
+}
+</style>
+
+</head>
+<body>
+
+<div style="font-family:'DM Sans',sans-serif;color:#17151F;background:#FFFFFF;min-height:880px;display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:16px 28px">
+<div style="display:flex;align-items:center;gap:12px"><div style="width:36px;height:36px;border-radius:12px;background:#17151F;display:flex;align-items:center;justify-content:center"><div style="width:13px;height:13px;border-radius:999px;background:#FFC93C"></div></div><div><div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:19px">Federated Learning Collaboration</div><div style="font-size:13px;color:#8A867A">4 people</div></div></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap"><span class="chip" style="background:#F1EBFF;color:#5A2FC7">Research Room</span><span class="chip" style="background:#E4F8EB;color:#1F6B3B"><span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#2DBE74;margin-right:7px"></span>00:32:14</span><span class="chip">Encrypted</span></div>
+</div>
+<div style="display:flex;gap:18px;padding:4px 28px 28px;flex:1;flex-wrap:wrap">
+<div style="flex:1 1 640px;min-width:0;background:#FAF9FC;border:1px solid #EEEBF5;border-radius:28px;padding:14px;display:flex;flex-direction:column;gap:12px">
+<div class="tl" style="--bg:#F1EBFF;flex:none;height:450px;border-radius:24px;box-shadow:inset 0 0 0 3px #7444E8"><div class="av" style="--a:#7444E8;--t:#FFFFFF;width:120px;height:120px;font-size:46px">A</div><span class="vn" style="font-size:14px;left:16px;bottom:16px">Anant · speaking</span><span style="position:absolute;right:16px;top:16px;background:#FFC93C;color:#17151F;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600">Shivam raised a hand</span><div style="position:absolute;left:50%;bottom:16px;transform:translateX(-50%);background:#FFFFFF;border-radius:16px;padding:10px 16px;font-size:14px;box-shadow:0 12px 30px rgba(23,21,31,0.12)">What if we federate at the grid edge?</div></div>
+<div style="display:flex;gap:12px;flex-wrap:wrap">
+<div class="tl" style="--bg:#FFF4D1"><div class="av" style="--a:#FFC93C">R</div><span class="vn">Rahul</span></div>
+<div class="tl" style="--bg:#E4F8EB"><div class="av" style="--a:#86E3A8">S</div><span class="vn">Shivam</span></div>
+<div class="tl" style="--bg:#FFE9E9"><div class="av" style="--a:#FF8A8A">M</div><span class="vn">Mentor · muted</span></div>
+</div>
+<div style="display:flex;justify-content:center;gap:12px;padding-top:6px">
+<button class="cb" aria-label="Mute" style="--a:#86E3A8"><svg class="ic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+<button class="cb" aria-label="Camera" style="--a:#86E3A8"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="6" width="12" height="12" rx="3"/><path d="M15 10l6-3v10l-6-3z"/></svg></button>
+<button class="cb" aria-label="Share screen" style="--a:#7444E8;--t:#FFFFFF"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></button>
+<button class="cb" aria-label="Raise hand" style="--a:#FFC93C"><svg class="ic" viewBox="0 0 24 24"><path d="M8 13V6a1.5 1.5 0 0 1 3 0v5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-3l-2-4a1.5 1.5 0 0 1 2.5-1.5L8 13"/></svg></button>
+<button class="cb" aria-label="Chat" style="--a:#FFFFFF;box-shadow:inset 0 0 0 1.5px #E4E2DB"><svg class="ic" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg></button>
+<button class="cb" aria-label="Leave" style="--a:#FF6B6B;width:72px"><svg class="ic" viewBox="0 0 24 24"><path d="M4 15c5-5 11-5 16 0l-2 3-3-1.5v-2c-2-.7-4-.7-6 0v2L6 18z"/></svg></button>
+</div>
+</div>
+<div style="flex:0 1 310px;min-width:270px;border:1px solid #E9E7E1;border-radius:28px;padding:24px;display:flex;flex-direction:column;gap:16px;align-self:stretch">
+<div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:19px">Context</div>
+<div><div class="lb" style="margin-bottom:6px">PURPOSE</div><div style="font-size:15px;line-height:1.45">Discuss federated RL architecture for EV charging</div></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap"><span class="chip" style="background:#F1EBFF;color:#5A2FC7">Federated Learning</span><span class="chip" style="background:#E4F8EB;color:#1F6B3B">Edge AI</span><span class="chip" style="background:#FFF4D1;color:#6B4E00">Smart Grid</span></div>
+<div class="lb" style="margin-top:4px">SHARED RESOURCES</div>
+<div><div class="res"><span>Paper draft</span><span style="color:#7444E8;font-size:13px;font-weight:600">Open</span></div><div class="res"><span>GitHub repository</span><span style="color:#7444E8;font-size:13px;font-weight:600">Open</span></div><div class="res" style="border:0"><span>Research notes</span><span style="color:#7444E8;font-size:13px;font-weight:600">Open</span></div></div>
+</div>
+</div>
+</div>
+
+</body>
+</html>
