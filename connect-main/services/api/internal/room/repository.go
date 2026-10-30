@@ -78,6 +78,7 @@ type Repository interface {
 	GetActiveParticipants(ctx context.Context, roomID string) ([]*Participant, error)
 	GetActiveParticipantCount(ctx context.Context, roomID string) (int, error)
 	MarkParticipantLeft(ctx context.Context, roomID, identity string, leftAt time.Time) error
+	UpdateParticipantRole(ctx context.Context, roomID, identity, role string) error
 	CreateAdmissionRequest(ctx context.Context, req *AdmissionRequest) error
 	GetAdmissionRequest(ctx context.Context, roomID, identity string) (*AdmissionRequest, error)
 	GetPendingAdmissionRequests(ctx context.Context, roomID string) ([]*AdmissionRequest, error)
@@ -252,6 +253,16 @@ func (r *PgxRepository) MarkParticipantLeft(ctx context.Context, roomID, identit
 		WHERE room_id = $2 AND identity = $3 AND left_at IS NULL
 	`
 	_, err := r.pool.Exec(ctx, query, leftAt, roomID, identity)
+	return err
+}
+
+func (r *PgxRepository) UpdateParticipantRole(ctx context.Context, roomID, identity, role string) error {
+	query := `
+		UPDATE room_participants
+		SET role = $1
+		WHERE room_id = $2 AND identity = $3 AND left_at IS NULL
+	`
+	_, err := r.pool.Exec(ctx, query, role, roomID, identity)
 	return err
 }
 
@@ -561,6 +572,19 @@ func (m *MemoryRepository) MarkParticipantLeft(_ context.Context, roomID, identi
 	for _, p := range m.participants[roomID] {
 		if p.Identity == identity && p.LeftAt == nil {
 			p.LeftAt = &leftAt
+		}
+	}
+	return nil
+}
+
+func (m *MemoryRepository) UpdateParticipantRole(_ context.Context, roomID, identity, role string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, p := range m.participants[roomID] {
+		if p.Identity == identity && p.LeftAt == nil {
+			p.Role = role
+			return nil
 		}
 	}
 	return nil

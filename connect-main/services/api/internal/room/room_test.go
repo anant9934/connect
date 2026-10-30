@@ -367,3 +367,89 @@ func TestMeetingHistoryOwnershipScoping(t *testing.T) {
 		t.Fatalf("expected ErrUnauthorizedRoomAction, got: %v", errUnauth)
 	}
 }
+
+func TestSpeakerPromotionAndDemotionLifecycle(t *testing.T) {
+	svc, repo, _ := setupRoomTest(t)
+	ctx := context.Background()
+
+	host := &auth.User{ID: "host-456", Email: "host@example.com"}
+	student := &auth.User{ID: "student-789", Email: "student@example.com"}
+	eavesdropper := &auth.User{ID: "eaves-123", Email: "eaves@example.com"}
+
+	// 1. Host creates room
+	rm, err := svc.CreateRoom(ctx, host, 50, "127.0.0.1", "req-create")
+	if err != nil {
+		t.Fatalf("CreateRoom failed: %v", err)
+	}
+
+	// 2. Student joins room
+	joinRes, err := svc.JoinRoom(ctx, rm.PublicCode, student, "", "127.0.0.1", "req-join-student")
+	if err != nil {
+		t.Fatalf("student JoinRoom failed: %v", err)
+	}
+	studentIdentity := "user:" + student.ID
+	if joinRes.Participant.Role != livekit.RoleParticipant {
+		t.Fatalf("expected initial role %q, got %q", livekit.RoleParticipant, joinRes.Participant.Role)
+	}
+
+	// 3. Unauthorized attacker attempts to promote student
+	errUnauth := svc.PromoteSpeaker(ctx, rm.PublicCode, eavesdropper, studentIdentity, "127.0.0.1", "req-hack")
+	if !errors.Is(errUnauth, room.ErrUnauthorizedRoomAction) {
+		t.Fatalf("SECURITY VIOLATION: unauthorized user could promote speaker: %v", errUnauth)
+	}
+
+	// 4. Student attempts self-promotion
+	errSelf := svc.PromoteSpeaker(ctx, rm.PublicCode, student, studentIdentity, "127.0.0.1", "req-self")
+	if !errors.Is(errSelf, room.ErrUnauthorizedRoomAction) {
+		t.Fatalf("SECURITY VIOLATION: student could self-promote: %v", errSelf)
+	}
+
+	// 5. Host promotes student to speaker
+	if err := svc.PromoteSpeaker(ctx, rm.PublicCode, host, studentIdentity, "127.0.0.1", "req-promote"); err != nil {
+		t.Fatalf("host PromoteSpeaker failed: %v", err)
+	}
+
+	// Verify DB role updated to speaker
+	updatedPart, err := repo.GetParticipant(ctx, rm.ID, studentIdentity)
+	if err != nil || updatedPart == nil {
+		t.Fatalf("GetParticipant failed: %v", err)
+	}
+	if updatedPart.Role != livekit.RoleSpeaker {
+		t.Fatalf("expected role %q after promotion, got %q", livekit.RoleSpeaker, updatedPart.Role)
+	}
+
+	// Verify token generated for student now grants speaker sources
+	tok, err := svc.GenerateToken(ctx, rm.PublicCode, student, "", "", "127.0.0.1", "req-token-speaker")
+	if err != nil {
+		t.Fatalf("GenerateToken for speaker failed: %v", err)
+	}
+	if tok == "" {
+		t.Fatal("expected non-empty token for promoted speaker")
+	}
+
+	// 6. Unauthorized user attempts to demote student
+	errDemoteUnauth := svc.DemoteSpeaker(ctx, rm.PublicCode, eavesdropper, studentIdentity, "127.0.0.1", "req-demote-hack")
+	if !errors.Is(errDemoteUnauth, room.ErrUnauthorizedRoomAction) {
+		t.Fatalf("SECURITY VIOLATION: unauthorized user could demote speaker: %v", errDemoteUnauth)
+	}
+
+	// 7. Host demotes student back to participant
+	if err := svc.DemoteSpeaker(ctx, rm.PublicCode, host, studentIdentity, "127.0.0.1", "req-demote"); err != nil {
+		t.Fatalf("host DemoteSpeaker failed: %v", err)
+	}
+
+	// Verify DB role updated back to participant
+	demotedPart, err := repo.GetParticipant(ctx, rm.ID, studentIdentity)
+	if err != nil || demotedPart == nil {
+		t.Fatalf("GetParticipant failed: %v", err)
+	}
+	if demotedPart.Role != livekit.RoleParticipant {
+		t.Fatalf("expected role %q after demotion, got %q", livekit.RoleParticipant, demotedPart.Role)
+	}
+
+	// 8. Host cannot demote or promote themselves
+	hostIdentity := "user:" + host.ID
+	if err := svc.PromoteSpeaker(ctx, rm.PublicCode, host, hostIdentity, "127.0.0.1", "req-host"); err == nil {
+		t.Fatal("expected error when trying to promote host, got nil")
+	}
+}

@@ -152,7 +152,7 @@ func BuildRouter(
 						appmw.RequireAuth(authService),
 					).Post("/admission/decision", roomHandler.DecideAdmission)
 
-					// Host participant management (Remove, Mute)
+					// Host participant management (Remove, Mute, Promote, Demote)
 					roomDetail.With(
 						appmw.CSRFProtection(cfg.CORSAllowedOrigins),
 						appmw.RequireAuth(authService),
@@ -162,6 +162,16 @@ func BuildRouter(
 						appmw.CSRFProtection(cfg.CORSAllowedOrigins),
 						appmw.RequireAuth(authService),
 					).Post("/participants/{identity}/mute", roomHandler.MuteParticipant)
+
+					roomDetail.With(
+						appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+						appmw.RequireAuth(authService),
+					).Post("/participants/{identity}/promote-speaker", roomHandler.PromoteSpeaker)
+
+					roomDetail.With(
+						appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+						appmw.RequireAuth(authService),
+					).Post("/participants/{identity}/demote-speaker", roomHandler.DemoteSpeaker)
 
 					// Host actions: Lock, Unlock, End (Require authenticated session)
 					roomDetail.With(

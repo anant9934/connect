@@ -701,6 +701,84 @@ func (s *Service) MuteParticipant(ctx context.Context, code string, user *auth.U
 	return nil
 }
 
+// PromoteSpeaker allows a room host to promote a participant to a speaker in real-time.
+// This updates the participant's persistent role in the database and pushes updated
+// track publishing permissions to LiveKit SFU.
+func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.User, targetIdentity, clientIP, reqID string) error {
+	normCode := NormalizeCode(code)
+	rm, err := s.repo.GetRoomByCode(ctx, normCode)
+	if err != nil {
+		return ErrRoomNotFound
+	}
+	if !s.policy.IsHost(user, rm) {
+		return ErrUnauthorizedRoomAction
+	}
+
+	if targetIdentity == "user:"+user.ID {
+		return errors.New("cannot change role of room host")
+	}
+
+	if err := s.repo.UpdateParticipantRole(ctx, rm.ID, targetIdentity, livekit.RoleSpeaker); err != nil {
+		return err
+	}
+
+	if s.roomManager != nil {
+		_ = s.roomManager.PromoteToSpeaker(ctx, normCode, targetIdentity)
+	}
+
+	if s.auditService != nil {
+		s.auditService.Record(ctx, audit.AuditParams{
+			EventType: "room.speaker_promoted",
+			Severity:  "INFO",
+			ActorID:   user.ID,
+			RoomID:    rm.ID,
+			ClientIP:  clientIP,
+			RequestID: reqID,
+		})
+	}
+
+	return nil
+}
+
+// DemoteSpeaker allows a room host to revoke speaker privileges from a participant in real-time.
+// This resets the participant's persistent role in the database back to participant and
+// revokes their publishing permissions in LiveKit SFU.
+func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.User, targetIdentity, clientIP, reqID string) error {
+	normCode := NormalizeCode(code)
+	rm, err := s.repo.GetRoomByCode(ctx, normCode)
+	if err != nil {
+		return ErrRoomNotFound
+	}
+	if !s.policy.IsHost(user, rm) {
+		return ErrUnauthorizedRoomAction
+	}
+
+	if targetIdentity == "user:"+user.ID {
+		return errors.New("cannot change role of room host")
+	}
+
+	if err := s.repo.UpdateParticipantRole(ctx, rm.ID, targetIdentity, livekit.RoleParticipant); err != nil {
+		return err
+	}
+
+	if s.roomManager != nil {
+		_ = s.roomManager.DemoteToParticipant(ctx, normCode, targetIdentity)
+	}
+
+	if s.auditService != nil {
+		s.auditService.Record(ctx, audit.AuditParams{
+			EventType: "room.speaker_demoted",
+			Severity:  "INFO",
+			ActorID:   user.ID,
+			RoomID:    rm.ID,
+			ClientIP:  clientIP,
+			RequestID: reqID,
+		})
+	}
+
+	return nil
+}
+
 // GetMeetingHistory returns paginated historical meeting records for an authenticated host.
 func (s *Service) GetMeetingHistory(ctx context.Context, user *auth.User, limit, offset int) ([]*MeetingHistoryItem, int, error) {
 	if user == nil {

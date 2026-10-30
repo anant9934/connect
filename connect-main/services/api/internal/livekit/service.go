@@ -123,3 +123,51 @@ func (m *RoomManager) MuteParticipantTrack(ctx context.Context, roomCode, identi
 	}
 	return nil
 }
+
+// UpdateParticipantPermissions instructs LiveKit SFU to authoritatively update a participant's
+// publishing, subscribing, and track source permissions in real-time.
+func (m *RoomManager) UpdateParticipantPermissions(
+	ctx context.Context,
+	roomCode, identity string,
+	permission *proto.ParticipantPermission,
+) error {
+	if m.client == nil {
+		return nil
+	}
+
+	_, err := m.client.UpdateParticipant(ctx, &proto.UpdateParticipantRequest{
+		Room:       roomCode,
+		Identity:   identity,
+		Permission: permission,
+	})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return nil
+		}
+		return fmt.Errorf("livekit update participant permissions failed: %w", err)
+	}
+	return nil
+}
+
+// PromoteToSpeaker grants camera and microphone publishing permissions to a participant in real-time.
+func (m *RoomManager) PromoteToSpeaker(ctx context.Context, roomCode, identity string) error {
+	return m.UpdateParticipantPermissions(ctx, roomCode, identity, &proto.ParticipantPermission{
+		CanSubscribe:   true,
+		CanPublish:     true,
+		CanPublishData: true,
+		CanPublishSources: []proto.TrackSource{
+			proto.TrackSource_CAMERA,
+			proto.TrackSource_MICROPHONE,
+		},
+	})
+}
+
+// DemoteToParticipant revokes publishing permissions from a participant in real-time.
+func (m *RoomManager) DemoteToParticipant(ctx context.Context, roomCode, identity string) error {
+	return m.UpdateParticipantPermissions(ctx, roomCode, identity, &proto.ParticipantPermission{
+		CanSubscribe:     true,
+		CanPublish:       false,
+		CanPublishData:   true,
+		CanPublishSources: nil,
+	})
+}

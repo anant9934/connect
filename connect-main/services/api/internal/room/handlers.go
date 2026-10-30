@@ -699,6 +699,65 @@ func (h *Handlers) MuteParticipant(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// PromoteSpeaker handles POST /api/v1/rooms/{code}/participants/{identity}/promote-speaker
+func (h *Handlers) PromoteSpeaker(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	targetIdentity := chi.URLParam(r, "identity")
+	user, ok := middleware.UserFromContext(r.Context())
+	if !ok || user == nil {
+		model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication required")
+		return
+	}
+
+	clientIP := extractIP(r)
+	reqID := getRequestID(r)
+
+	if err := h.service.PromoteSpeaker(r.Context(), code, user, targetIdentity, clientIP, reqID); err != nil {
+		switch {
+		case errors.Is(err, ErrUnauthorizedRoomAction):
+			model.SendJSONError(w, r, http.StatusForbidden, "UNAUTHORIZED", "Only the host can promote participants to speaker")
+		default:
+			model.SendJSONError(w, r, http.StatusBadRequest, "PROMOTION_FAILED", err.Error())
+		}
+		return
+	}
+
+	model.SendJSON(w, http.StatusOK, map[string]any{
+		"promoted": true,
+		"role":     livekit.RoleSpeaker,
+	})
+}
+
+// DemoteSpeaker handles POST /api/v1/rooms/{code}/participants/{identity}/demote-speaker
+func (h *Handlers) DemoteSpeaker(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	targetIdentity := chi.URLParam(r, "identity")
+	user, ok := middleware.UserFromContext(r.Context())
+	if !ok || user == nil {
+		model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication required")
+		return
+	}
+
+	clientIP := extractIP(r)
+	reqID := getRequestID(r)
+
+	if err := h.service.DemoteSpeaker(r.Context(), code, user, targetIdentity, clientIP, reqID); err != nil {
+		switch {
+		case errors.Is(err, ErrUnauthorizedRoomAction):
+			model.SendJSONError(w, r, http.StatusForbidden, "UNAUTHORIZED", "Only the host can demote speakers")
+		default:
+			model.SendJSONError(w, r, http.StatusBadRequest, "DEMOTION_FAILED", err.Error())
+		}
+		return
+	}
+
+	model.SendJSON(w, http.StatusOK, map[string]any{
+		"demoted": true,
+		"role":    livekit.RoleParticipant,
+	})
+}
+
+
 // History handles GET /api/v1/rooms/history
 func (h *Handlers) History(w http.ResponseWriter, r *http.Request) {
 	user, ok := middleware.UserFromContext(r.Context())
