@@ -1,12 +1,18 @@
 package room_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/tathastu/connect/services/api/internal/audit"
 	"github.com/tathastu/connect/services/api/internal/auth"
@@ -532,5 +538,179 @@ func TestSpeakerPromotion_ConcurrentSafety(t *testing.T) {
 	}
 	if err := svc.ReconcileRoom(ctx, rm.PublicCode); err != nil {
 		t.Fatalf("ReconcileRoom failed: %v", err)
+	}
+}
+
+type mockSFURoundTripper struct {
+	failRPC    atomic.Bool
+	timeoutRPC atomic.Bool
+	callCount  atomic.Int32
+}
+
+func (m *mockSFURoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	m.callCount.Add(1)
+	if m.timeoutRPC.Load() {
+		return nil, context.DeadlineExceeded
+	}
+	if m.failRPC.Load() {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"internal SFU failure"}`)),
+			Header:     make(http.Header),
+		}, nil
+	}
+	hdr := make(http.Header)
+	hdr.Set("Content-Type", "application/protobuf")
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(bytes.NewReader([]byte{})),
+		Header:     hdr,
+	}, nil
+}
+
+func TestSpeakerPromotion_MultiInstanceDistributedConcurrency(t *testing.T) {
+	// Simulates two independent API instances (svc1 and svc2) serving requests concurrently
+	// against the same persistent repository with distributed locking and CAS.
+	repo := room.NewMemoryRepository()
+	policy := room.NewPolicy()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditService := audit.NewService(nil, logger)
+	tokenService := livekit.NewTokenService("test_key", "test_secret")
+
+	svc1 := room.NewServiceWithInstanceID(repo, policy, auditService, tokenService, nil, "node-instance-alpha-1")
+	svc2 := room.NewServiceWithInstanceID(repo, policy, auditService, tokenService, nil, "node-instance-beta-2")
+
+	ctx := context.Background()
+	host := &auth.User{ID: "host-dist", DisplayName: "Distributed Host"}
+	student := &auth.User{ID: "student-dist", DisplayName: "Distributed Student"}
+
+	rm, err := svc1.CreateRoom(ctx, host, 50, "127.0.0.1", "req-create")
+	if err != nil {
+		t.Fatalf("CreateRoom on node 1 failed: %v", err)
+	}
+
+	_, err = svc2.JoinRoom(ctx, rm.PublicCode, student, "", "127.0.0.1", "req-join")
+	if err != nil {
+		t.Fatalf("JoinRoom on node 2 failed: %v", err)
+	}
+	studentIdent := "user:" + student.ID
+
+	// Interleave concurrent mutations across both instances
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func(idx int) {
+			defer wg.Done()
+			_ = svc1.PromoteSpeaker(ctx, rm.PublicCode, host, studentIdent, "127.0.0.1", fmt.Sprintf("req-s1-%d", idx))
+		}(i)
+		go func(idx int) {
+			defer wg.Done()
+			_ = svc2.DemoteSpeaker(ctx, rm.PublicCode, host, studentIdent, "127.0.0.1", fmt.Sprintf("req-s2-%d", idx))
+		}(i)
+	}
+	wg.Wait()
+
+	// Verify distributed lock prevented corrupted/stale state
+	finalPart, err := repo.GetParticipant(ctx, rm.ID, studentIdent)
+	if err != nil || finalPart == nil {
+		t.Fatalf("GetParticipant failed: %v", err)
+	}
+	if finalPart.Role != livekit.RoleSpeaker && finalPart.Role != livekit.RoleParticipant {
+		t.Fatalf("invalid role in database after multi-instance operations: %q", finalPart.Role)
+	}
+
+	// Verify reconciliation from both instances converges without error
+	if err := svc1.ReconcileParticipant(ctx, rm.PublicCode, studentIdent); err != nil {
+		t.Fatalf("svc1 ReconcileParticipant failed: %v", err)
+	}
+	if err := svc2.ReconcileParticipant(ctx, rm.PublicCode, studentIdent); err != nil {
+		t.Fatalf("svc2 ReconcileParticipant failed: %v", err)
+	}
+}
+
+func TestReconciliationFailuresAndConvergence(t *testing.T) {
+	repo := room.NewMemoryRepository()
+	policy := room.NewPolicy()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditService := audit.NewService(nil, logger)
+	tokenService := livekit.NewTokenService("test_key", "test_secret")
+
+	mockTransport := &mockSFURoundTripper{}
+	mockRoomMgr := livekit.NewRoomManagerWithTransport("https://livekit.example.com", "test_key", "test_secret", mockTransport)
+
+	svc1 := room.NewServiceWithInstanceID(repo, policy, auditService, tokenService, mockRoomMgr, "node-1")
+	svc2 := room.NewServiceWithInstanceID(repo, policy, auditService, tokenService, mockRoomMgr, "node-2")
+
+	ctx := context.Background()
+	host := &auth.User{ID: "host-recon", DisplayName: "Recon Host"}
+	student := &auth.User{ID: "student-recon", DisplayName: "Recon Student"}
+
+	rm, err := svc1.CreateRoom(ctx, host, 50, "127.0.0.1", "req-create")
+	if err != nil {
+		t.Fatalf("CreateRoom failed: %v", err)
+	}
+
+	_, err = svc1.JoinRoom(ctx, rm.PublicCode, student, "", "127.0.0.1", "req-join")
+	if err != nil {
+		t.Fatalf("JoinRoom failed: %v", err)
+	}
+	studentIdent := "user:" + student.ID
+
+	// 1. LiveKit Outage during promotion: Returns ErrSFUSyncFailed and rolls back database
+	mockTransport.failRPC.Store(true)
+	errOutage := svc1.PromoteSpeaker(ctx, rm.PublicCode, host, studentIdent, "127.0.0.1", "req-outage")
+	if !errors.Is(errOutage, room.ErrSFUSyncFailed) {
+		t.Fatalf("expected ErrSFUSyncFailed on SFU outage, got: %v", errOutage)
+	}
+	partAfterOutage, _ := repo.GetParticipant(ctx, rm.ID, studentIdent)
+	if partAfterOutage.Role != livekit.RoleParticipant {
+		t.Fatalf("expected DB role to remain participant after SFU outage, got: %s", partAfterOutage.Role)
+	}
+
+	// 2. LiveKit RPC Timeout during promotion: Returns ErrSFUSyncFailed and rolls back database
+	mockTransport.failRPC.Store(false)
+	mockTransport.timeoutRPC.Store(true)
+	errTimeout := svc1.PromoteSpeaker(ctx, rm.PublicCode, host, studentIdent, "127.0.0.1", "req-timeout")
+	if !errors.Is(errTimeout, room.ErrSFUSyncFailed) {
+		t.Fatalf("expected ErrSFUSyncFailed on timeout, got: %v", errTimeout)
+	}
+	partAfterTimeout, _ := repo.GetParticipant(ctx, rm.ID, studentIdent)
+	if partAfterTimeout.Role != livekit.RoleParticipant {
+		t.Fatalf("expected DB role to remain participant after timeout rollback, got: %s", partAfterTimeout.Role)
+	}
+
+	// 3. Service Recovery: Network recovers, promotion succeeds and converges
+	mockTransport.timeoutRPC.Store(false)
+	errSuccess := svc1.PromoteSpeaker(ctx, rm.PublicCode, host, studentIdent, "127.0.0.1", "req-recovered")
+	if errSuccess != nil {
+		t.Fatalf("expected promotion to succeed after service recovery, got: %v", errSuccess)
+	}
+	partAfterRecovery, _ := repo.GetParticipant(ctx, rm.ID, studentIdent)
+	if partAfterRecovery.Role != livekit.RoleSpeaker {
+		t.Fatalf("expected DB role to be speaker after recovery, got: %s", partAfterRecovery.Role)
+	}
+
+	// 4. Concurrent reconciliation from two API instances
+	var wg sync.WaitGroup
+	var errRecon1, errRecon2 error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		errRecon1 = svc1.ReconcileParticipant(ctx, rm.PublicCode, studentIdent)
+	}()
+	go func() {
+		defer wg.Done()
+		errRecon2 = svc2.ReconcileParticipant(ctx, rm.PublicCode, studentIdent)
+	}()
+	wg.Wait()
+	if errRecon1 != nil || errRecon2 != nil {
+		t.Fatalf("concurrent reconciliation failed: err1=%v, err2=%v", errRecon1, errRecon2)
+	}
+
+	// 5. Participant disconnect during reconciliation: Fails closed safely
+	_ = repo.MarkParticipantLeft(ctx, rm.ID, studentIdent, time.Now().UTC())
+	errDisconnected := svc1.ReconcileParticipant(ctx, rm.PublicCode, studentIdent)
+	if !errors.Is(errDisconnected, room.ErrParticipantNotFoundInRoom) {
+		t.Fatalf("expected ErrParticipantNotFoundInRoom for disconnected participant, got: %v", errDisconnected)
 	}
 }

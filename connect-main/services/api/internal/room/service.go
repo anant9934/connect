@@ -7,7 +7,6 @@ import (
 	"log"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,24 +37,26 @@ type Service struct {
 	auditService *audit.Service
 	tokenService *livekit.TokenService
 	roomManager  *livekit.RoomManager
-	partMu       sync.Map
+	instanceID   string
 }
 
-func (s *Service) lockParticipant(key string) func() {
-	val, _ := s.partMu.LoadOrStore(key, &sync.Mutex{})
-	m := val.(*sync.Mutex)
-	m.Lock()
-	return m.Unlock
-}
-
-// NewService constructs the room domain service.
+// NewService constructs the room domain service with an auto-generated instance ID.
 func NewService(repo Repository, policy *Policy, auditService *audit.Service, tokenService *livekit.TokenService, roomManager *livekit.RoomManager) *Service {
+	return NewServiceWithInstanceID(repo, policy, auditService, tokenService, roomManager, uuid.NewString())
+}
+
+// NewServiceWithInstanceID constructs the room domain service with a specific instance ID for distributed simulation.
+func NewServiceWithInstanceID(repo Repository, policy *Policy, auditService *audit.Service, tokenService *livekit.TokenService, roomManager *livekit.RoomManager, instanceID string) *Service {
+	if instanceID == "" {
+		instanceID = uuid.NewString()
+	}
 	return &Service{
 		repo:         repo,
 		policy:       policy,
 		auditService: auditService,
 		tokenService: tokenService,
 		roomManager:  roomManager,
+		instanceID:   instanceID,
 	}
 }
 
@@ -712,9 +713,10 @@ func (s *Service) MuteParticipant(ctx context.Context, code string, user *auth.U
 }
 
 // PromoteSpeaker allows a room host to promote a participant to a speaker in real-time.
-// This serializes concurrent promotion/demotion requests per participant, updates the
-// participant's persistent role in the database, and synchronizes track publishing
-// permissions with LiveKit SFU with bounded RPC timeouts and explicit rollback/reconciliation.
+// This serializes concurrent promotion/demotion requests across distributed API instances using
+// PostgreSQL-backed participant leases, updates the participant's persistent role in the database
+// via Compare-And-Swap (preventing stale role updates), and synchronizes track publishing permissions
+// with LiveKit SFU without holding database transactions open during network operations.
 func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.User, targetIdentity, clientIP, reqID string) error {
 	normCode := NormalizeCode(code)
 	rm, err := s.repo.GetRoomByCode(ctx, normCode)
@@ -729,11 +731,14 @@ func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.Us
 		return errors.New("cannot change role of room host")
 	}
 
-	// Serialize concurrent state mutations for this participant
-	unlock := s.lockParticipant(rm.ID + ":" + targetIdentity)
+	// 1. Acquire distributed lock across API instances (10s TTL)
+	unlock, err := s.repo.AcquireParticipantLock(ctx, rm.ID, targetIdentity, s.instanceID, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to acquire distributed lock: %w", err)
+	}
 	defer unlock()
 
-	// Verify participant is an active participant of this room
+	// 2. Fetch authoritative database state under lock
 	part, err := s.repo.GetParticipant(ctx, rm.ID, targetIdentity)
 	if err != nil || part == nil || part.LeftAt != nil {
 		return ErrParticipantNotFoundInRoom
@@ -757,14 +762,16 @@ func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.Us
 		return nil
 	}
 
-	if err := s.repo.UpdateParticipantRole(ctx, rm.ID, targetIdentity, livekit.RoleSpeaker); err != nil {
+	// 3. Atomically update DB role with CAS (prevents stale updates)
+	if err := s.repo.UpdateParticipantRoleCAS(ctx, rm.ID, targetIdentity, prevRole, livekit.RoleSpeaker); err != nil {
 		return fmt.Errorf("failed to persist role update: %w", err)
 	}
 
+	// 4. LiveKit RPC without holding database transactions open
 	if s.roomManager != nil {
 		if err := s.roomManager.PromoteToSpeaker(rpcCtx, normCode, targetIdentity); err != nil {
-			// Roll back database role update to prevent state divergence
-			rbErr := s.repo.UpdateParticipantRole(ctx, rm.ID, targetIdentity, prevRole)
+			// Roll back database role update using CAS to prevent state divergence
+			rbErr := s.repo.UpdateParticipantRoleCAS(ctx, rm.ID, targetIdentity, livekit.RoleSpeaker, prevRole)
 			if s.auditService != nil {
 				s.auditService.Record(ctx, audit.AuditParams{
 					EventType: "room.sfu_sync_failed",
@@ -798,8 +805,8 @@ func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.Us
 }
 
 // DemoteSpeaker allows a room host to revoke speaker privileges from a participant in real-time.
-// This serializes concurrent mutations per participant, resets the persistent role to participant,
-// and revokes media publication permissions on LiveKit SFU with explicit rollback and timeouts.
+// This serializes concurrent mutations across distributed API instances using PostgreSQL leases,
+// resets the persistent role to participant with CAS, and revokes media publication permissions on LiveKit SFU.
 func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.User, targetIdentity, clientIP, reqID string) error {
 	normCode := NormalizeCode(code)
 	rm, err := s.repo.GetRoomByCode(ctx, normCode)
@@ -814,11 +821,14 @@ func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.Use
 		return errors.New("cannot change role of room host")
 	}
 
-	// Serialize concurrent state mutations for this participant
-	unlock := s.lockParticipant(rm.ID + ":" + targetIdentity)
+	// 1. Acquire distributed lock across API instances (10s TTL)
+	unlock, err := s.repo.AcquireParticipantLock(ctx, rm.ID, targetIdentity, s.instanceID, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to acquire distributed lock: %w", err)
+	}
 	defer unlock()
 
-	// Verify participant is an active participant of this room
+	// 2. Fetch authoritative database state under lock
 	part, err := s.repo.GetParticipant(ctx, rm.ID, targetIdentity)
 	if err != nil || part == nil || part.LeftAt != nil {
 		return ErrParticipantNotFoundInRoom
@@ -842,14 +852,16 @@ func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.Use
 		return nil
 	}
 
-	if err := s.repo.UpdateParticipantRole(ctx, rm.ID, targetIdentity, livekit.RoleParticipant); err != nil {
+	// 3. Atomically update DB role with CAS (prevents stale updates)
+	if err := s.repo.UpdateParticipantRoleCAS(ctx, rm.ID, targetIdentity, prevRole, livekit.RoleParticipant); err != nil {
 		return fmt.Errorf("failed to persist role update: %w", err)
 	}
 
+	// 4. LiveKit RPC
 	if s.roomManager != nil {
 		if err := s.roomManager.DemoteToParticipant(rpcCtx, normCode, targetIdentity); err != nil {
-			// Roll back database role update to prevent state divergence
-			rbErr := s.repo.UpdateParticipantRole(ctx, rm.ID, targetIdentity, prevRole)
+			// Roll back database role update using CAS to prevent state divergence
+			rbErr := s.repo.UpdateParticipantRoleCAS(ctx, rm.ID, targetIdentity, livekit.RoleParticipant, prevRole)
 			if s.auditService != nil {
 				s.auditService.Record(ctx, audit.AuditParams{
 					EventType: "room.sfu_sync_failed",
@@ -883,7 +895,7 @@ func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.Use
 }
 
 // ReconcileParticipant synchronizes LiveKit SFU permissions to match authoritative PostgreSQL database role.
-// Used for backend restart recovery and self-healing after transient network partitions.
+// Used for backend restart recovery, transient partition healing, and distributed instance synchronization.
 func (s *Service) ReconcileParticipant(ctx context.Context, code, identity string) error {
 	normCode := NormalizeCode(code)
 	rm, err := s.repo.GetRoomByCode(ctx, normCode)
@@ -891,7 +903,10 @@ func (s *Service) ReconcileParticipant(ctx context.Context, code, identity strin
 		return ErrRoomNotFound
 	}
 
-	unlock := s.lockParticipant(rm.ID + ":" + identity)
+	unlock, err := s.repo.AcquireParticipantLock(ctx, rm.ID, identity, s.instanceID, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to acquire distributed lock for reconciliation: %w", err)
+	}
 	defer unlock()
 
 	part, err := s.repo.GetParticipant(ctx, rm.ID, identity)
@@ -907,9 +922,15 @@ func (s *Service) ReconcileParticipant(ctx context.Context, code, identity strin
 	defer cancel()
 
 	if part.Role == livekit.RoleSpeaker || part.Role == livekit.RoleHost {
-		return s.roomManager.PromoteToSpeaker(rpcCtx, normCode, identity)
+		if err := s.roomManager.PromoteToSpeaker(rpcCtx, normCode, identity); err != nil {
+			return fmt.Errorf("%w: %v", ErrSFUSyncFailed, err)
+		}
+		return nil
 	}
-	return s.roomManager.DemoteToParticipant(rpcCtx, normCode, identity)
+	if err := s.roomManager.DemoteToParticipant(rpcCtx, normCode, identity); err != nil {
+		return fmt.Errorf("%w: %v", ErrSFUSyncFailed, err)
+	}
+	return nil
 }
 
 // ReconcileRoom iterates all active participants of a room and ensures LiveKit SFU matches PostgreSQL state.

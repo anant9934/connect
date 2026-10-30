@@ -21,6 +21,8 @@ var (
 	ErrParticipantNotFoundInRoom = errors.New("participant not found in active room")
 	ErrSFUSyncFailed             = errors.New("failed to synchronize permissions with media server")
 	ErrDatabaseRollbackFailed    = errors.New("critical state desynchronization: failed to rollback database role after SFU error")
+	ErrLockBusy                  = errors.New("participant lock is currently held by another instance")
+	ErrStaleRoleUpdate           = errors.New("concurrent modification detected: participant role state is stale")
 )
 
 // Policy enforces backend-authoritative room permissions and IDOR prevention.

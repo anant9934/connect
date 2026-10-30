@@ -79,6 +79,8 @@ type Repository interface {
 	GetActiveParticipantCount(ctx context.Context, roomID string) (int, error)
 	MarkParticipantLeft(ctx context.Context, roomID, identity string, leftAt time.Time) error
 	UpdateParticipantRole(ctx context.Context, roomID, identity, role string) error
+	UpdateParticipantRoleCAS(ctx context.Context, roomID, identity, expectedRole, newRole string) error
+	AcquireParticipantLock(ctx context.Context, roomID, identity, ownerID string, ttl time.Duration) (func(), error)
 	CreateAdmissionRequest(ctx context.Context, req *AdmissionRequest) error
 	GetAdmissionRequest(ctx context.Context, roomID, identity string) (*AdmissionRequest, error)
 	GetPendingAdmissionRequests(ctx context.Context, roomID string) ([]*AdmissionRequest, error)
@@ -266,6 +268,84 @@ func (r *PgxRepository) UpdateParticipantRole(ctx context.Context, roomID, ident
 	return err
 }
 
+func (r *PgxRepository) UpdateParticipantRoleCAS(ctx context.Context, roomID, identity, expectedRole, newRole string) error {
+	query := `
+		UPDATE room_participants
+		SET role = $1
+		WHERE room_id = $2 AND identity = $3 AND left_at IS NULL AND role = $4
+	`
+	cmdTag, err := r.pool.Exec(ctx, query, newRole, roomID, identity, expectedRole)
+	if err != nil {
+		return err
+	}
+	if cmdTag.RowsAffected() == 0 {
+		return ErrStaleRoleUpdate
+	}
+	return nil
+}
+
+func (r *PgxRepository) AcquireParticipantLock(ctx context.Context, roomID, identity, ownerID string, ttl time.Duration) (func(), error) {
+	lockKey := roomID + ":" + identity
+	now := time.Now().UTC()
+	expiresAt := now.Add(ttl)
+
+	// Ensure table exists idempotently
+	initQuery := `
+		CREATE TABLE IF NOT EXISTS participant_locks (
+			lock_key VARCHAR(128) PRIMARY KEY,
+			owner_id VARCHAR(64) NOT NULL,
+			acquired_at TIMESTAMPTZ NOT NULL,
+			expires_at TIMESTAMPTZ NOT NULL
+		);
+	`
+	_, _ = r.pool.Exec(ctx, initQuery)
+
+	query := `
+		INSERT INTO participant_locks (lock_key, owner_id, acquired_at, expires_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (lock_key) DO UPDATE
+		SET owner_id = EXCLUDED.owner_id,
+		    acquired_at = EXCLUDED.acquired_at,
+		    expires_at = EXCLUDED.expires_at
+		WHERE participant_locks.expires_at < $3
+		RETURNING lock_key;
+	`
+
+	deadline := time.Now().Add(4 * time.Second)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+
+	for {
+		var returnedKey string
+		err := r.pool.QueryRow(ctx, query, lockKey, ownerID, now, expiresAt).Scan(&returnedKey)
+		if err == nil && returnedKey != "" {
+			released := false
+			return func() {
+				if released {
+					return
+				}
+				released = true
+				relCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				_, _ = r.pool.Exec(relCtx, "DELETE FROM participant_locks WHERE lock_key = $1 AND owner_id = $2", lockKey, ownerID)
+			}, nil
+		}
+
+		if time.Now().After(deadline) {
+			return nil, ErrLockBusy
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+			now = time.Now().UTC()
+			expiresAt = now.Add(ttl)
+		}
+	}
+}
+
 func (r *PgxRepository) CreateAdmissionRequest(ctx context.Context, req *AdmissionRequest) error {
 	if req.ID == "" {
 		req.ID = uuid.NewString()
@@ -404,9 +484,16 @@ func (r *PgxRepository) GetMeetingHistory(ctx context.Context, userID string, li
 	return items, total, rows.Err()
 }
 
+type memParticipantLock struct {
+	ownerID   string
+	expiresAt time.Time
+}
+
 // MemoryRepository provides concurrent safe in-memory storage for rooms.
 type MemoryRepository struct {
 	mu                sync.RWMutex
+	lockMu            sync.Mutex
+	partLocks         map[string]memParticipantLock
 	roomsByID         map[string]*Room
 	roomsByCode       map[string]*Room
 	participants      map[string][]*Participant      // key: roomID
@@ -417,6 +504,7 @@ type MemoryRepository struct {
 // NewMemoryRepository constructs an in-memory repository instance.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
+		partLocks:         make(map[string]memParticipantLock),
 		roomsByID:         make(map[string]*Room),
 		roomsByCode:       make(map[string]*Room),
 		participants:      make(map[string][]*Participant),
@@ -588,6 +676,66 @@ func (m *MemoryRepository) UpdateParticipantRole(_ context.Context, roomID, iden
 		}
 	}
 	return nil
+}
+
+func (m *MemoryRepository) UpdateParticipantRoleCAS(_ context.Context, roomID, identity, expectedRole, newRole string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, p := range m.participants[roomID] {
+		if p.Identity == identity && p.LeftAt == nil {
+			if p.Role != expectedRole {
+				return ErrStaleRoleUpdate
+			}
+			p.Role = newRole
+			return nil
+		}
+	}
+	return ErrParticipantNotFoundInRoom
+}
+
+func (m *MemoryRepository) AcquireParticipantLock(ctx context.Context, roomID, identity, ownerID string, ttl time.Duration) (func(), error) {
+	lockKey := roomID + ":" + identity
+	deadline := time.Now().Add(4 * time.Second)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+
+	for {
+		now := time.Now().UTC()
+		m.lockMu.Lock()
+		cur, exists := m.partLocks[lockKey]
+		if !exists || now.After(cur.expiresAt) {
+			m.partLocks[lockKey] = memParticipantLock{
+				ownerID:   ownerID,
+				expiresAt: now.Add(ttl),
+			}
+			m.lockMu.Unlock()
+
+			released := false
+			return func() {
+				m.lockMu.Lock()
+				defer m.lockMu.Unlock()
+				if !released {
+					released = true
+					if l, ok := m.partLocks[lockKey]; ok && l.ownerID == ownerID {
+						delete(m.partLocks, lockKey)
+					}
+				}
+			}, nil
+		}
+		m.lockMu.Unlock()
+
+		if time.Now().After(deadline) {
+			return nil, ErrLockBusy
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
 }
 
 func (m *MemoryRepository) CreateAdmissionRequest(_ context.Context, req *AdmissionRequest) error {

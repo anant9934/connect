@@ -91,13 +91,16 @@ type RoomManager struct {
 	apiSecret string
 }
 
-// NewRoomManager constructs a RoomManager instance targeting the configured LiveKit SFU.
-func NewRoomManager(livekitURL, apiKey, apiSecret string) *RoomManager {
+// NewRoomManagerWithTransport constructs a RoomManager instance with a custom HTTP roundtripper for mocking and testing.
+func NewRoomManagerWithTransport(livekitURL, apiKey, apiSecret string, baseTransport http.RoundTripper) *RoomManager {
 	if apiKey == "" || apiSecret == "" || livekitURL == "" {
 		return &RoomManager{
 			apiKey:    apiKey,
 			apiSecret: apiSecret,
 		}
+	}
+	if baseTransport == nil {
+		baseTransport = http.DefaultTransport
 	}
 
 	// Normalize WebSocket URL to HTTP URL for Twirp RPC
@@ -108,7 +111,7 @@ func NewRoomManager(livekitURL, apiKey, apiSecret string) *RoomManager {
 	httpClient := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &authTransport{
-			base:      http.DefaultTransport,
+			base:      baseTransport,
 			apiKey:    apiKey,
 			apiSecret: apiSecret,
 		},
@@ -119,6 +122,11 @@ func NewRoomManager(livekitURL, apiKey, apiSecret string) *RoomManager {
 		apiKey:    apiKey,
 		apiSecret: apiSecret,
 	}
+}
+
+// NewRoomManager constructs a RoomManager instance targeting the configured LiveKit SFU.
+func NewRoomManager(livekitURL, apiKey, apiSecret string) *RoomManager {
+	return NewRoomManagerWithTransport(livekitURL, apiKey, apiSecret, http.DefaultTransport)
 }
 
 // GenerateDiscoveryToken creates a least-privilege token restricted strictly to listing rooms.
