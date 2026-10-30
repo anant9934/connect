@@ -453,10 +453,24 @@ func (s *Service) GenerateToken(ctx context.Context, code string, user *auth.Use
 		}
 	}
 
+	var role string
+	if isHost {
+		role = livekit.RoleHost
+	} else {
+		// Authoritatively derive participant role from database state; never trust client
+		p, err := s.repo.GetParticipant(ctx, rm.ID, identity)
+		if err == nil && p != nil && p.Role != "" {
+			role = p.Role
+		} else {
+			role = livekit.RoleParticipant
+		}
+	}
+
 	token, err := s.tokenService.GenerateToken(livekit.GrantParams{
 		RoomCode:    rm.PublicCode,
 		Identity:    identity,
 		DisplayName: displayName,
+		Role:        role,
 		IsHost:      isHost,
 		ValidFor:    10 * time.Minute,
 	})
