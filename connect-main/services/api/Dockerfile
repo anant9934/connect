@@ -3,7 +3,7 @@
 # ==============================================================================
 
 # Stage 1: Build binary
-FROM golang:1.23-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 WORKDIR /build
 
