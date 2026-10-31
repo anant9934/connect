@@ -13,13 +13,13 @@ CREATE SCHEMA IF NOT EXISTS connect_auth;
 
 -- Provision the runtime role before any GRANT/REVOKE references it.
 -- This migration must run with CREATEROLE (or superuser) privileges.
-DO $
+DO $role$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'connect_app') THEN
         CREATE ROLE connect_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
     END IF;
 END
-$;
+$role$;
 
 REVOKE ALL ON SCHEMA connect_auth FROM PUBLIC;
 REVOKE CREATE ON SCHEMA connect_auth FROM PUBLIC, connect_app;
