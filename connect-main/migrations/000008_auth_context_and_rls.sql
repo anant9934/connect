@@ -101,7 +101,7 @@ BEGIN
 
     -- 4. Bind to Current 64-bit Transaction ID & Expiration Window
     v_xid := pg_catalog.pg_current_xact_id()::TEXT;
-    v_exp := pg_catalog.extract(epoch FROM (pg_catalog.clock_timestamp() + INTERVAL '10 minutes'))::BIGINT;
+    v_exp := EXTRACT(epoch FROM (pg_catalog.clock_timestamp() + INTERVAL '10 minutes'))::BIGINT;
 
     -- 5. Retrieve Internal Secret & Compute HMAC-SHA256 Signature
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
@@ -148,7 +148,7 @@ BEGIN
     END IF;
 
     -- Verify expiration
-    IF pg_catalog.extract(epoch FROM pg_catalog.clock_timestamp()) > v_exp::BIGINT THEN
+    IF EXTRACT(epoch FROM pg_catalog.clock_timestamp()) > v_exp::BIGINT THEN
         RETURN NULL; -- Fail closed: Expired context
     END IF;
 
@@ -193,7 +193,7 @@ BEGIN
         RETURN NULL;
     END IF;
 
-    IF pg_catalog.extract(epoch FROM pg_catalog.clock_timestamp()) > v_exp::BIGINT THEN
+    IF EXTRACT(epoch FROM pg_catalog.clock_timestamp()) > v_exp::BIGINT THEN
         RETURN NULL;
     END IF;
 
@@ -233,7 +233,7 @@ BEGIN
         RETURN false;
     END IF;
 
-    IF pg_catalog.extract(epoch FROM pg_catalog.clock_timestamp()) > v_exp::BIGINT THEN
+    IF EXTRACT(epoch FROM pg_catalog.clock_timestamp()) > v_exp::BIGINT THEN
         RETURN false;
     END IF;
 
