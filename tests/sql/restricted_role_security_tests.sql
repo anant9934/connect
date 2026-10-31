@@ -19,7 +19,8 @@ DECLARE
     v_token_a VARCHAR(64) := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     v_token_b VARCHAR(64) := 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
     v_token_auditor VARCHAR(64) := '3333333333333333333333333333333333333333333333333333333333333333';
-    v_room_commons UUID := 'cccccccc-cccc-cccc-cccc-cccccccccccc'::UUID;
+    v_room_commons_private UUID := 'cccccccc-cccc-cccc-cccc-cccccccccccc'::UUID;
+    v_room_commons_shared UUID := 'c1111111-1111-1111-1111-111111111111'::UUID;
     v_department_a UUID := 'dddddddd-dddd-dddd-dddd-dddddddddddd'::UUID;
     v_department_b UUID := 'd2222222-2222-2222-2222-222222222222'::UUID;
     v_note_private UUID := 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'::UUID;
@@ -27,13 +28,16 @@ DECLARE
 BEGIN
     RAISE NOTICE 'Setting up multi-tenant test fixtures under trusted setup role...';
 
-    -- Ensure application role has necessary DML rights on domain tables (RLS will gate row visibility)
+    -- Ensure application role has necessary DML rights on domain tables while strictly preserving immutability revokes
     GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO connect_app;
+    REVOKE UPDATE, DELETE ON attendance_overrule_audit_log FROM connect_app;
+    REVOKE UPDATE, DELETE ON participant_connection_events FROM connect_app;
+    REVOKE DELETE ON attendance_records FROM connect_app;
 
     -- Clean up prior test data if exists
     DELETE FROM attendance_overrule_audit_log WHERE organization_id IN (v_org_a, v_org_b);
     DELETE FROM meeting_notes WHERE id IN (v_note_private, v_note_shared);
-    DELETE FROM rooms WHERE id = v_room_commons;
+    DELETE FROM rooms WHERE id IN (v_room_commons_private, v_room_commons_shared);
     DELETE FROM courses WHERE organization_id IN (v_org_a, v_org_b);
     DELETE FROM departments WHERE organization_id IN (v_org_a, v_org_b);
     DELETE FROM organization_memberships WHERE organization_id IN (v_org_a, v_org_b);
@@ -47,10 +51,10 @@ BEGIN
     (v_org_b, 'Tenant Beta Institute', 'tenant-beta');
 
     -- 2. Users & Sessions
-    INSERT INTO users (id, email, password_hash, status) VALUES
-    (v_user_a, 'alice@alpha.edu', 'hash_a', 'active'),
-    (v_user_b, 'bob@beta.edu', 'hash_b', 'active'),
-    (v_user_auditor, 'auditor@alpha.edu', 'hash_auditor', 'active');
+    INSERT INTO users (id, email_normalized, display_name, password_hash, status) VALUES
+    (v_user_a, 'alice@alpha.edu', 'Alice Alpha', 'hash_a', 'active'),
+    (v_user_b, 'bob@beta.edu', 'Bob Beta', 'hash_b', 'active'),
+    (v_user_auditor, 'auditor@alpha.edu', 'Auditor Alpha', 'hash_auditor', 'active');
 
     INSERT INTO sessions (user_id, token_hash, expires_at) VALUES
     (v_user_a, v_token_a, clock_timestamp() + INTERVAL '1 hour'),
@@ -72,13 +76,14 @@ BEGIN
     (gen_random_uuid(), v_org_a, v_department_a, 'CS401', 'Distributed Systems'),
     (gen_random_uuid(), v_org_b, v_department_b, 'ME201', 'Thermodynamics');
 
-    -- 5. Personal Commons Room & Notes Created by Alice
-    INSERT INTO rooms (id, title, host_user_id, workspace_type, is_locked)
-    VALUES (v_room_commons, 'Alice Open Research Room', v_user_a, 'personal_commons', false);
+    -- 5. Personal Commons Rooms & Notes Created by Alice
+    INSERT INTO rooms (id, public_code, host_user_id, workspace_type, is_locked) VALUES
+    (v_room_commons_private, 'alice-commons-private', v_user_a, 'personal_commons', false),
+    (v_room_commons_shared, 'alice-commons-shared', v_user_a, 'personal_commons', false);
 
-    INSERT INTO meeting_notes (id, room_id, created_by, title, content, visibility) VALUES
-    (v_note_private, v_room_commons, v_user_a, 'Alice Private Notes', 'Private Alice Research', 'private'),
-    (v_note_shared, v_room_commons, v_user_a, 'Alice Shared Notes', 'Publicly Readable Research', 'shared');
+    INSERT INTO meeting_notes (id, room_id, created_by, created_by_identity, updated_by_identity, title, content, visibility) VALUES
+    (v_note_private, v_room_commons_private, v_user_a, 'alice-ident', 'alice-ident', 'Alice Private Notes', 'Private Alice Research', 'private'),
+    (v_note_shared, v_room_commons_shared, v_user_a, 'alice-ident', 'alice-ident', 'Alice Shared Notes', 'Publicly Readable Research', 'shared');
 
     RAISE NOTICE '✓ [PASS] Fixtures successfully created.';
 END $$;
@@ -385,12 +390,13 @@ DECLARE
     v_token_a VARCHAR(64) := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     v_token_b VARCHAR(64) := 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
     v_token_auditor VARCHAR(64) := '3333333333333333333333333333333333333333333333333333333333333333';
-    v_room_commons UUID := 'cccccccc-cccc-cccc-cccc-cccccccccccc'::UUID;
+    v_room_commons_private UUID := 'cccccccc-cccc-cccc-cccc-cccccccccccc'::UUID;
+    v_room_commons_shared UUID := 'c1111111-1111-1111-1111-111111111111'::UUID;
     v_note_private UUID := 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'::UUID;
     v_note_shared UUID := 'ffffffff-ffff-ffff-ffff-ffffffffffff'::UUID;
 BEGIN
     DELETE FROM meeting_notes WHERE id IN (v_note_private, v_note_shared);
-    DELETE FROM rooms WHERE id = v_room_commons;
+    DELETE FROM rooms WHERE id IN (v_room_commons_private, v_room_commons_shared);
     DELETE FROM courses WHERE organization_id IN (v_org_a, v_org_b);
     DELETE FROM departments WHERE organization_id IN (v_org_a, v_org_b);
     DELETE FROM organization_memberships WHERE organization_id IN (v_org_a, v_org_b);
@@ -398,5 +404,5 @@ BEGIN
     DELETE FROM users WHERE id IN (v_user_a, v_user_b, v_user_auditor);
     DELETE FROM organizations WHERE id IN (v_org_a, v_org_b);
     RAISE NOTICE '✓ [CLEANUP] Multi-tenant test fixtures cleaned up.';
-    RAISE NOTICE 'ALL RESTRICTED-ROLE SECURITY TESTS UNDER connect_app PASSED 100%!';
+    RAISE NOTICE 'ALL RESTRICTED-ROLE SECURITY TESTS UNDER connect_app PASSED 100%%!';
 END $$;

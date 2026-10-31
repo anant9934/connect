@@ -74,14 +74,14 @@ jobs:
         if: hashFiles('connect-main/apps/web/package.json', 'connect-main/apps/mobile/package.json') != ''
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Run Web Tests & Checks
         if: hashFiles('connect-main/apps/web/package.json') != ''
         run: |
           cd connect-main/apps/web
           npm ci || npm install
-          if npm run | grep -q 'test'; then npm test -- --run; fi
+          if npm run | grep -q 'test'; then npm test; fi
 
       - name: Run Mobile Tests & Checks
         if: hashFiles('connect-main/apps/mobile/package.json') != ''
@@ -138,4 +138,18 @@ jobs:
         run: |
           chmod +x scripts/test_pg16_migrations.sh
           ./scripts/test_pg16_migrations.sh
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: connect-main/services/api/go.sum
+
+      - name: Run Go Database Integration Tests on PostgreSQL 16
+        env:
+          REQUIRE_TEST_DATABASE: "true"
+          TEST_DATABASE_URL: "postgres://connect_admin:connect_disposable_ci_password_456@localhost:5432/connect_test_ci_runner?sslmode=disable"
+        run: |
+          cd connect-main/services/api
+          go test -v -race -run 'TestPostgres_.*' ./internal/room/...
 

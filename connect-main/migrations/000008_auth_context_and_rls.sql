@@ -458,6 +458,15 @@ ALTER TABLE attendance_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_records FORCE ROW LEVEL SECURITY;
 ALTER TABLE rooms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rooms FORCE ROW LEVEL SECURITY;
+ALTER TABLE meeting_notes
+    ADD COLUMN IF NOT EXISTS visibility VARCHAR(32) NOT NULL DEFAULT 'private',
+    ALTER COLUMN created_by_identity SET DEFAULT '',
+    ALTER COLUMN updated_by_identity SET DEFAULT '';
+
+ALTER TABLE meeting_files
+    ADD COLUMN IF NOT EXISTS uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT false;
+
 ALTER TABLE meeting_notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE meeting_notes FORCE ROW LEVEL SECURITY;
 ALTER TABLE meeting_files ENABLE ROW LEVEL SECURITY;
@@ -796,9 +805,10 @@ CREATE POLICY rls_allocations_select ON faculty_allocations
                 faculty_user_id = connect_auth.current_user_id() OR
                 EXISTS (
                     SELECT 1 FROM course_enrollments ce
-                    WHERE ce.course_batch_id = faculty_allocations.course_batch_id
+                    JOIN course_batches cb ON cb.id = ce.batch_id
+                    WHERE cb.course_id = faculty_allocations.course_id
                       AND ce.student_user_id = connect_auth.current_user_id()
-                      AND ce.status = 'active'
+                      AND ce.status = 'enrolled'
                 )
             )
         )
@@ -813,9 +823,8 @@ CREATE POLICY rls_allocations_insert ON faculty_allocations
             (
                 connect_auth.current_role() = 'institution_admin' OR
                 EXISTS (
-                    SELECT 1 FROM public.course_batches cb
-                    JOIN public.courses c ON c.id = cb.course_id
-                    WHERE cb.id = faculty_allocations.course_batch_id
+                    SELECT 1 FROM public.courses c
+                    WHERE c.id = faculty_allocations.course_id
                       AND connect_auth.is_department_coordinator(c.department_id)
                 )
             )
@@ -831,9 +840,8 @@ CREATE POLICY rls_allocations_update ON faculty_allocations
             (
                 connect_auth.current_role() = 'institution_admin' OR
                 EXISTS (
-                    SELECT 1 FROM public.course_batches cb
-                    JOIN public.courses c ON c.id = cb.course_id
-                    WHERE cb.id = faculty_allocations.course_batch_id
+                    SELECT 1 FROM public.courses c
+                    WHERE c.id = faculty_allocations.course_id
                       AND connect_auth.is_department_coordinator(c.department_id)
                 )
             )
@@ -846,9 +854,8 @@ CREATE POLICY rls_allocations_update ON faculty_allocations
             (
                 connect_auth.current_role() = 'institution_admin' OR
                 EXISTS (
-                    SELECT 1 FROM public.course_batches cb
-                    JOIN public.courses c ON c.id = cb.course_id
-                    WHERE cb.id = faculty_allocations.course_batch_id
+                    SELECT 1 FROM public.courses c
+                    WHERE c.id = faculty_allocations.course_id
                       AND connect_auth.is_department_coordinator(c.department_id)
                 )
             )
@@ -884,7 +891,8 @@ CREATE POLICY rls_enrollments_select ON course_enrollments
                 connect_auth.is_department_coordinator() OR
                 EXISTS (
                     SELECT 1 FROM faculty_allocations fa
-                    WHERE fa.course_batch_id = course_enrollments.course_batch_id
+                    JOIN course_batches cb ON cb.course_id = fa.course_id
+                    WHERE cb.id = course_enrollments.batch_id
                       AND fa.faculty_user_id = connect_auth.current_user_id()
                 )
             )
@@ -902,7 +910,7 @@ CREATE POLICY rls_enrollments_insert ON course_enrollments
                 EXISTS (
                     SELECT 1 FROM public.course_batches cb
                     JOIN public.courses c ON c.id = cb.course_id
-                    WHERE cb.id = course_enrollments.course_batch_id
+                    WHERE cb.id = course_enrollments.batch_id
                       AND connect_auth.is_department_coordinator(c.department_id)
                 )
             )
@@ -920,7 +928,7 @@ CREATE POLICY rls_enrollments_update ON course_enrollments
                 EXISTS (
                     SELECT 1 FROM public.course_batches cb
                     JOIN public.courses c ON c.id = cb.course_id
-                    WHERE cb.id = course_enrollments.course_batch_id
+                    WHERE cb.id = course_enrollments.batch_id
                       AND connect_auth.is_department_coordinator(c.department_id)
                 )
             )
@@ -935,7 +943,7 @@ CREATE POLICY rls_enrollments_update ON course_enrollments
                 EXISTS (
                     SELECT 1 FROM public.course_batches cb
                     JOIN public.courses c ON c.id = cb.course_id
-                    WHERE cb.id = course_enrollments.course_batch_id
+                    WHERE cb.id = course_enrollments.batch_id
                       AND connect_auth.is_department_coordinator(c.department_id)
                 )
             )
@@ -975,9 +983,9 @@ CREATE POLICY rls_sessions_select ON class_sessions
                 ) OR
                 EXISTS (
                     SELECT 1 FROM course_enrollments ce
-                    WHERE ce.course_batch_id = class_sessions.course_batch_id
+                    WHERE ce.batch_id = class_sessions.batch_id
                       AND ce.student_user_id = connect_auth.current_user_id()
-                      AND ce.status = 'active'
+                      AND ce.status = 'enrolled'
                 )
             )
         )
