@@ -295,6 +295,16 @@ CREATE POLICY rls_tenant_courses ON courses
         organization_id = connect_auth.current_org_id()
     );
 
+-- Permissive read access for authenticated active members of the selected tenant.
+-- authenticate_session() only establishes this context after validating active membership.
+CREATE POLICY rls_departments_select_member ON departments
+    AS PERMISSIVE FOR SELECT
+    USING (organization_id = connect_auth.current_org_id());
+
+CREATE POLICY rls_courses_select_member ON courses
+    AS PERMISSIVE FOR SELECT
+    USING (organization_id = connect_auth.current_org_id());
+
 CREATE POLICY rls_tenant_batches ON course_batches
     AS RESTRICTIVE USING (
         connect_auth.is_super_admin() OR
