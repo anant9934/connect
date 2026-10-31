@@ -15,16 +15,26 @@
 ```text
 ========================================================================================
                                 FINAL VERDICT:
-                 BLOCKED — WORKER SERVICE ABSENT FROM RENDER
+                   BLOCKED — OWNER BILLING ACTION REQUIRED
+                 (Payment Method Required on Render for Worker)
 ========================================================================================
 ```
 
 ### Executive Summary
-While the background worker code (`cmd/worker/main.go`, `internal/worker/runner.go`), multi-binary Dockerfile, and `render.yaml` specification have been pushed to `main` at commit `48cd105b97d3e24095a4e5cbd84d6fb49a4e2f60`, **no background worker service exists or runs on Render**.
+While the background worker code (`cmd/worker/main.go`, `internal/worker/runner.go`), multi-binary Dockerfile, and `render.yaml` specification have been pushed to `main` at commit `854feddc9d2b391de89406d0d512480d71c2761d`, **the background worker service cannot be provisioned due to an external Render billing prerequisite**.
 
-Direct inspection of the Render account via the Render Management API (`GET /services`) confirmed that **only one service exists**: the HTTP API web service (`connect`, `srv-dbj507nlk1mc73897go0`). No worker service or blueprint has been instantiated.
+Automated provisioning of `tathastu-connect-worker` was attempted via the Render Management API (`POST /v1/services` with `type: background_worker`, `plan: starter`, `region: ohio`, `dockerCommand: /app/worker`). The Render API rejected the creation with:
+```json
+{
+  "message": "Payment information is required to complete this request. To add a card, visit https://dashboard.render.com/billing"
+}
+```
 
-Empirical end-to-end probing confirmed this reality: a live test job (`system.audit_ping`) enqueued directly into the production PostgreSQL database remained stranded in `pending` status with `locked_by = NULL` and `fencing_token = 0` until manually cleaned up. **No deployed worker daemon is polling or processing background jobs in production.**
+Render strictly restricts free tier plans to `web_service` only (`{"message": "only web services allowed for plan"}`). Background workers require a paid tier plan (`starter` at $7/mo minimum), which requires a valid payment method on file in the workspace account (`tea-dbib05ss728c73cra4pg`).
+
+Per safety instructions, no duplicate web service was created, and no existing API service configuration was altered. Until a payment method is added to the Render workspace, the dedicated background worker cannot be instantiated.
+
+An automated provisioner script has been created at `scripts/provision_render_worker.sh` that pulls configuration directly from the API service and deploys the worker in one command as soon as billing is activated.
 
 ---
 
@@ -156,27 +166,26 @@ Current state queried directly from Neon PostgreSQL:
 
 To transition the Background Worker subsystem from `BLOCKED` to `PASS`:
 
-### Immediate Action Required
-**Deploy the `tathastu-connect-worker` service on Render:**
+### Immediate Owner Action Required: Add Payment Method to Render
 
-1. **Option A (Via Render Dashboard):**
-   - In Render Dashboard, click **New +** -> **Background Worker**.
-   - Connect repository `https://github.com/anant9934/connect` (branch `main`).
-   - Set **Runtime**: `Docker`.
-   - Set **Root Directory**: `connect-main/services/api`.
-   - Set **Dockerfile Path**: `./Dockerfile`.
-   - Set **Docker Command**: `/app/worker`.
-   - Add Environment Variables:
-     - `APP_ENV` = `production`
-     - `DATABASE_URL` = `[Neon PostgreSQL connection string]`
-     - `LOG_LEVEL` = `info`
-     - `WORKER_CONCURRENCY` = `5`
-     - `WORKER_POLL_INTERVAL` = `1s`
-     - `WORKER_LEASE_TTL` = `30s`
-     - `STORAGE_PROVIDER` = `r2`
-     - `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_REGION` = `[R2 credentials]`
+1. **Add Payment Card on Render:**
+   - Go to `https://dashboard.render.com/billing` for workspace **Anant's workspace** (`tea-dbib05ss728c73cra4pg`).
+   - Add a valid payment method (required for Render background worker `starter` plan at \$7/month).
 
-2. **Option B (Via Render Blueprints):**
-   - In Render Dashboard, click **New +** -> **Blueprint**.
-   - Select repository `https://github.com/anant9934/connect`.
-   - Render will parse `render.yaml` and provision `tathastu-connect-worker` alongside `tathastu-connect-api`.
+2. **Execute Automated Provisioner:**
+   - Once billing information is added, run the pre-built provisioner script:
+     ```bash
+     ./scripts/provision_render_worker.sh
+     ```
+   - This script automatically:
+     - Extracts all required `DATABASE_URL` and `R2_*` configuration from `srv-dbj507nlk1mc73897go0`.
+     - Creates `tathastu-connect-worker` (`type: background_worker`, `plan: starter`, `region: ohio`, `dockerCommand: /app/worker`).
+     - Injects all worker environment variables securely.
+     - Triggers the initial build and deploy.
+
+3. **Verify Live Job Processing:**
+   - Once the worker deployment status is `live`, run the probe:
+     ```bash
+     go run ./cmd/verify_worker/main.go
+     ```
+   - Confirm the deployed worker claims and completes the job.
