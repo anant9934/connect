@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS organization_memberships (
         REFERENCES users(id) ON DELETE RESTRICT,
     CONSTRAINT fk_org_memberships_revoker FOREIGN KEY (revoked_by)
         REFERENCES users(id) ON DELETE SET NULL,
-    CONSTRAINT ck_org_memberships_role CHECK (role IN ('institution_admin', 'institution_auditor', 'institution_member')),
+    CONSTRAINT ck_org_memberships_role CHECK (role IN ('institution_admin', 'institution_auditor', 'institution_member', 'department_coordinator', 'faculty', 'student')),
     CONSTRAINT ck_org_memberships_status CHECK (status IN ('active', 'suspended', 'revoked'))
 );
 
