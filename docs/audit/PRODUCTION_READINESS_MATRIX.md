@@ -1,0 +1,79 @@
+# PRODUCTION READINESS AUDIT & VERIFICATION MATRIX
+
+**Target Environment:** Production (`main`)
+**Frontend Deployment:** `https://connect-anants-projects-38125e91.vercel.app` (Vercel)
+**Backend Deployment:** `https://connect-a2fi.onrender.com` (Render)
+**Database:** Neon PostgreSQL Pooler (`us-east-2`)
+**Cache:** Upstash Redis with TLS
+**Media SFU:** LiveKit Cloud (`wss://tathastu-connect-htzr4167.livekit.cloud`)
+**Object Storage:** Cloudflare R2 (`connect` bucket)
+**Current HEAD Commit:** `49264bd8a11bd32edcc067f0487cc965f15f7d86`
+**Audit Date:** 2026-10-31 / 2026-11-01
+**Auditor:** Principal Software Architect, Senior Go Engineer, Application Security Engineer, Database Reliability Engineer, Performance Engineer, and Production SRE
+
+---
+
+## 1. FORMAL VERDICT
+
+```text
+========================================================================================
+                                FINAL VERDICT:
+                       BLOCKED — OWNER ACTION REQUIRED
+========================================================================================
+```
+
+### Executive Summary of Verdict
+While the core live systems (Next.js frontend, Go API server, Neon PostgreSQL database, Upstash Redis TLS, and LiveKit Cloud WebRTC SFU) are **fully operational, securely configured, and pass all end-to-end integration journeys**, production sign-off cannot be granted due to one external owner-gated blocker and two architectural findings:
+
+1. **[CRITICAL BLOCKER — OWNER ACTION REQUIRED] Cloudflare R2 Token Permissions Lacking Object Write:**
+   Empirical testing via S3 API against bucket `connect` confirmed `ListObjectsV2` succeeds (`200 OK`), but `PutObject` and `DeleteObject` fail with `HTTP 403 Forbidden (AccessDenied)`. As verified in the owner's Cloudflare dashboard screenshot, the API token was generated with **"Read and List objects"** permissions only. The repository owner must generate an R2 token with **"Object Read & Write"** permissions and update `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` on Render.
+2. **[ARCHITECTURAL FINDING] Background Outbox Worker Absent from Deployment:**
+   `internal/worker/queue.go` provides transaction outbox enqueuing, atomic leasing, heartbeating, and dead-lettering (`SELECT FOR UPDATE SKIP LOCKED`), but no worker runner loop is instantiated in `cmd/server/main.go`, and no background worker service is running on Render.
+3. **[ARCHITECTURAL FINDING] Absence of LiveKit Webhook Ingestion:**
+   The backend does not register an endpoint for LiveKit Cloud webhooks (`/api/v1/livekit/webhook`), meaning ungraceful client disconnects (browser crash, sudden network drop) cannot be processed asynchronously by the server.
+
+---
+
+## 2. COMPREHENSIVE SUBSYSTEM READINESS MATRIX
+
+| Subsystem / Phase | Production Target | Deployed Status | Verified Live Functionality | Blockers / Findings | Verdict |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Phase A: Deployment Consistency** | Vercel + Render | Synced on commit `49264bd` | HTTP/2, TLS 1.3, CSP, CORS preflight, and Vercel edge reverse-proxy rewrites verified live. | None. | **PASS** |
+| **Phase B: Background Worker** | Render PaaS | Absent from runtime | Package exists (`internal/worker`), schema exists (`background_jobs`). | No runner loop instantiated in `cmd/server/main.go`. No outbox jobs currently enqueued by handlers. | **DEFECT** |
+| **Phase C: LiveKit Media SFU** | LiveKit Cloud | Live & Integrated | Room creation, least-privilege token minting, participant roles, and SFU room lifecycle verified. Defect in `DeleteRoom` grant scoping resolved in commit `49264bd`. | No webhook ingestion endpoint registered for ungraceful client drops. | **PASS (FIXED)** |
+| **Phase D: Object Storage** | Cloudflare R2 | Degraded (Read-Only) | `ListObjectsV2` succeeds (`200 OK`). Path traversal blocked (`404`). Size limit (25MB) enforced in code. | `PutObject` and `DeleteObject` fail with `HTTP 403 AccessDenied` due to token lacking write permissions. | **BLOCKED** |
+| **Phase E: Database & Cache** | Neon PG + Upstash Redis | Live & Applied | All 9 SQL migrations applied with advisory locking (27 tables). Redis TLS connection pool and sliding window rate limiting active. | None. | **PASS** |
+| **Phase F: Security Matrix** | Render Backend | Hardened & Enforced | Unauthenticated (401), invalid tokens (401), CSRF untrusted origin (403), Sec-Fetch-Site (403), BOLA/IDOR room termination & locking (403) verified live. | None. | **PASS** |
+| **Phase G: E2E User Journeys** | End-to-End Pipeline | 100% Succeeded | Signup (201) -> Session (200) -> Create Room (201) -> Join Room (200) -> Mint Token (200) -> Leave Room (200) -> End Room (200). | None. | **PASS** |
+| **Phase H: Failure & Recovery** | Infrastructure | Resilient | Readiness probe (`/health/ready`) pings DB & Redis with 2s timeout. Client token minting is in-memory HMAC (immune to LiveKit network drops). Panic recoverer active. | None. | **PASS** |
+| **Phase I: Performance** | Dual-Cloud | Benchmarked | `/health/live`: p50 534ms, p95 1.67s. `/health/ready`: p50 742ms, p95 1.19s. Memory footprint ~42MB RSS. | None. | **PASS** |
+
+---
+
+## 3. AUDIT REPORTS INDEX
+
+The full detailed evidence and execution traces for each phase are preserved in the following dedicated audit documents:
+
+1. [Phase A: Deployment Baseline & Consistency](file:///Users/quantum/Desktop/connect/docs/audit/POST_DEPLOYMENT_BASELINE.md)
+2. [Phase B: Background Worker Verification](file:///Users/quantum/Desktop/connect/docs/audit/WORKER_VERIFICATION_REPORT.md)
+3. [Phase C: LiveKit Cloud Real Session Verification](file:///Users/quantum/Desktop/connect/docs/audit/LIVEKIT_INTEGRATION_REPORT.md)
+4. [Phase D: Cloudflare R2 Object Storage Lifecycle](file:///Users/quantum/Desktop/connect/docs/audit/R2_STORAGE_VERIFICATION_REPORT.md)
+5. [Phase F: Post-Deployment Security Matrix & IDOR Audit](file:///Users/quantum/Desktop/connect/docs/audit/POST_DEPLOYMENT_SECURITY_MATRIX.md)
+6. [Phase G: Post-Deployment Functional End-to-End Tests](file:///Users/quantum/Desktop/connect/docs/audit/POST_DEPLOYMENT_FUNCTIONAL_TESTS.md)
+7. [Phase H: Downstream Failure and Recovery Testing](file:///Users/quantum/Desktop/connect/docs/audit/FAILURE_RECOVERY_REPORT.md)
+8. [Phase I: Performance Baseline and Capacity](file:///Users/quantum/Desktop/connect/docs/audit/PERFORMANCE_BASELINE.md)
+
+---
+
+## 4. OWNER ACTION ITEMS FOR FINAL SIGN-OFF
+
+To transition this deployment from `BLOCKED — OWNER ACTION REQUIRED` to `APPROVED FOR PRODUCTION`:
+
+1. **Regenerate Cloudflare R2 API Token with Write Permissions:**
+   - Go to Cloudflare Dashboard -> R2 -> Manage R2 API Tokens.
+   - Select **Object Read & Write** on bucket `connect`.
+   - Update `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` in Render service `srv-dbj507nlk1mc73897go0`.
+2. **Implement Background Worker Runner (Phase J2):**
+   - Wire a worker loop in `cmd/server/main.go` using `internal/worker/queue.go` to process background jobs.
+3. **Register LiveKit Webhook Handler (Phase J3):**
+   - Add `/api/v1/livekit/webhook` with signature verification to handle automatic participant cleanup on ungraceful disconnects.
