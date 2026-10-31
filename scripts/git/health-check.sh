@@ -220,6 +220,13 @@ if [ -n "${DIFF_CONTENT}" ]; then
     SECRET_FOUND=true
     FAILURES=$((FAILURES + 1))
   fi
+
+  # Pattern 7: Database Connection String with Embedded Credentials
+  if echo "${ADDED_LINES}" | grep -Eq '(postgres|postgresql|mysql|mongodb|redis):\/\/[a-zA-Z0-9_\-\.]+:[^@\s]+@'; then
+    log_fail "Database connection string with embedded credentials detected in diff!"
+    SECRET_FOUND=true
+    FAILURES=$((FAILURES + 1))
+  fi
 fi
 
 if [ "${SECRET_FOUND}" = false ]; then

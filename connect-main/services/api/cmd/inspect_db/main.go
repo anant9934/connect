@@ -10,7 +10,11 @@ import (
 )
 
 func main() {
-	dbURL := "postgres://postgres.zvlfwhjkjcctvsbrxjhc:aMazon%4020999999999999999@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres?sslmode=require"
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		fmt.Fprintln(os.Stderr, "Error: DATABASE_URL environment variable is required")
+		os.Exit(1)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

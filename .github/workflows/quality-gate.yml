@@ -44,6 +44,12 @@ jobs:
           fi
           echo "No sensitive files detected."
 
+      - name: Secret Scanning (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
       - name: Run Atomic Health Check
         run: |
           chmod +x scripts/git/health-check.sh

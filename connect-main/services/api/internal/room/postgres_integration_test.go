@@ -22,8 +22,6 @@ import (
 	"github.com/tathastu/connect/services/api/internal/room"
 )
 
-const defaultTestDBURL = "postgres://postgres.zvlfwhjkjcctvsbrxjhc:aMazon%4020999999999999999@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres?sslmode=require&default_query_exec_mode=simple_protocol"
-
 func setupRealPostgresPools(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool) {
 	t.Helper()
 	dbURL := os.Getenv("TEST_DATABASE_URL")
@@ -31,7 +29,10 @@ func setupRealPostgresPools(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool) {
 		dbURL = os.Getenv("DATABASE_URL")
 	}
 	if dbURL == "" {
-		dbURL = defaultTestDBURL
+		if os.Getenv("CI") != "" {
+			t.Fatal("TEST_DATABASE_URL or DATABASE_URL must be explicitly configured in CI; no fallback credentials permitted")
+		}
+		t.Skip("Skipping PostgreSQL integration test: TEST_DATABASE_URL or DATABASE_URL is not set")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -39,6 +40,9 @@ func setupRealPostgresPools(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool) {
 
 	cfg1, err := pgxpool.ParseConfig(dbURL)
 	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatalf("Invalid PostgreSQL configuration in CI: %v", err)
+		}
 		t.Skipf("Skipping real postgres test (invalid url: %v)", err)
 	}
 	cfg1.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
@@ -46,16 +50,25 @@ func setupRealPostgresPools(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool) {
 
 	pool1, err := pgxpool.NewWithConfig(ctx, cfg1)
 	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatalf("Real postgres test pool1 init failed in CI: %v", err)
+		}
 		t.Skipf("Skipping real postgres test (pool1 init failed: %v)", err)
 	}
 	if pingErr := pool1.Ping(ctx); pingErr != nil {
 		pool1.Close()
+		if os.Getenv("CI") != "" {
+			t.Fatalf("Real postgres test pool1 ping failed in CI: %v", pingErr)
+		}
 		t.Skipf("Skipping real postgres test (pool1 ping failed: %v)", pingErr)
 	}
 
 	cfg2, err := pgxpool.ParseConfig(dbURL)
 	if err != nil {
 		pool1.Close()
+		if os.Getenv("CI") != "" {
+			t.Fatalf("Invalid PostgreSQL configuration for pool2 in CI: %v", err)
+		}
 		t.Skipf("Skipping real postgres test (invalid url for pool2: %v)", err)
 	}
 	cfg2.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
@@ -64,10 +77,17 @@ func setupRealPostgresPools(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool) {
 	pool2, err := pgxpool.NewWithConfig(ctx, cfg2)
 	if err != nil {
 		pool1.Close()
+		if os.Getenv("CI") != "" {
+			t.Fatalf("Real postgres test pool2 init failed in CI: %v", err)
+		}
 		t.Skipf("Skipping real postgres test (pool2 init failed: %v)", err)
 	}
 	if pingErr := pool2.Ping(ctx); pingErr != nil {
 		pool1.Close()
+		pool2.Close()
+		if os.Getenv("CI") != "" {
+			t.Fatalf("Real postgres test pool2 ping failed in CI: %v", pingErr)
+		}
 		t.Skipf("Skipping real postgres test (pool2 ping failed: %v)", pingErr)
 	}
 
