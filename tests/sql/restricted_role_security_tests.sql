@@ -28,8 +28,11 @@ DECLARE
 BEGIN
     RAISE NOTICE 'Setting up multi-tenant test fixtures under trusted setup role...';
 
-    -- Ensure application role has necessary DML rights on domain tables (RLS will gate row visibility)
+    -- Ensure application role has necessary DML rights on domain tables while strictly preserving immutability revokes
     GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO connect_app;
+    REVOKE UPDATE, DELETE ON attendance_overrule_audit_log FROM connect_app;
+    REVOKE UPDATE, DELETE ON participant_connection_events FROM connect_app;
+    REVOKE DELETE ON attendance_records FROM connect_app;
 
     -- Clean up prior test data if exists
     DELETE FROM attendance_overrule_audit_log WHERE organization_id IN (v_org_a, v_org_b);
