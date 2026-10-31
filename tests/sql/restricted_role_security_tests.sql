@@ -15,8 +15,10 @@ DECLARE
     v_org_b UUID := 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'::UUID;
     v_user_a UUID := 'a1111111-1111-1111-1111-111111111111'::UUID;
     v_user_b UUID := 'b2222222-2222-2222-2222-222222222222'::UUID;
+    v_user_auditor UUID := 'a3333333-3333-3333-3333-333333333333'::UUID;
     v_token_a VARCHAR(64) := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     v_token_b VARCHAR(64) := 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    v_token_auditor VARCHAR(64) := '3333333333333333333333333333333333333333333333333333333333333333';
     v_room_commons UUID := 'cccccccc-cccc-cccc-cccc-cccccccccccc'::UUID;
     v_department_a UUID := 'dddddddd-dddd-dddd-dddd-dddddddddddd'::UUID;
     v_department_b UUID := 'd2222222-2222-2222-2222-222222222222'::UUID;
@@ -35,8 +37,8 @@ BEGIN
     DELETE FROM courses WHERE organization_id IN (v_org_a, v_org_b);
     DELETE FROM departments WHERE organization_id IN (v_org_a, v_org_b);
     DELETE FROM organization_memberships WHERE organization_id IN (v_org_a, v_org_b);
-    DELETE FROM sessions WHERE token_hash IN (v_token_a, v_token_b);
-    DELETE FROM users WHERE id IN (v_user_a, v_user_b);
+    DELETE FROM sessions WHERE token_hash IN (v_token_a, v_token_b, v_token_auditor);
+    DELETE FROM users WHERE id IN (v_user_a, v_user_b, v_user_auditor);
     DELETE FROM organizations WHERE id IN (v_org_a, v_org_b);
 
     -- 1. Organizations
@@ -47,21 +49,24 @@ BEGIN
     -- 2. Users & Sessions
     INSERT INTO users (id, email, password_hash, status) VALUES
     (v_user_a, 'alice@alpha.edu', 'hash_a', 'active'),
-    (v_user_b, 'bob@beta.edu', 'hash_b', 'active');
+    (v_user_b, 'bob@beta.edu', 'hash_b', 'active'),
+    (v_user_auditor, 'auditor@alpha.edu', 'hash_auditor', 'active');
 
     INSERT INTO sessions (user_id, token_hash, expires_at) VALUES
     (v_user_a, v_token_a, clock_timestamp() + INTERVAL '1 hour'),
-    (v_user_b, v_token_b, clock_timestamp() + INTERVAL '1 hour');
+    (v_user_b, v_token_b, clock_timestamp() + INTERVAL '1 hour'),
+    (v_user_auditor, v_token_auditor, clock_timestamp() + INTERVAL '1 hour');
 
     -- 3. Memberships
     INSERT INTO organization_memberships (organization_id, user_id, role, status) VALUES
     (v_org_a, v_user_a, 'institution_member', 'active'),
-    (v_org_b, v_user_b, 'institution_member', 'active');
+    (v_org_b, v_user_b, 'institution_member', 'active'),
+    (v_org_a, v_user_auditor, 'institution_auditor', 'active');
 
-    -- 4. Departments & Courses
-    INSERT INTO departments (id, organization_id, code, name) VALUES
-    (v_department_a, v_org_a, 'CS', 'Computer Science Alpha'),
-    (v_department_b, v_org_b, 'ME', 'Mechanical Engineering Beta');
+    -- 4. Departments & Courses (Alice is coordinator of Department Alpha)
+    INSERT INTO departments (id, organization_id, code, name, coordinator_user_id) VALUES
+    (v_department_a, v_org_a, 'CS', 'Computer Science Alpha', v_user_a),
+    (v_department_b, v_org_b, 'ME', 'Mechanical Engineering Beta', NULL);
 
     INSERT INTO courses (id, organization_id, department_id, code, title) VALUES
     (gen_random_uuid(), v_org_a, v_department_a, 'CS401', 'Distributed Systems'),
@@ -315,6 +320,56 @@ BEGIN
     RAISE NOTICE '✓ [PASS] Non-super-admin user sees 0 background_jobs.';
 END $$;
 
+-- Test 2.9: Department Coordinator Scoped Course Creation
+DO $$
+DECLARE
+    v_token_a VARCHAR(64) := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    v_org_a UUID := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::UUID;
+    v_department_a UUID := 'dddddddd-dddd-dddd-dddd-dddddddddddd'::UUID;
+    v_new_course_id UUID := gen_random_uuid();
+BEGIN
+    RAISE NOTICE '[ROLE: connect_app] Test 2.9: Testing Department Coordinator course creation...';
+    PERFORM * FROM connect_auth.authenticate_session(v_token_a, v_org_a);
+
+    -- Alice is coordinator of Department A: INSERT course in Department A MUST SUCCEED
+    INSERT INTO courses (id, organization_id, department_id, code, title)
+    VALUES (v_new_course_id, v_org_a, v_department_a, 'CS502', 'Advanced Algorithms');
+
+    RAISE NOTICE '✓ [PASS] Department Coordinator successfully created course in coordinated department.';
+
+    -- Clean up test course
+    DELETE FROM courses WHERE id = v_new_course_id;
+END $$;
+
+-- Test 2.10: Institution Auditor Read-Only Enforcement
+DO $$
+DECLARE
+    v_token_auditor VARCHAR(64) := '3333333333333333333333333333333333333333333333333333333333333333';
+    v_org_a UUID := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::UUID;
+    v_department_a UUID := 'dddddddd-dddd-dddd-dddd-dddddddddddd'::UUID;
+    v_count INT;
+BEGIN
+    RAISE NOTICE '[ROLE: connect_app] Test 2.10: Testing Institution Auditor read-only enforcement...';
+    PERFORM * FROM connect_auth.authenticate_session(v_token_auditor, v_org_a);
+
+    -- Auditor CAN read courses
+    SELECT count(*) INTO v_count FROM courses WHERE organization_id = v_org_a;
+    IF v_count < 1 THEN
+        RAISE EXCEPTION 'ASSERTION FAILED: Institution Auditor could not read tenant courses!';
+    END IF;
+    RAISE NOTICE '✓ [PASS] Institution Auditor successfully read % tenant courses.', v_count;
+
+    -- Auditor CANNOT create courses
+    BEGIN
+        INSERT INTO courses (id, organization_id, department_id, code, title)
+        VALUES (gen_random_uuid(), v_org_a, v_department_a, 'AUDIT101', 'Unauthorized Course');
+        RAISE EXCEPTION 'SECURITY BREACH: Institution Auditor was able to INSERT course!';
+    EXCEPTION
+        WHEN check_violation OR insufficient_privilege THEN
+            RAISE NOTICE '✓ [PASS] Auditor INSERT strictly blocked by RLS WITH CHECK.';
+    END;
+END $$;
+
 RESET ROLE;
 
 -- ------------------------------------------------------------------------------
@@ -326,8 +381,10 @@ DECLARE
     v_org_b UUID := 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'::UUID;
     v_user_a UUID := 'a1111111-1111-1111-1111-111111111111'::UUID;
     v_user_b UUID := 'b2222222-2222-2222-2222-222222222222'::UUID;
+    v_user_auditor UUID := 'a3333333-3333-3333-3333-333333333333'::UUID;
     v_token_a VARCHAR(64) := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     v_token_b VARCHAR(64) := 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    v_token_auditor VARCHAR(64) := '3333333333333333333333333333333333333333333333333333333333333333';
     v_room_commons UUID := 'cccccccc-cccc-cccc-cccc-cccccccccccc'::UUID;
     v_note_private UUID := 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'::UUID;
     v_note_shared UUID := 'ffffffff-ffff-ffff-ffff-ffffffffffff'::UUID;
@@ -337,8 +394,8 @@ BEGIN
     DELETE FROM courses WHERE organization_id IN (v_org_a, v_org_b);
     DELETE FROM departments WHERE organization_id IN (v_org_a, v_org_b);
     DELETE FROM organization_memberships WHERE organization_id IN (v_org_a, v_org_b);
-    DELETE FROM sessions WHERE token_hash IN (v_token_a, v_token_b);
-    DELETE FROM users WHERE id IN (v_user_a, v_user_b);
+    DELETE FROM sessions WHERE token_hash IN (v_token_a, v_token_b, v_token_auditor);
+    DELETE FROM users WHERE id IN (v_user_a, v_user_b, v_user_auditor);
     DELETE FROM organizations WHERE id IN (v_org_a, v_org_b);
     RAISE NOTICE '✓ [CLEANUP] Multi-tenant test fixtures cleaned up.';
     RAISE NOTICE 'ALL RESTRICTED-ROLE SECURITY TESTS UNDER connect_app PASSED 100%!';
