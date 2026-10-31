@@ -3,12 +3,9 @@
 # ==============================================================================
 
 # Stage 1: Build binary
-FROM golang:1.23-alpine AS builder
+FROM golang:1.23-bookworm AS builder
 
 WORKDIR /build
-
-# Install git, ca-certificates, and build tools
-RUN apk add --no-cache git ca-certificates tzdata
 
 # Cache Go modules
 COPY connect-main/services/api/go.mod connect-main/services/api/go.sum ./
