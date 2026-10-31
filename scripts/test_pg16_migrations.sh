@@ -67,7 +67,7 @@ IDENTITY_CHECK=$(psql "${TARGET_URL}" -t -A -c "
 SELECT
     current_database() || '|' ||
     current_user || '|' ||
-    version() || '|' ||
+    current_setting('server_version_num') || '|' ||
     (SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public');
 " 2>&1) || {
   log_fail "Failed to connect to target database: ${IDENTITY_CHECK}"
@@ -76,23 +76,31 @@ SELECT
 
 CURRENT_DB=$(echo "${IDENTITY_CHECK}" | cut -d'|' -f1)
 CURRENT_USER=$(echo "${IDENTITY_CHECK}" | cut -d'|' -f2)
-PG_VERSION=$(echo "${IDENTITY_CHECK}" | cut -d'|' -f3)
+PG_VERSION_NUM=$(echo "${IDENTITY_CHECK}" | cut -d'|' -f3)
 TABLE_COUNT=$(echo "${IDENTITY_CHECK}" | cut -d'|' -f4)
 
 log_info "Connected Target Database: ${CURRENT_DB}"
 log_info "Connected User: ${CURRENT_USER}"
-log_info "Server Engine: ${PG_VERSION}"
+log_info "PostgreSQL server_version_num: ${PG_VERSION_NUM}"
 log_info "Pre-existing Public Tables: ${TABLE_COUNT}"
 
-# Reject if connected to default 'postgres' database
-if [ "${CURRENT_DB}" = "postgres" ]; then
-  log_fail "BLOCKED: Target database is the default 'postgres' maintenance database. Please use a dedicated disposable test database."
+# Require an explicitly named disposable database. This is an additional guard,
+# not a substitute for verifying the target in the cloud/provider console.
+if [[ "${CURRENT_DB}" != connect_test_* ]]; then
+  log_fail "BLOCKED: Disposable database name must begin with connect_test_."
   exit 1
 fi
 
-# Reject if database contains pre-existing application tables (> 25 tables indicates non-empty/shared DB)
-if [ "${TABLE_COUNT}" -gt 25 ]; then
-  log_fail "BLOCKED: Target database contains ${TABLE_COUNT} pre-existing tables. Aborting to prevent modifying a shared/live database."
+# Require PostgreSQL 16 exactly; do not merely print the server version.
+if ! [[ "${PG_VERSION_NUM}" =~ ^[0-9]+$ ]] || [ "${PG_VERSION_NUM}" -lt 160000 ] || [ "${PG_VERSION_NUM}" -ge 170000 ]; then
+  log_fail "BLOCKED: PostgreSQL 16 is required; detected server_version_num=${PG_VERSION_NUM}."
+  exit 1
+fi
+
+# Require an empty public schema. Any existing table makes the target non-disposable
+# for this migration-chain test and aborts before the first write.
+if [ "${TABLE_COUNT}" -ne 0 ]; then
+  log_fail "BLOCKED: Target database has ${TABLE_COUNT} pre-existing public tables; expected an empty disposable database."
   exit 1
 fi
 
