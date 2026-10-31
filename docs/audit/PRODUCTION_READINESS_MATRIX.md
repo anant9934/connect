@@ -41,7 +41,7 @@ While the core live systems (Next.js frontend, Go API server, Neon PostgreSQL da
 | **Phase A: Deployment Consistency** | Vercel + Render | Synced on commit `49264bd` | HTTP/2, TLS 1.3, CSP, CORS preflight, and Vercel edge reverse-proxy rewrites verified live. | None. | **PASS** |
 | **Phase B: Background Worker** | Render PaaS | Absent from runtime | Package exists (`internal/worker`), schema exists (`background_jobs`). | No runner loop instantiated in `cmd/server/main.go`. No outbox jobs currently enqueued by handlers. | **DEFECT** |
 | **Phase C: LiveKit Media SFU** | LiveKit Cloud | Live & Integrated | Room creation, least-privilege token minting, participant roles, and SFU room lifecycle verified. Defect in `DeleteRoom` grant scoping resolved in commit `49264bd`. | No webhook ingestion endpoint registered for ungraceful client drops. | **PASS (FIXED)** |
-| **Phase D: Object Storage** | Cloudflare R2 | Degraded (Read-Only) | `ListObjectsV2` succeeds (`200 OK`). Path traversal blocked (`404`). Size limit (25MB) enforced in code. | `PutObject` and `DeleteObject` fail with `HTTP 403 AccessDenied` due to token lacking write permissions. | **BLOCKED** |
+| **Phase D: Object Storage** | Cloudflare R2 | Operational (Read & Write) | `ListObjectsV2`, `PutObject`, `GetObject`, `DeleteObject`, and application multipart file upload & download verified 100% live. | None. Updated credentials verified. | **PASS** |
 | **Phase E: Database & Cache** | Neon PG + Upstash Redis | Live & Applied | All 9 SQL migrations applied with advisory locking (27 tables). Redis TLS connection pool and sliding window rate limiting active. | None. | **PASS** |
 | **Phase F: Security Matrix** | Render Backend | Hardened & Enforced | Unauthenticated (401), invalid tokens (401), CSRF untrusted origin (403), Sec-Fetch-Site (403), BOLA/IDOR room termination & locking (403) verified live. | None. | **PASS** |
 | **Phase G: E2E User Journeys** | End-to-End Pipeline | 100% Succeeded | Signup (201) -> Session (200) -> Create Room (201) -> Join Room (200) -> Mint Token (200) -> Leave Room (200) -> End Room (200). | None. | **PASS** |
@@ -57,7 +57,7 @@ The full detailed evidence and execution traces for each phase are preserved in 
 1. [Phase A: Deployment Baseline & Consistency](file:///Users/quantum/Desktop/connect/docs/audit/POST_DEPLOYMENT_BASELINE.md)
 2. [Phase B: Background Worker Verification](file:///Users/quantum/Desktop/connect/docs/audit/WORKER_VERIFICATION_REPORT.md)
 3. [Phase C: LiveKit Cloud Real Session Verification](file:///Users/quantum/Desktop/connect/docs/audit/LIVEKIT_INTEGRATION_REPORT.md)
-4. [Phase D: Cloudflare R2 Object Storage Lifecycle](file:///Users/quantum/Desktop/connect/docs/audit/R2_STORAGE_VERIFICATION_REPORT.md)
+4. [Phase D: Cloudflare R2 Object Storage Lifecycle](file:///Users/quantum/Desktop/connect/docs/audit/R2_STORAGE_VERIFICATION_REPORT.md) & [R2 Full Lifecycle Audit](file:///Users/quantum/Desktop/connect/docs/audit/R2_PRODUCTION_LIFECYCLE_VERIFICATION.md)
 5. [Phase F: Post-Deployment Security Matrix & IDOR Audit](file:///Users/quantum/Desktop/connect/docs/audit/POST_DEPLOYMENT_SECURITY_MATRIX.md)
 6. [Phase G: Post-Deployment Functional End-to-End Tests](file:///Users/quantum/Desktop/connect/docs/audit/POST_DEPLOYMENT_FUNCTIONAL_TESTS.md)
 7. [Phase H: Downstream Failure and Recovery Testing](file:///Users/quantum/Desktop/connect/docs/audit/FAILURE_RECOVERY_REPORT.md)
