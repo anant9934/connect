@@ -5,15 +5,34 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
 
+// serializePayload mirrors PostgreSQL connect_auth.serialize_hmac_payload.
+func serializePayload(userID, orgID string, isSuper bool, role, nonce, xid string, exp int64) string {
+	superStr := "false"
+	if isSuper {
+		superStr = "true"
+	}
+	expStr := strconv.FormatInt(exp, 10)
+	return fmt.Sprintf("%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d:%s",
+		len(userID), userID,
+		len(orgID), orgID,
+		len(superStr), superStr,
+		len(role), role,
+		len(nonce), nonce,
+		len(xid), xid,
+		len(expStr), expStr,
+	)
+}
+
 // computeHMAC computes the exact HMAC-SHA256 signature mirroring PostgreSQL connect_auth.authenticate_session.
 func computeHMAC(secret []byte, userID, orgID string, isSuper bool, role, nonce, xid string, exp int64) string {
-	payload := fmt.Sprintf("%s|%s|%t|%s|%s|%s|%d", userID, orgID, isSuper, role, nonce, xid, exp)
+	payload := serializePayload(userID, orgID, isSuper, role, nonce, xid, exp)
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(payload))
 	return hex.EncodeToString(mac.Sum(nil))
@@ -180,5 +199,31 @@ func TestAttackScenario_ExpiredContext(t *testing.T) {
 	}
 	if reason != "context expired" {
 		t.Errorf("unexpected failure reason: %s", reason)
+	}
+}
+
+func TestAttackScenario_DelimiterAmbiguityResistance(t *testing.T) {
+	secret := []byte("test_secret_key_32_bytes_long_12")
+	user := uuid.New().String()
+	nonce := "a1b2c3d4e5f60718"
+	xid := "1013"
+	exp := time.Now().Add(10 * time.Minute).Unix()
+
+	// Legitimate user context with empty org
+	sig := computeHMAC(secret, user, "", false, "institution_member", nonce, xid, exp)
+
+	// Attacker attempts to forge a context by injecting delimiter manipulation
+	// into the role field to impersonate another organization
+	fakeRole := "institution_member|injected"
+	valid, _ := verifyHMACContext(secret, user, "", false, fakeRole, nonce, xid, xid, exp, sig)
+	if valid {
+		t.Fatal("SECURITY FAILURE: Delimiter injection succeeded in forging signature!")
+	}
+
+	// Verify that length prefixing produces different payloads for shifted inputs
+	p1 := serializePayload("ab", "c", false, "role", nonce, xid, exp)
+	p2 := serializePayload("a", "bc", false, "role", nonce, xid, exp)
+	if p1 == p2 {
+		t.Fatalf("SECURITY FAILURE: Serialized payloads collided: %s == %s", p1, p2)
 	}
 }
