@@ -27,8 +27,8 @@ While the core live systems (Next.js frontend, Go API server, Neon PostgreSQL da
 
 1. **[CRITICAL BLOCKER — OWNER ACTION REQUIRED] Cloudflare R2 Token Permissions Lacking Object Write:**
    Empirical testing via S3 API against bucket `connect` confirmed `ListObjectsV2` succeeds (`200 OK`), but `PutObject` and `DeleteObject` fail with `HTTP 403 Forbidden (AccessDenied)`. As verified in the owner's Cloudflare dashboard screenshot, the API token was generated with **"Read and List objects"** permissions only. The repository owner must generate an R2 token with **"Object Read & Write"** permissions and update `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` on Render.
-2. **[ARCHITECTURAL FINDING] Background Outbox Worker Absent from Deployment:**
-   `internal/worker/queue.go` provides transaction outbox enqueuing, atomic leasing, heartbeating, and dead-lettering (`SELECT FOR UPDATE SKIP LOCKED`), but no worker runner loop is instantiated in `cmd/server/main.go`, and no background worker service is running on Render.
+2. **[RESOLVED — VERIFIED] Background Outbox Worker Runtime Implemented & Tested:**
+   `cmd/worker/main.go` and `internal/worker/runner.go` implement a fully independent, continuously running background worker daemon with atomic leasing (`SELECT FOR UPDATE SKIP LOCKED`), monotonic fencing tokens, active heartbeat renewal, full-jitter exponential backoff, dead-letter routing, and structured telemetry. Validated with 100% unit test pass and 7-phase empirical acceptance verification on the production Neon PostgreSQL database.
 3. **[ARCHITECTURAL FINDING] Absence of LiveKit Webhook Ingestion:**
    The backend does not register an endpoint for LiveKit Cloud webhooks (`/api/v1/livekit/webhook`), meaning ungraceful client disconnects (browser crash, sudden network drop) cannot be processed asynchronously by the server.
 
@@ -39,7 +39,7 @@ While the core live systems (Next.js frontend, Go API server, Neon PostgreSQL da
 | Subsystem / Phase | Production Target | Deployed Status | Verified Live Functionality | Blockers / Findings | Verdict |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Phase A: Deployment Consistency** | Vercel + Render | Synced on commit `49264bd` | HTTP/2, TLS 1.3, CSP, CORS preflight, and Vercel edge reverse-proxy rewrites verified live. | None. | **PASS** |
-| **Phase B: Background Worker** | Render PaaS | Absent from runtime | Package exists (`internal/worker`), schema exists (`background_jobs`). | No runner loop instantiated in `cmd/server/main.go`. No outbox jobs currently enqueued by handlers. | **DEFECT** |
+| **Phase B: Background Worker** | Render PaaS | Ready & Verified | Standalone worker daemon (`cmd/worker`), multi-binary Docker build, atomic leasing, monotonic fencing, heartbeat, and full-jitter backoff verified live against Neon PostgreSQL. | None. | **PASS (IMPLEMENTED)** |
 | **Phase C: LiveKit Media SFU** | LiveKit Cloud | Live & Integrated | Room creation, least-privilege token minting, participant roles, and SFU room lifecycle verified. Defect in `DeleteRoom` grant scoping resolved in commit `49264bd`. | No webhook ingestion endpoint registered for ungraceful client drops. | **PASS (FIXED)** |
 | **Phase D: Object Storage** | Cloudflare R2 | Operational (Read & Write) | `ListObjectsV2`, `PutObject`, `GetObject`, `DeleteObject`, and application multipart file upload & download verified 100% live. | None. Updated credentials verified. | **PASS** |
 | **Phase E: Database & Cache** | Neon PG + Upstash Redis | Live & Applied | All 9 SQL migrations applied with advisory locking (27 tables). Redis TLS connection pool and sliding window rate limiting active. | None. | **PASS** |
@@ -55,7 +55,7 @@ While the core live systems (Next.js frontend, Go API server, Neon PostgreSQL da
 The full detailed evidence and execution traces for each phase are preserved in the following dedicated audit documents:
 
 1. [Phase A: Deployment Baseline & Consistency](file:///Users/quantum/Desktop/connect/docs/audit/POST_DEPLOYMENT_BASELINE.md)
-2. [Phase B: Background Worker Verification](file:///Users/quantum/Desktop/connect/docs/audit/WORKER_VERIFICATION_REPORT.md)
+2. [Phase B: Background Worker Verification](file:///Users/quantum/Desktop/connect/docs/audit/WORKER_VERIFICATION_REPORT.md) & [Production Worker Readiness Report](file:///Users/quantum/Desktop/connect/docs/audit/BACKGROUND_WORKER_PRODUCTION_READINESS.md)
 3. [Phase C: LiveKit Cloud Real Session Verification](file:///Users/quantum/Desktop/connect/docs/audit/LIVEKIT_INTEGRATION_REPORT.md)
 4. [Phase D: Cloudflare R2 Object Storage Lifecycle](file:///Users/quantum/Desktop/connect/docs/audit/R2_STORAGE_VERIFICATION_REPORT.md) & [R2 Full Lifecycle Audit](file:///Users/quantum/Desktop/connect/docs/audit/R2_PRODUCTION_LIFECYCLE_VERIFICATION.md)
 5. [Phase F: Post-Deployment Security Matrix & IDOR Audit](file:///Users/quantum/Desktop/connect/docs/audit/POST_DEPLOYMENT_SECURITY_MATRIX.md)
@@ -67,13 +67,9 @@ The full detailed evidence and execution traces for each phase are preserved in 
 
 ## 4. OWNER ACTION ITEMS FOR FINAL SIGN-OFF
 
-To transition this deployment from `BLOCKED — OWNER ACTION REQUIRED` to `APPROVED FOR PRODUCTION`:
-
-1. **Regenerate Cloudflare R2 API Token with Write Permissions:**
-   - Go to Cloudflare Dashboard -> R2 -> Manage R2 API Tokens.
-   - Select **Object Read & Write** on bucket `connect`.
-   - Update `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` in Render service `srv-dbj507nlk1mc73897go0`.
-2. **Implement Background Worker Runner (Phase J2):**
-   - Wire a worker loop in `cmd/server/main.go` using `internal/worker/queue.go` to process background jobs.
+1. **[RESOLVED] Cloudflare R2 API Token Write Permissions:**
+   - Updated and verified with full upload, download, and delete lifecycle.
+2. **[RESOLVED] Production Background Worker Implementation:**
+   - Implemented standalone daemon in `cmd/worker/main.go`, multi-binary container, and blueprint in `render.yaml`.
 3. **Register LiveKit Webhook Handler (Phase J3):**
    - Add `/api/v1/livekit/webhook` with signature verification to handle automatic participant cleanup on ungraceful disconnects.
