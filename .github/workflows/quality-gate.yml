@@ -74,14 +74,14 @@ jobs:
         if: hashFiles('connect-main/apps/web/package.json', 'connect-main/apps/mobile/package.json') != ''
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Run Web Tests & Checks
         if: hashFiles('connect-main/apps/web/package.json') != ''
         run: |
           cd connect-main/apps/web
           npm ci || npm install
-          if npm run | grep -q 'test'; then npm test -- --run; fi
+          if npm run | grep -q 'test'; then npm test; fi
 
       - name: Run Mobile Tests & Checks
         if: hashFiles('connect-main/apps/mobile/package.json') != ''
