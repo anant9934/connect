@@ -32,7 +32,7 @@ func Connect(ctx context.Context, cfg *config.Config) (*DB, error) {
 	}
 
 	// Verify initial ping with timeout
-	pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	if err := pool.Ping(pingCtx); err != nil {

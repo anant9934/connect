@@ -228,7 +228,7 @@ func getEnv(key, defaultVal string) string {
 }
 
 func loadDotEnv() {
-	paths := []string{".env", "../../.env", "../.env"}
+	paths := []string{".env", "../../../.env", "../../.env", "../.env"}
 	for _, p := range paths {
 		cleaned := filepath.Clean(p)
 		// #nosec G304 -- local config paths are fixed internal constants
