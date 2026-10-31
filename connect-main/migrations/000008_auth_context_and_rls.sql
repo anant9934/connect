@@ -394,6 +394,47 @@ $$;
 
 REVOKE ALL ON FUNCTION connect_auth.is_super_admin() FROM PUBLIC;
 
+CREATE OR REPLACE FUNCTION connect_auth.is_department_coordinator(p_department_id UUID DEFAULT NULL)
+RETURNS BOOLEAN
+SECURITY DEFINER
+SET search_path = pg_catalog, public, connect_auth
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_user UUID := connect_auth.current_user_id();
+    v_org UUID := connect_auth.current_org_id();
+    v_role VARCHAR := connect_auth.current_role();
+BEGIN
+    IF v_user IS NULL OR v_org IS NULL THEN
+        RETURN false;
+    END IF;
+
+    -- If explicitly assigned role in organization_memberships
+    IF v_role = 'department_coordinator' AND p_department_id IS NULL THEN
+        RETURN true;
+    END IF;
+
+    -- Check relational assignment in departments table
+    IF p_department_id IS NOT NULL THEN
+        RETURN EXISTS (
+            SELECT 1 FROM public.departments d
+            WHERE d.id = p_department_id
+              AND d.organization_id = v_org
+              AND d.coordinator_user_id = v_user
+              AND d.status = 'active'
+        );
+    ELSE
+        RETURN EXISTS (
+            SELECT 1 FROM public.departments d
+            WHERE d.organization_id = v_org
+              AND d.coordinator_user_id = v_user
+              AND d.status = 'active'
+        );
+    END IF;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION connect_auth.is_department_coordinator(UUID) FROM PUBLIC;
+
 -- 4. Enable Row-Level Security & Force RLS Across All Protected Tables
 ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE organizations FORCE ROW LEVEL SECURITY;
@@ -624,7 +665,10 @@ CREATE POLICY rls_courses_insert ON courses
         connect_auth.is_super_admin() OR
         (
             organization_id = connect_auth.current_org_id() AND
-            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                connect_auth.is_department_coordinator(department_id)
+            )
         )
     );
 
@@ -634,14 +678,20 @@ CREATE POLICY rls_courses_update ON courses
         connect_auth.is_super_admin() OR
         (
             organization_id = connect_auth.current_org_id() AND
-            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                connect_auth.is_department_coordinator(department_id)
+            )
         )
     )
     WITH CHECK (
         connect_auth.is_super_admin() OR
         (
             organization_id = connect_auth.current_org_id() AND
-            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                connect_auth.is_department_coordinator(department_id)
+            )
         )
     );
 
@@ -675,7 +725,14 @@ CREATE POLICY rls_batches_insert ON course_batches
         connect_auth.is_super_admin() OR
         (
             organization_id = connect_auth.current_org_id() AND
-            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                EXISTS (
+                    SELECT 1 FROM public.courses c
+                    WHERE c.id = course_batches.course_id
+                      AND connect_auth.is_department_coordinator(c.department_id)
+                )
+            )
         )
     );
 
@@ -685,14 +742,28 @@ CREATE POLICY rls_batches_update ON course_batches
         connect_auth.is_super_admin() OR
         (
             organization_id = connect_auth.current_org_id() AND
-            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                EXISTS (
+                    SELECT 1 FROM public.courses c
+                    WHERE c.id = course_batches.course_id
+                      AND connect_auth.is_department_coordinator(c.department_id)
+                )
+            )
         )
     )
     WITH CHECK (
         connect_auth.is_super_admin() OR
         (
             organization_id = connect_auth.current_org_id() AND
-            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                EXISTS (
+                    SELECT 1 FROM public.courses c
+                    WHERE c.id = course_batches.course_id
+                      AND connect_auth.is_department_coordinator(c.department_id)
+                )
+            )
         )
     );
 
@@ -720,7 +791,8 @@ CREATE POLICY rls_allocations_select ON faculty_allocations
         (
             organization_id = connect_auth.current_org_id() AND
             (
-                connect_auth.current_role() IN ('institution_admin', 'institution_auditor', 'department_coordinator') OR
+                connect_auth.current_role() IN ('institution_admin', 'institution_auditor') OR
+                connect_auth.is_department_coordinator() OR
                 faculty_user_id = connect_auth.current_user_id() OR
                 EXISTS (
                     SELECT 1 FROM course_enrollments ce
@@ -738,7 +810,15 @@ CREATE POLICY rls_allocations_insert ON faculty_allocations
         connect_auth.is_super_admin() OR
         (
             organization_id = connect_auth.current_org_id() AND
-            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                EXISTS (
+                    SELECT 1 FROM public.course_batches cb
+                    JOIN public.courses c ON c.id = cb.course_id
+                    WHERE cb.id = faculty_allocations.course_batch_id
+                      AND connect_auth.is_department_coordinator(c.department_id)
+                )
+            )
         )
     );
 
@@ -748,14 +828,30 @@ CREATE POLICY rls_allocations_update ON faculty_allocations
         connect_auth.is_super_admin() OR
         (
             organization_id = connect_auth.current_org_id() AND
-            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                EXISTS (
+                    SELECT 1 FROM public.course_batches cb
+                    JOIN public.courses c ON c.id = cb.course_id
+                    WHERE cb.id = faculty_allocations.course_batch_id
+                      AND connect_auth.is_department_coordinator(c.department_id)
+                )
+            )
         )
     )
     WITH CHECK (
         connect_auth.is_super_admin() OR
         (
             organization_id = connect_auth.current_org_id() AND
-            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                EXISTS (
+                    SELECT 1 FROM public.course_batches cb
+                    JOIN public.courses c ON c.id = cb.course_id
+                    WHERE cb.id = faculty_allocations.course_batch_id
+                      AND connect_auth.is_department_coordinator(c.department_id)
+                )
+            )
         )
     );
 
@@ -784,7 +880,8 @@ CREATE POLICY rls_enrollments_select ON course_enrollments
             organization_id = connect_auth.current_org_id() AND
             (
                 student_user_id = connect_auth.current_user_id() OR
-                connect_auth.current_role() IN ('institution_admin', 'institution_auditor', 'department_coordinator') OR
+                connect_auth.current_role() IN ('institution_admin', 'institution_auditor') OR
+                connect_auth.is_department_coordinator() OR
                 EXISTS (
                     SELECT 1 FROM faculty_allocations fa
                     WHERE fa.course_batch_id = course_enrollments.course_batch_id
@@ -800,7 +897,15 @@ CREATE POLICY rls_enrollments_insert ON course_enrollments
         connect_auth.is_super_admin() OR
         (
             organization_id = connect_auth.current_org_id() AND
-            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                EXISTS (
+                    SELECT 1 FROM public.course_batches cb
+                    JOIN public.courses c ON c.id = cb.course_id
+                    WHERE cb.id = course_enrollments.course_batch_id
+                      AND connect_auth.is_department_coordinator(c.department_id)
+                )
+            )
         )
     );
 
@@ -810,14 +915,30 @@ CREATE POLICY rls_enrollments_update ON course_enrollments
         connect_auth.is_super_admin() OR
         (
             organization_id = connect_auth.current_org_id() AND
-            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                EXISTS (
+                    SELECT 1 FROM public.course_batches cb
+                    JOIN public.courses c ON c.id = cb.course_id
+                    WHERE cb.id = course_enrollments.course_batch_id
+                      AND connect_auth.is_department_coordinator(c.department_id)
+                )
+            )
         )
     )
     WITH CHECK (
         connect_auth.is_super_admin() OR
         (
             organization_id = connect_auth.current_org_id() AND
-            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                EXISTS (
+                    SELECT 1 FROM public.course_batches cb
+                    JOIN public.courses c ON c.id = cb.course_id
+                    WHERE cb.id = course_enrollments.course_batch_id
+                      AND connect_auth.is_department_coordinator(c.department_id)
+                )
+            )
         )
     );
 
@@ -845,7 +966,8 @@ CREATE POLICY rls_sessions_select ON class_sessions
         (
             organization_id = connect_auth.current_org_id() AND
             (
-                connect_auth.current_role() IN ('institution_admin', 'institution_auditor', 'department_coordinator') OR
+                connect_auth.current_role() IN ('institution_admin', 'institution_auditor') OR
+                connect_auth.is_department_coordinator() OR
                 EXISTS (
                     SELECT 1 FROM faculty_allocations fa
                     WHERE fa.id = class_sessions.faculty_allocation_id
@@ -1201,12 +1323,15 @@ CREATE POLICY rls_audit_log_select ON attendance_overrule_audit_log
         connect_auth.is_super_admin()
         OR (
             organization_id = connect_auth.current_org_id()
-            AND EXISTS (
-                SELECT 1 FROM public.organization_memberships om
-                WHERE om.organization_id = attendance_overrule_audit_log.organization_id
-                  AND om.user_id = connect_auth.current_user_id()
-                  AND om.role IN ('institution_admin', 'institution_auditor', 'faculty')
-                  AND om.status = 'active'
+            AND (
+                connect_auth.current_role() IN ('institution_admin', 'institution_auditor')
+                OR connect_auth.is_department_coordinator()
+                OR EXISTS (
+                    SELECT 1 FROM public.faculty_allocations fa
+                    WHERE fa.organization_id = attendance_overrule_audit_log.organization_id
+                      AND fa.faculty_user_id = connect_auth.current_user_id()
+                      AND fa.status IN ('active', 'ended')
+                )
             )
         )
     );
@@ -1216,12 +1341,14 @@ CREATE POLICY rls_audit_log_insert ON attendance_overrule_audit_log
     WITH CHECK (
         organization_id = connect_auth.current_org_id()
         AND overruled_by = connect_auth.current_user_id()
-        AND EXISTS (
-            SELECT 1 FROM public.organization_memberships om
-            WHERE om.organization_id = attendance_overrule_audit_log.organization_id
-              AND om.user_id = connect_auth.current_user_id()
-              AND om.role IN ('institution_admin', 'faculty')
-              AND om.status = 'active'
+        AND (
+            connect_auth.current_role() = 'institution_admin'
+            OR EXISTS (
+                SELECT 1 FROM public.faculty_allocations fa
+                WHERE fa.organization_id = attendance_overrule_audit_log.organization_id
+                  AND fa.faculty_user_id = connect_auth.current_user_id()
+                  AND fa.status IN ('active', 'ended')
+            )
         )
     );
 
@@ -1283,6 +1410,7 @@ GRANT EXECUTE ON FUNCTION connect_auth.current_role() TO connect_app, connect_wo
 GRANT EXECUTE ON FUNCTION connect_auth.is_super_admin() TO connect_app, connect_worker;
 GRANT EXECUTE ON FUNCTION connect_auth.constant_time_equals(TEXT, TEXT) TO connect_app, connect_worker;
 GRANT EXECUTE ON FUNCTION connect_auth.serialize_hmac_payload(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO connect_app, connect_worker;
+GRANT EXECUTE ON FUNCTION connect_auth.is_department_coordinator(UUID) TO connect_app, connect_worker;
 
 -- Domain Table Access for Application and Background Worker Runtime Roles
 GRANT USAGE ON SCHEMA public TO connect_app, connect_worker;
