@@ -435,15 +435,25 @@ REVOKE DELETE ON attendance_records FROM PUBLIC;
 REVOKE UPDATE, DELETE ON participant_connection_events FROM PUBLIC;
 REVOKE UPDATE, DELETE ON attendance_overrule_audit_log FROM PUBLIC;
 
--- Role Separation & Least-Privilege Grants for connect_app Application Role
+-- 5. Role Separation, Mandatory Provisioning, and Least-Privilege Enforcements
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'connect_app') THEN
-        GRANT USAGE ON SCHEMA connect_auth TO connect_app;
-        GRANT EXECUTE ON FUNCTION connect_auth.authenticate_session(VARCHAR, UUID) TO connect_app;
-        GRANT EXECUTE ON FUNCTION connect_auth.current_org_id() TO connect_app;
-        GRANT EXECUTE ON FUNCTION connect_auth.current_user_id() TO connect_app;
-        GRANT EXECUTE ON FUNCTION connect_auth.is_super_admin() TO connect_app;
-        REVOKE ALL ON TABLE connect_auth.internal_keys FROM connect_app;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'connect_app') THEN
+        CREATE ROLE connect_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
     END IF;
 END $$;
+
+-- Blanket revocation of schema, table, and function privileges from PUBLIC
+REVOKE ALL ON SCHEMA connect_auth FROM PUBLIC;
+REVOKE ALL ON ALL TABLES IN SCHEMA connect_auth FROM PUBLIC;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA connect_auth FROM PUBLIC;
+
+-- Mandatory Grants to Application Runtime Role (No Silent Skipping)
+GRANT USAGE ON SCHEMA connect_auth TO connect_app;
+GRANT EXECUTE ON FUNCTION connect_auth.authenticate_session(VARCHAR, UUID) TO connect_app;
+GRANT EXECUTE ON FUNCTION connect_auth.current_org_id() TO connect_app;
+GRANT EXECUTE ON FUNCTION connect_auth.current_user_id() TO connect_app;
+GRANT EXECUTE ON FUNCTION connect_auth.is_super_admin() TO connect_app;
+
+-- Explicit Zero-Access Isolation on Internal HMAC Secret Table
+REVOKE ALL ON TABLE connect_auth.internal_keys FROM PUBLIC, connect_app;
