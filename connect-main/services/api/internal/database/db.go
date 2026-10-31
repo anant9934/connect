@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tathastu/connect/services/api/internal/config"
 )
@@ -55,4 +56,82 @@ func (db *DB) Close() {
 	if db != nil && db.Pool != nil {
 		db.Pool.Close()
 	}
+}
+
+// WithAuthenticatedTx executes a callback within an isolated database transaction,
+// establishing cryptographically verified PostgreSQL session context (app._user_id, app._org_id, app._sig).
+// The transaction is automatically committed on success and rolled back on error or panic.
+func (db *DB) WithAuthenticatedTx(
+	ctx context.Context,
+	tokenHash string,
+	requestedOrgID *string,
+	fn func(ctx context.Context, tx pgx.Tx, auth *AuthContext) error,
+) (err error) {
+	if db == nil || db.Pool == nil {
+		return fmt.Errorf("database pool not initialized")
+	}
+
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback(ctx)
+			panic(p)
+		} else if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	authCtx, err := AuthenticateAndSetContext(ctx, tx, tokenHash, requestedOrgID)
+	if err != nil {
+		return err
+	}
+
+	if err = fn(ctx, tx, authCtx); err != nil {
+		return err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// WithSystemWorkerTx executes a background system worker task within an isolated database transaction.
+// The transaction is automatically committed on success and rolled back on error or panic.
+func (db *DB) WithSystemWorkerTx(
+	ctx context.Context,
+	fn func(ctx context.Context, tx pgx.Tx) error,
+) (err error) {
+	if db == nil || db.Pool == nil {
+		return fmt.Errorf("database pool not initialized")
+	}
+
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback(ctx)
+			panic(p)
+		} else if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	if err = fn(ctx, tx); err != nil {
+		return err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
 }
