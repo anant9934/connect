@@ -47,10 +47,10 @@ BEGIN
     (v_org_b, 'Tenant Beta Institute', 'tenant-beta');
 
     -- 2. Users & Sessions
-    INSERT INTO users (id, email, password_hash, status) VALUES
-    (v_user_a, 'alice@alpha.edu', 'hash_a', 'active'),
-    (v_user_b, 'bob@beta.edu', 'hash_b', 'active'),
-    (v_user_auditor, 'auditor@alpha.edu', 'hash_auditor', 'active');
+    INSERT INTO users (id, email_normalized, display_name, password_hash, status) VALUES
+    (v_user_a, 'alice@alpha.edu', 'Alice Alpha', 'hash_a', 'active'),
+    (v_user_b, 'bob@beta.edu', 'Bob Beta', 'hash_b', 'active'),
+    (v_user_auditor, 'auditor@alpha.edu', 'Auditor Alpha', 'hash_auditor', 'active');
 
     INSERT INTO sessions (user_id, token_hash, expires_at) VALUES
     (v_user_a, v_token_a, clock_timestamp() + INTERVAL '1 hour'),
@@ -76,9 +76,9 @@ BEGIN
     INSERT INTO rooms (id, title, host_user_id, workspace_type, is_locked)
     VALUES (v_room_commons, 'Alice Open Research Room', v_user_a, 'personal_commons', false);
 
-    INSERT INTO meeting_notes (id, room_id, created_by, title, content, visibility) VALUES
-    (v_note_private, v_room_commons, v_user_a, 'Alice Private Notes', 'Private Alice Research', 'private'),
-    (v_note_shared, v_room_commons, v_user_a, 'Alice Shared Notes', 'Publicly Readable Research', 'shared');
+    INSERT INTO meeting_notes (id, room_id, created_by, created_by_identity, updated_by_identity, title, content, visibility) VALUES
+    (v_note_private, v_room_commons, v_user_a, 'alice-ident', 'alice-ident', 'Alice Private Notes', 'Private Alice Research', 'private'),
+    (v_note_shared, v_room_commons, v_user_a, 'alice-ident', 'alice-ident', 'Alice Shared Notes', 'Publicly Readable Research', 'shared');
 
     RAISE NOTICE '✓ [PASS] Fixtures successfully created.';
 END $$;
