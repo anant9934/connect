@@ -73,6 +73,35 @@ $$;
 
 REVOKE ALL ON FUNCTION connect_auth.constant_time_equals(TEXT, TEXT) FROM PUBLIC;
 
+-- 2.1 Canonical Length-Prefixed HMAC Payload Serializer (Prevents Delimiter Collisions and Injection)
+CREATE OR REPLACE FUNCTION connect_auth.serialize_hmac_payload(
+    p_user TEXT,
+    p_org TEXT,
+    p_super TEXT,
+    p_role TEXT,
+    p_nonce TEXT,
+    p_xid TEXT,
+    p_exp TEXT
+)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+SET search_path = pg_catalog
+AS $$
+SELECT pg_catalog.concat_ws('|',
+    pg_catalog.concat(pg_catalog.octet_length(COALESCE(p_user, '')), ':', COALESCE(p_user, '')),
+    pg_catalog.concat(pg_catalog.octet_length(COALESCE(p_org, '')), ':', COALESCE(p_org, '')),
+    pg_catalog.concat(pg_catalog.octet_length(COALESCE(p_super, 'false')), ':', COALESCE(p_super, 'false')),
+    pg_catalog.concat(pg_catalog.octet_length(COALESCE(p_role, '')), ':', COALESCE(p_role, '')),
+    pg_catalog.concat(pg_catalog.octet_length(COALESCE(p_nonce, '')), ':', COALESCE(p_nonce, '')),
+    pg_catalog.concat(pg_catalog.octet_length(COALESCE(p_xid, '')), ':', COALESCE(p_xid, '')),
+    pg_catalog.concat(pg_catalog.octet_length(COALESCE(p_exp, '')), ':', COALESCE(p_exp, ''))
+);
+$$;
+
+REVOKE ALL ON FUNCTION connect_auth.serialize_hmac_payload(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
+
 -- 3. Authenticate Session Procedure (Generates HMAC Signature Bound to Transaction ID)
 CREATE OR REPLACE FUNCTION connect_auth.authenticate_session(
     p_token_hash VARCHAR(64),
@@ -140,9 +169,17 @@ BEGIN
     v_exp := EXTRACT(epoch FROM (pg_catalog.clock_timestamp() + INTERVAL '10 minutes'))::BIGINT;
     v_nonce := pg_catalog.encode(public.gen_random_bytes(16), 'hex');
 
-    -- 5. Retrieve Internal Secret & Compute HMAC-SHA256 Signature
+    -- 5. Retrieve Internal Secret & Compute HMAC-SHA256 Signature (Canonical Length-Prefixed)
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
-    v_payload := v_user_id::TEXT || '|' || COALESCE(p_requested_org_id::TEXT, '') || '|' || v_is_super::TEXT || '|' || COALESCE(v_role, '') || '|' || v_nonce || '|' || v_xid || '|' || v_exp::TEXT;
+    v_payload := connect_auth.serialize_hmac_payload(
+        v_user_id::TEXT,
+        COALESCE(p_requested_org_id::TEXT, ''),
+        CASE WHEN v_is_super THEN 'true' ELSE 'false' END,
+        COALESCE(v_role, ''),
+        v_nonce,
+        v_xid,
+        v_exp::TEXT
+    );
     v_sig := pg_catalog.encode(public.hmac(v_payload::BYTEA, v_secret, 'sha256'), 'hex');
 
     -- 6. Set Transaction-Local Session Variables (Scoped Strictly to this Transaction)
@@ -195,7 +232,11 @@ BEGIN
 
     -- Verify cryptographic signature using constant-time comparison
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
-    v_expected_sig := pg_catalog.encode(public.hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || COALESCE(v_role, '') || '|' || v_nonce || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
+    v_expected_sig := pg_catalog.encode(public.hmac(
+        connect_auth.serialize_hmac_payload(v_user, COALESCE(v_org, ''), COALESCE(v_super, 'false'), COALESCE(v_role, ''), v_nonce, v_xid, v_exp)::BYTEA,
+        v_secret,
+        'sha256'
+    ), 'hex');
 
     IF NOT connect_auth.constant_time_equals(v_sig, v_expected_sig) THEN
         RETURN NULL; -- Fail closed: Forged or tampered GUC parameters!
@@ -241,7 +282,11 @@ BEGIN
     END IF;
 
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
-    v_expected_sig := pg_catalog.encode(public.hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || COALESCE(v_role, '') || '|' || v_nonce || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
+    v_expected_sig := pg_catalog.encode(public.hmac(
+        connect_auth.serialize_hmac_payload(v_user, COALESCE(v_org, ''), COALESCE(v_super, 'false'), COALESCE(v_role, ''), v_nonce, v_xid, v_exp)::BYTEA,
+        v_secret,
+        'sha256'
+    ), 'hex');
 
     IF NOT connect_auth.constant_time_equals(v_sig, v_expected_sig) THEN
         RETURN NULL;
@@ -283,7 +328,11 @@ BEGIN
     END IF;
 
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
-    v_expected_sig := pg_catalog.encode(public.hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || COALESCE(v_role, '') || '|' || v_nonce || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
+    v_expected_sig := pg_catalog.encode(public.hmac(
+        connect_auth.serialize_hmac_payload(v_user, COALESCE(v_org, ''), COALESCE(v_super, 'false'), COALESCE(v_role, ''), v_nonce, v_xid, v_exp)::BYTEA,
+        v_secret,
+        'sha256'
+    ), 'hex');
 
     IF NOT connect_auth.constant_time_equals(v_sig, v_expected_sig) THEN
         RETURN NULL;
@@ -329,7 +378,11 @@ BEGIN
     END IF;
 
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
-    v_expected_sig := pg_catalog.encode(public.hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || COALESCE(v_role, '') || '|' || v_nonce || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
+    v_expected_sig := pg_catalog.encode(public.hmac(
+        connect_auth.serialize_hmac_payload(v_user, COALESCE(v_org, ''), COALESCE(v_super, 'false'), COALESCE(v_role, ''), v_nonce, v_xid, v_exp)::BYTEA,
+        v_secret,
+        'sha256'
+    ), 'hex');
 
     IF NOT connect_auth.constant_time_equals(v_sig, v_expected_sig) THEN
         RETURN false;
@@ -1229,6 +1282,7 @@ GRANT EXECUTE ON FUNCTION connect_auth.current_user_id() TO connect_app, connect
 GRANT EXECUTE ON FUNCTION connect_auth.current_role() TO connect_app, connect_worker;
 GRANT EXECUTE ON FUNCTION connect_auth.is_super_admin() TO connect_app, connect_worker;
 GRANT EXECUTE ON FUNCTION connect_auth.constant_time_equals(TEXT, TEXT) TO connect_app, connect_worker;
+GRANT EXECUTE ON FUNCTION connect_auth.serialize_hmac_payload(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO connect_app, connect_worker;
 
 -- Domain Table Access for Application and Background Worker Runtime Roles
 GRANT USAGE ON SCHEMA public TO connect_app, connect_worker;
