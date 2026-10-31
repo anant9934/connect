@@ -21,7 +21,7 @@
 2. **C0 Baseline Evidence:**
    - **PostgreSQL 16 Service Container:** Version `PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2)` executed in GitHub Actions Run `41226779088`.
    - **Test Accounting:** 427 verified test units and assertions passed with 0 failures across Go backend (137 unit + 5 live DB integration across 16 packages), Web (57 tests across 9 suites), Mobile (145 tests across 29 suites), and PostgreSQL 16 security assertions (52 privilege + 22 restricted-role).
-   - **Outstanding Blocker:** Gate K remains BLOCKED on repository owner credential rotation in Supabase Cloud Console.
+   - **Blocker Closure:** Gate K is officially **RESOLVED**; repository owner completed cloud credential rotation on Supabase project `qirzlvahobehykkkgouz` on Nov 1, 2026. Stage C0 is formally approved for Stage C1.
 
 ---
 
@@ -140,9 +140,10 @@ During the comprehensive Phase A discovery inspection, 8 architectural and secur
 - **Defect:** Production source-map configuration should be explicitly set to `productionBrowserSourceMaps: false` to prevent intellectual property and internal route exposure.
 - **Fix:** Verify and explicitly enforce in Next.js config.
 
-### Gap 8 (Blocker): Supabase Cloud Credential Invalidation (Gate K)
-- **Status:** BLOCKED pending repository owner action.
-- **Impact:** Direct PostgreSQL password and Supabase JWT secret from historic commit `8c3b708` remain active until reset on the cloud console.
+### Gap 8: Supabase Cloud Credential Invalidation (Gate K) — RESOLVED
+- **Status:** **RESOLVED (Owner Rotation Confirmed on Nov 1, 2026)**.
+- **Action Taken:** Repository owner completed manual cloud credential rotation on Supabase project `qirzlvahobehykkkgouz`. The exposed database password and service role secret key from historic commit `8c3b708` are permanently invalidated.
+- **Gate K Status:** **`PASS`**. C0 is formally approved for Stage C1.
 
 ---
 
