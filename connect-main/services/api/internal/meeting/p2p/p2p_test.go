@@ -2,11 +2,13 @@ package p2p
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,30 +18,98 @@ import (
 	"github.com/tathastu/connect/services/api/internal/config"
 )
 
+type memListener struct {
+	conns     chan net.Conn
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func newMemListener() *memListener {
+	return &memListener{
+		conns:  make(chan net.Conn, 16),
+		closed: make(chan struct{}),
+	}
+}
+
+func (l *memListener) Accept() (net.Conn, error) {
+	select {
+	case c, ok := <-l.conns:
+		if !ok {
+			return nil, errors.New("listener closed")
+		}
+		return c, nil
+	case <-l.closed:
+		return nil, errors.New("listener closed")
+	}
+}
+
+func (l *memListener) Close() error {
+	l.closeOnce.Do(func() {
+		close(l.closed)
+	})
+	return nil
+}
+
+func (l *memListener) Addr() net.Addr {
+	return &dummyAddr{}
+}
+
+type dummyAddr struct{}
+
+func (d *dummyAddr) Network() string { return "mem" }
+func (d *dummyAddr) String() string  { return "pipe" }
+
+func setupTestWSServer(t *testing.T) (*websocket.Dialer, func()) {
+	l := newMemListener()
+	server := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					break
+				}
+			}
+		}),
+	}
+	go func() {
+		_ = server.Serve(l)
+	}()
+
+	dialer := &websocket.Dialer{
+		NetDial: func(network, addr string) (net.Conn, error) {
+			c1, c2 := net.Pipe()
+			select {
+			case l.conns <- c2:
+				return c1, nil
+			case <-l.closed:
+				c1.Close()
+				c2.Close()
+				return nil, errors.New("listener closed")
+			}
+		},
+	}
+
+	cleanup := func() {
+		_ = l.Close()
+		_ = server.Close()
+	}
+	return dialer, cleanup
+}
+
 func TestP2PHub_RegisterAndRoles(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	hub := NewHub(logger)
 	roomCode := "test-room-123"
 
-	// Mock WebSocket server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				break
-			}
-		}
-	}))
-	defer server.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	dialer, cleanup := setupTestWSServer(t)
+	defer cleanup()
 
 	// Peer 1: Host connects
-	conn1, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn1, _, err := dialer.Dial("ws://localhost/ws", nil)
 	require.NoError(t, err)
 	defer conn1.Close()
 
@@ -51,7 +121,7 @@ func TestP2PHub_RegisterAndRoles(t *testing.T) {
 	assert.Equal(t, "impolite", peer1.Info.Role, "First host peer should be assigned impolite role")
 
 	// Peer 2: Guest connects
-	conn2, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn2, _, err := dialer.Dial("ws://localhost/ws", nil)
 	require.NoError(t, err)
 	defer conn2.Close()
 
@@ -63,7 +133,7 @@ func TestP2PHub_RegisterAndRoles(t *testing.T) {
 	assert.Equal(t, "polite", peer2.Info.Role, "Guest peer paired with host should be assigned polite role")
 
 	// Peer 3 attempts to join: MUST be rejected with ErrRoomFull (strict 1:1 eligibility)
-	conn3, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn3, _, err := dialer.Dial("ws://localhost/ws", nil)
 	require.NoError(t, err)
 	defer conn3.Close()
 

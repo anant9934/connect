@@ -210,3 +210,10 @@ func TestRoomManager_CrossRoomAdminTokenRejection(t *testing.T) {
 	assert.False(t, claimsDisc.Video.RoomAdmin, "discovery token must not possess RoomAdmin privilege")
 	assert.Empty(t, claimsDisc.Video.Room, "discovery token has no room grant")
 }
+
+func TestRoomManager_MissingClientReturnsInfrastructureError(t *testing.T) {
+	rm := &RoomManager{}
+	info, err := rm.GetParticipant(context.Background(), "ROOM-1", "user-1")
+	assert.Nil(t, info)
+	assert.ErrorIs(t, err, ErrSFUClientNotConfigured)
+}

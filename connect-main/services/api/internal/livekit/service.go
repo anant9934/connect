@@ -288,10 +288,13 @@ func (m *RoomManager) DemoteToParticipant(ctx context.Context, roomCode, identit
 	})
 }
 
+// ErrSFUClientNotConfigured is returned when the LiveKit room service client has not been initialized.
+var ErrSFUClientNotConfigured = errors.New("livekit room service client not initialized")
+
 // GetParticipant queries LiveKit SFU for live participant details and permissions.
 func (m *RoomManager) GetParticipant(ctx context.Context, roomCode, identity string) (*proto.ParticipantInfo, error) {
 	if m.client == nil {
-		return nil, nil
+		return nil, ErrSFUClientNotConfigured
 	}
 
 	scopedCtx := WithRoomScope(ctx, roomCode)
