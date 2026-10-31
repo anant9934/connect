@@ -126,7 +126,7 @@ BEGIN
 
     BEGIN
         PERFORM * FROM connect_auth.authenticate_session(
-            'nonexistent_fake_token_hash_0123456789abcdef0123456789abcdef01234567'
+            '7777777777777777777777777777777777777777777777777777777777777777'
         );
         RAISE EXCEPTION 'VULNERABILITY DETECTED: authenticate_session accepted invalid token hash!';
     EXCEPTION
@@ -175,7 +175,7 @@ END $$;
 DO $$
 DECLARE
     v_test_user_id UUID := gen_random_uuid();
-    v_test_token_hash VARCHAR(64) := 'test_token_hash_scenario_7_abcdef0123456789abcdef0123456789abcdef';
+    v_test_token_hash VARCHAR(64) := '8888888888888888888888888888888888888888888888888888888888888888';
     v_org_unauthorized UUID := gen_random_uuid();
 BEGIN
     RAISE NOTICE 'Executing Attack Scenario 7: Unauthorized Org Membership Impersonation...';
