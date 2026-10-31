@@ -546,15 +546,23 @@ func TestSpeakerPromotion_ConcurrentSafety(t *testing.T) {
 }
 
 type mockSFURoundTripper struct {
-	failRPC       atomic.Bool
-	timeoutRPC    atomic.Bool
-	callCount     atomic.Int32
-	sfuCanPublish atomic.Bool
+	failRPC            atomic.Bool
+	timeoutRPC         atomic.Bool
+	failGetParticipant atomic.Bool
+	callCount          atomic.Int32
+	sfuCanPublish      atomic.Bool
 }
 
 func (m *mockSFURoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	m.callCount.Add(1)
 	if strings.HasSuffix(req.URL.Path, "/GetParticipant") {
+		if m.failGetParticipant.Load() {
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Body:       io.NopCloser(strings.NewReader(`{"error":"sfu unavailable"}`)),
+				Header:     make(http.Header),
+			}, nil
+		}
 		pInfo := &proto_livekit.ParticipantInfo{
 			Permission: &proto_livekit.ParticipantPermission{
 				CanPublish: m.sfuCanPublish.Load(),
@@ -911,4 +919,75 @@ func TestDistributedLease_MissingTableReturnsErrLockInfrastructureUnavailable(t 
 		assert.Equal(t, "42P01", targetErr.Code)
 	}
 	assert.ErrorIs(t, room.ErrLockInfrastructureUnavailable, room.ErrLockInfrastructureUnavailable)
+}
+
+func TestSpeakerPromotion_SFUQueryFailurePreservesUnknownState(t *testing.T) {
+	repo := room.NewMemoryRepository()
+	policy := room.NewPolicy()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditService := audit.NewService(nil, logger)
+	tokenService := livekit.NewTokenService("test_key", "test_secret")
+
+	mockTransport := &mockSFURoundTripper{}
+	mockRoomMgr := livekit.NewRoomManagerWithTransport("https://livekit.example.com", "test_key", "test_secret", mockTransport)
+
+	svc := room.NewServiceWithInstanceID(repo, policy, auditService, tokenService, mockRoomMgr, "node-unknown-state-test")
+
+	ctx := context.Background()
+	host := &auth.User{ID: "host-unknown", DisplayName: "Unknown State Host"}
+	student := &auth.User{ID: "student-unknown", DisplayName: "Unknown State Student"}
+	studentIdent := "user:" + student.ID
+
+	rm, err := svc.CreateRoom(ctx, host, 50, "127.0.0.1", "req-create")
+	if err != nil {
+		t.Fatalf("CreateRoom failed: %v", err)
+	}
+
+	_, err = svc.JoinRoom(ctx, rm.PublicCode, student, "", "127.0.0.1", "req-join")
+	if err != nil {
+		t.Fatalf("JoinRoom failed: %v", err)
+	}
+
+	// Case 1: RPC times out AND SFU query fails/is unavailable
+	// Service MUST leave transition_state as 'unknown' and NOT assume rollback!
+	mockTransport.timeoutRPC.Store(true)
+	mockTransport.failGetParticipant.Store(true)
+
+	errPromote := svc.PromoteSpeaker(ctx, rm.PublicCode, host, studentIdent, "127.0.0.1", "req-unknown-1")
+	if !errors.Is(errPromote, room.ErrSFUSyncFailed) {
+		t.Fatalf("expected ErrSFUSyncFailed when SFU query failed, got: %v", errPromote)
+	}
+
+	part, err := repo.GetParticipant(ctx, rm.ID, studentIdent)
+	if err != nil {
+		t.Fatalf("GetParticipant failed: %v", err)
+	}
+	if part.TransitionState != "unknown" {
+		t.Fatalf("expected transition_state to be 'unknown', got %q", part.TransitionState)
+	}
+	// Note: Role was set to speaker during BeginParticipantRoleTransition and NOT prematurely rolled back
+	if part.Role != livekit.RoleSpeaker {
+		t.Fatalf("expected role to remain speaker pending reconciliation (not rolled back), got %q", part.Role)
+	}
+
+	// Case 2: System recovers and ReconcileParticipant is called
+	mockTransport.timeoutRPC.Store(false)
+	mockTransport.failGetParticipant.Store(false)
+	mockTransport.sfuCanPublish.Store(true)
+
+	errRecon := svc.ReconcileParticipant(ctx, rm.PublicCode, studentIdent)
+	if errRecon != nil {
+		t.Fatalf("ReconcileParticipant failed after recovery: %v", errRecon)
+	}
+
+	partAfterRecon, err := repo.GetParticipant(ctx, rm.ID, studentIdent)
+	if err != nil {
+		t.Fatalf("GetParticipant after recon failed: %v", err)
+	}
+	if partAfterRecon.TransitionState != "idle" {
+		t.Fatalf("expected transition_state to be 'idle' after reconciliation, got %q", partAfterRecon.TransitionState)
+	}
+	if partAfterRecon.Role != livekit.RoleSpeaker {
+		t.Fatalf("expected role to be speaker after reconciliation, got %q", partAfterRecon.Role)
+	}
 }

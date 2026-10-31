@@ -782,20 +782,37 @@ func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.Us
 		if rpcErr != nil {
 			// Check for timeout ambiguity
 			if errors.Is(rpcErr, context.DeadlineExceeded) || strings.Contains(strings.ToLower(rpcErr.Error()), "deadline exceeded") {
-				// Mark transition as unknown for observability
+				// Mark transition as unknown for observability and reconciliation
 				_ = s.repo.SetParticipantTransitionUnknown(ctx, rm.ID, targetIdentity, opID, lock.Generation)
 
 				// Active query to SFU to inspect actual permission state
 				reconCtx, reconCancel := context.WithTimeout(context.Background(), 3*time.Second)
 				defer reconCancel()
 				pInfo, checkErr := s.roomManager.GetParticipant(reconCtx, normCode, targetIdentity)
-				if checkErr == nil && pInfo != nil && pInfo.Permission != nil && pInfo.Permission.CanPublish {
+				if checkErr != nil {
+					// Query to SFU failed or was unavailable: state is ambiguous!
+					// Do NOT assume rollback. Keep transition_state = 'unknown' for reconciliation.
+					if s.auditService != nil {
+						s.auditService.Record(ctx, audit.AuditParams{
+							EventType: "room.sfu_sync_ambiguous",
+							Severity:  "WARN",
+							ActorID:   user.ID,
+							RoomID:    rm.ID,
+							ClientIP:  clientIP,
+							RequestID: reqID,
+						})
+					}
+					log.Printf("[WARN] Participant %s role transition in room %s is ambiguous: rpc timeout (%v), sfu query failed (%v). State preserved as 'unknown' for background reconciliation.", targetIdentity, rm.ID, rpcErr, checkErr)
+					return fmt.Errorf("%w: sfu rpc timed out and sfu status query unavailable (%v); participant state is unknown and requires reconciliation", ErrSFUSyncFailed, checkErr)
+				}
+
+				if pInfo != nil && pInfo.Permission != nil && pInfo.Permission.CanPublish {
 					// SFU confirmed the participant has publishing permissions! Transition succeeded despite client timeout
 					_ = s.repo.CommitParticipantTransition(ctx, rm.ID, targetIdentity, opID, lock.Generation)
 					return nil
 				}
 
-				// Otherwise SFU did not apply permissions or is unreachable; safely rollback role
+				// SFU definitively responded and confirmed permissions were NOT applied; safely rollback role
 				rbErr := s.repo.RollbackParticipantRole(ctx, rm.ID, targetIdentity, prevRole, opID, lock.Generation)
 				if s.auditService != nil {
 					s.auditService.Record(ctx, audit.AuditParams{
@@ -915,20 +932,37 @@ func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.Use
 		if rpcErr != nil {
 			// Check for timeout ambiguity
 			if errors.Is(rpcErr, context.DeadlineExceeded) || strings.Contains(strings.ToLower(rpcErr.Error()), "deadline exceeded") {
-				// Mark transition as unknown for observability
+				// Mark transition as unknown for observability and reconciliation
 				_ = s.repo.SetParticipantTransitionUnknown(ctx, rm.ID, targetIdentity, opID, lock.Generation)
 
 				// Active query to SFU to inspect actual permission state
 				reconCtx, reconCancel := context.WithTimeout(context.Background(), 3*time.Second)
 				defer reconCancel()
 				pInfo, checkErr := s.roomManager.GetParticipant(reconCtx, normCode, targetIdentity)
-				if checkErr == nil && pInfo != nil && pInfo.Permission != nil && !pInfo.Permission.CanPublish {
+				if checkErr != nil {
+					// Query to SFU failed or was unavailable: state is ambiguous!
+					// Do NOT assume rollback. Keep transition_state = 'unknown' for reconciliation.
+					if s.auditService != nil {
+						s.auditService.Record(ctx, audit.AuditParams{
+							EventType: "room.sfu_sync_ambiguous",
+							Severity:  "WARN",
+							ActorID:   user.ID,
+							RoomID:    rm.ID,
+							ClientIP:  clientIP,
+							RequestID: reqID,
+						})
+					}
+					log.Printf("[WARN] Participant %s role transition in room %s is ambiguous: rpc timeout (%v), sfu query failed (%v). State preserved as 'unknown' for background reconciliation.", targetIdentity, rm.ID, rpcErr, checkErr)
+					return fmt.Errorf("%w: sfu rpc timed out and sfu status query unavailable (%v); participant state is unknown and requires reconciliation", ErrSFUSyncFailed, checkErr)
+				}
+
+				if pInfo == nil || (pInfo.Permission != nil && !pInfo.Permission.CanPublish) {
 					// SFU confirmed the participant has had publishing revoked! Demotion succeeded despite client timeout
 					_ = s.repo.CommitParticipantTransition(ctx, rm.ID, targetIdentity, opID, lock.Generation)
 					return nil
 				}
 
-				// Otherwise SFU did not revoke permissions or is unreachable; safely rollback role
+				// SFU definitively responded and confirmed participant still has publishing permissions; safely rollback role
 				rbErr := s.repo.RollbackParticipantRole(ctx, rm.ID, targetIdentity, prevRole, opID, lock.Generation)
 				if s.auditService != nil {
 					s.auditService.Record(ctx, audit.AuditParams{

@@ -334,12 +334,13 @@ func (r *PgxRepository) CommitParticipantTransition(ctx context.Context, roomID,
 	query := `
 		UPDATE room_participants
 		SET transition_state = 'idle',
-		    transition_op_id = ''
+		    transition_op_id = '',
+		    fencing_token = $3
 		WHERE room_id = $1
 		  AND identity = $2
 		  AND left_at IS NULL
-		  AND fencing_token = $3
-		  AND transition_op_id = $4
+		  AND fencing_token <= $3
+		  AND (transition_op_id = $4 OR transition_state != 'idle')
 	`
 	_, err := r.pool.Exec(ctx, query, roomID, identity, generation, opID)
 	return err
@@ -844,9 +845,10 @@ func (m *MemoryRepository) CommitParticipantTransition(_ context.Context, roomID
 
 	for _, p := range m.participants[roomID] {
 		if p.Identity == identity && p.LeftAt == nil {
-			if p.FencingToken == generation && p.TransitionOpID == opID {
+			if generation >= p.FencingToken && (p.TransitionOpID == opID || p.TransitionState != "idle") {
 				p.TransitionState = "idle"
 				p.TransitionOpID = ""
+				p.FencingToken = generation
 			}
 			return nil
 		}
