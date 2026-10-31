@@ -78,12 +78,20 @@ BEGIN
         RAISE EXCEPTION 'SECURITY BREACH: PUBLIC must NOT have EXECUTE on connect_auth.is_super_admin!';
     END IF;
 
+    IF has_function_privilege('public', 'connect_auth.current_role()', 'EXECUTE') THEN
+        RAISE EXCEPTION 'SECURITY BREACH: PUBLIC must NOT have EXECUTE on connect_auth.current_role!';
+    END IF;
+
     IF has_function_privilege('public', 'connect_auth.constant_time_equals(text,text)', 'EXECUTE') THEN
         RAISE EXCEPTION 'SECURITY BREACH: PUBLIC must NOT have EXECUTE on connect_auth.constant_time_equals!';
     END IF;
 
     IF NOT has_function_privilege('connect_app', 'connect_auth.authenticate_session(varchar,uuid)', 'EXECUTE') THEN
         RAISE EXCEPTION 'ASSERTION FAILED: connect_app must have EXECUTE on connect_auth.authenticate_session!';
+    END IF;
+
+    IF NOT has_function_privilege('connect_app', 'connect_auth.current_role()', 'EXECUTE') THEN
+        RAISE EXCEPTION 'ASSERTION FAILED: connect_app must have EXECUTE on connect_auth.current_role!';
     END IF;
 
     IF NOT has_function_privilege('connect_app', 'connect_auth.constant_time_equals(text,text)', 'EXECUTE') THEN

@@ -94,6 +94,7 @@ DECLARE
     v_role VARCHAR(32) := NULL;
     v_mem_status VARCHAR(32) := NULL;
     v_is_super BOOLEAN := false;
+    v_nonce TEXT;
     v_xid TEXT;
     v_exp BIGINT;
     v_secret BYTEA;
@@ -134,19 +135,22 @@ BEGIN
         END IF;
     END IF;
 
-    -- 4. Bind to Current 64-bit Transaction ID & Expiration Window
+    -- 4. Bind to Current 64-bit Transaction ID, Cryptographic Nonce & Expiration Window
     v_xid := pg_catalog.pg_current_xact_id()::TEXT;
     v_exp := EXTRACT(epoch FROM (pg_catalog.clock_timestamp() + INTERVAL '10 minutes'))::BIGINT;
+    v_nonce := pg_catalog.encode(public.gen_random_bytes(16), 'hex');
 
     -- 5. Retrieve Internal Secret & Compute HMAC-SHA256 Signature
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
-    v_payload := v_user_id::TEXT || '|' || COALESCE(p_requested_org_id::TEXT, '') || '|' || v_is_super::TEXT || '|' || v_xid || '|' || v_exp::TEXT;
+    v_payload := v_user_id::TEXT || '|' || COALESCE(p_requested_org_id::TEXT, '') || '|' || v_is_super::TEXT || '|' || COALESCE(v_role, '') || '|' || v_nonce || '|' || v_xid || '|' || v_exp::TEXT;
     v_sig := pg_catalog.encode(public.hmac(v_payload::BYTEA, v_secret, 'sha256'), 'hex');
 
     -- 6. Set Transaction-Local Session Variables (Scoped Strictly to this Transaction)
     PERFORM pg_catalog.set_config('app._user_id', v_user_id::TEXT, true);
     PERFORM pg_catalog.set_config('app._org_id', COALESCE(p_requested_org_id::TEXT, ''), true);
+    PERFORM pg_catalog.set_config('app._role', COALESCE(v_role, ''), true);
     PERFORM pg_catalog.set_config('app._is_super', CASE WHEN v_is_super THEN 'true' ELSE 'false' END, true);
+    PERFORM pg_catalog.set_config('app._nonce', v_nonce, true);
     PERFORM pg_catalog.set_config('app._xid', v_xid, true);
     PERFORM pg_catalog.set_config('app._exp', v_exp::TEXT, true);
     PERFORM pg_catalog.set_config('app._sig', v_sig, true);
@@ -157,7 +161,7 @@ $$;
 
 REVOKE ALL ON FUNCTION connect_auth.authenticate_session(VARCHAR, UUID) FROM PUBLIC;
 
--- 3. Internal Cryptographic Verification Functions for RLS Policies
+-- 4. Internal Cryptographic Verification Functions for RLS Policies
 CREATE OR REPLACE FUNCTION connect_auth.current_org_id()
 RETURNS UUID
 SECURITY DEFINER
@@ -166,14 +170,16 @@ LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_user TEXT := pg_catalog.current_setting('app._user_id', true);
     v_org TEXT := pg_catalog.current_setting('app._org_id', true);
+    v_role TEXT := pg_catalog.current_setting('app._role', true);
     v_super TEXT := pg_catalog.current_setting('app._is_super', true);
+    v_nonce TEXT := pg_catalog.current_setting('app._nonce', true);
     v_xid TEXT := pg_catalog.current_setting('app._xid', true);
     v_exp TEXT := pg_catalog.current_setting('app._exp', true);
     v_sig TEXT := pg_catalog.current_setting('app._sig', true);
     v_secret BYTEA;
     v_expected_sig TEXT;
 BEGIN
-    IF v_user IS NULL OR v_xid IS NULL OR v_exp IS NULL OR v_sig IS NULL THEN
+    IF v_user IS NULL OR v_xid IS NULL OR v_exp IS NULL OR v_sig IS NULL OR v_nonce IS NULL THEN
         RETURN NULL; -- Fail closed: Missing context
     END IF;
 
@@ -187,11 +193,11 @@ BEGIN
         RETURN NULL; -- Fail closed: Expired context
     END IF;
 
-    -- Verify cryptographic signature
+    -- Verify cryptographic signature using constant-time comparison
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
-    v_expected_sig := pg_catalog.encode(public.hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
+    v_expected_sig := pg_catalog.encode(public.hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || COALESCE(v_role, '') || '|' || v_nonce || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
 
-    IF v_sig != v_expected_sig THEN
+    IF NOT connect_auth.constant_time_equals(v_sig, v_expected_sig) THEN
         RETURN NULL; -- Fail closed: Forged or tampered GUC parameters!
     END IF;
 
@@ -213,14 +219,16 @@ LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_user TEXT := pg_catalog.current_setting('app._user_id', true);
     v_org TEXT := pg_catalog.current_setting('app._org_id', true);
+    v_role TEXT := pg_catalog.current_setting('app._role', true);
     v_super TEXT := pg_catalog.current_setting('app._is_super', true);
+    v_nonce TEXT := pg_catalog.current_setting('app._nonce', true);
     v_xid TEXT := pg_catalog.current_setting('app._xid', true);
     v_exp TEXT := pg_catalog.current_setting('app._exp', true);
     v_sig TEXT := pg_catalog.current_setting('app._sig', true);
     v_secret BYTEA;
     v_expected_sig TEXT;
 BEGIN
-    IF v_user IS NULL OR v_xid IS NULL OR v_exp IS NULL OR v_sig IS NULL THEN
+    IF v_user IS NULL OR v_xid IS NULL OR v_exp IS NULL OR v_sig IS NULL OR v_nonce IS NULL THEN
         RETURN NULL;
     END IF;
 
@@ -233,9 +241,9 @@ BEGIN
     END IF;
 
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
-    v_expected_sig := pg_catalog.encode(public.hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
+    v_expected_sig := pg_catalog.encode(public.hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || COALESCE(v_role, '') || '|' || v_nonce || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
 
-    IF v_sig != v_expected_sig THEN
+    IF NOT connect_auth.constant_time_equals(v_sig, v_expected_sig) THEN
         RETURN NULL;
     END IF;
 
@@ -245,6 +253,52 @@ $$;
 
 REVOKE ALL ON FUNCTION connect_auth.current_user_id() FROM PUBLIC;
 
+CREATE OR REPLACE FUNCTION connect_auth.current_role()
+RETURNS VARCHAR
+SECURITY DEFINER
+SET search_path = pg_catalog, public, connect_auth
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_user TEXT := pg_catalog.current_setting('app._user_id', true);
+    v_org TEXT := pg_catalog.current_setting('app._org_id', true);
+    v_role TEXT := pg_catalog.current_setting('app._role', true);
+    v_super TEXT := pg_catalog.current_setting('app._is_super', true);
+    v_nonce TEXT := pg_catalog.current_setting('app._nonce', true);
+    v_xid TEXT := pg_catalog.current_setting('app._xid', true);
+    v_exp TEXT := pg_catalog.current_setting('app._exp', true);
+    v_sig TEXT := pg_catalog.current_setting('app._sig', true);
+    v_secret BYTEA;
+    v_expected_sig TEXT;
+BEGIN
+    IF v_user IS NULL OR v_xid IS NULL OR v_exp IS NULL OR v_sig IS NULL OR v_nonce IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    IF v_xid != pg_catalog.pg_current_xact_id()::TEXT THEN
+        RETURN NULL;
+    END IF;
+
+    IF EXTRACT(epoch FROM pg_catalog.clock_timestamp()) > v_exp::BIGINT THEN
+        RETURN NULL;
+    END IF;
+
+    SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
+    v_expected_sig := pg_catalog.encode(public.hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || COALESCE(v_role, '') || '|' || v_nonce || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
+
+    IF NOT connect_auth.constant_time_equals(v_sig, v_expected_sig) THEN
+        RETURN NULL;
+    END IF;
+
+    IF v_role IS NULL OR v_role = '' THEN
+        RETURN NULL;
+    END IF;
+
+    RETURN v_role::VARCHAR;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION connect_auth.current_role() FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION connect_auth.is_super_admin()
 RETURNS BOOLEAN
 SECURITY DEFINER
@@ -253,14 +307,16 @@ LANGUAGE plpgsql STABLE AS $$
 DECLARE
     v_user TEXT := pg_catalog.current_setting('app._user_id', true);
     v_org TEXT := pg_catalog.current_setting('app._org_id', true);
+    v_role TEXT := pg_catalog.current_setting('app._role', true);
     v_super TEXT := pg_catalog.current_setting('app._is_super', true);
+    v_nonce TEXT := pg_catalog.current_setting('app._nonce', true);
     v_xid TEXT := pg_catalog.current_setting('app._xid', true);
     v_exp TEXT := pg_catalog.current_setting('app._exp', true);
     v_sig TEXT := pg_catalog.current_setting('app._sig', true);
     v_secret BYTEA;
     v_expected_sig TEXT;
 BEGIN
-    IF v_user IS NULL OR v_xid IS NULL OR v_exp IS NULL OR v_sig IS NULL THEN
+    IF v_user IS NULL OR v_xid IS NULL OR v_exp IS NULL OR v_sig IS NULL OR v_nonce IS NULL THEN
         RETURN false;
     END IF;
 
@@ -273,9 +329,9 @@ BEGIN
     END IF;
 
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
-    v_expected_sig := pg_catalog.encode(public.hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
+    v_expected_sig := pg_catalog.encode(public.hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || COALESCE(v_role, '') || '|' || v_nonce || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
 
-    IF v_sig != v_expected_sig THEN
+    IF NOT connect_auth.constant_time_equals(v_sig, v_expected_sig) THEN
         RETURN false;
     END IF;
 
@@ -702,6 +758,7 @@ GRANT USAGE ON SCHEMA connect_auth TO connect_app, connect_worker;
 GRANT EXECUTE ON FUNCTION connect_auth.authenticate_session(VARCHAR, UUID) TO connect_app, connect_worker;
 GRANT EXECUTE ON FUNCTION connect_auth.current_org_id() TO connect_app, connect_worker;
 GRANT EXECUTE ON FUNCTION connect_auth.current_user_id() TO connect_app, connect_worker;
+GRANT EXECUTE ON FUNCTION connect_auth.current_role() TO connect_app, connect_worker;
 GRANT EXECUTE ON FUNCTION connect_auth.is_super_admin() TO connect_app, connect_worker;
 GRANT EXECUTE ON FUNCTION connect_auth.constant_time_equals(TEXT, TEXT) TO connect_app, connect_worker;
 
