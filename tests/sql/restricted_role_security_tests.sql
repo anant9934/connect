@@ -272,6 +272,49 @@ BEGIN
     END;
 END $$;
 
+-- Test 2.7: RBAC Cryptographic Role Verification & Anti-Tampering
+DO $$
+DECLARE
+    v_token_a VARCHAR(64) := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    v_org_a UUID := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::UUID;
+    v_role VARCHAR;
+BEGIN
+    RAISE NOTICE '[ROLE: connect_app] Test 2.7: Testing cryptographic role verification and anti-tampering...';
+    PERFORM * FROM connect_auth.authenticate_session(v_token_a, v_org_a);
+
+    v_role := connect_auth.current_role();
+    IF v_role != 'institution_member' THEN
+        RAISE EXCEPTION 'ASSERTION FAILED: Expected role institution_member for Alice, got %', v_role;
+    END IF;
+    RAISE NOTICE '✓ [PASS] Authoritative role correctly extracted as %.', v_role;
+
+    -- Attacker attempts to tamper with app._role GUC
+    PERFORM set_config('app._role', 'institution_admin', true);
+    v_role := connect_auth.current_role();
+    IF v_role IS NOT NULL THEN
+        RAISE EXCEPTION 'SECURITY BREACH: current_role accepted tampered app._role!';
+    END IF;
+    RAISE NOTICE '✓ [PASS] Tampered app._role rejected with NULL by constant-time cryptographic verification.';
+END $$;
+
+-- Test 2.8: Background Jobs Queue RLS Isolation
+DO $$
+DECLARE
+    v_token_a VARCHAR(64) := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    v_org_a UUID := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::UUID;
+    v_count INT;
+BEGIN
+    RAISE NOTICE '[ROLE: connect_app] Test 2.8: Testing background_jobs RLS isolation under non-super-admin...';
+    PERFORM * FROM connect_auth.authenticate_session(v_token_a, v_org_a);
+
+    -- Non-super-admin Alice must see 0 background jobs
+    SELECT count(*) INTO v_count FROM background_jobs;
+    IF v_count != 0 THEN
+        RAISE EXCEPTION 'SECURITY BREACH: Non-super-admin user can view % background_jobs!', v_count;
+    END IF;
+    RAISE NOTICE '✓ [PASS] Non-super-admin user sees 0 background_jobs.';
+END $$;
+
 RESET ROLE;
 
 -- ------------------------------------------------------------------------------
