@@ -404,5 +404,5 @@ BEGIN
     DELETE FROM users WHERE id IN (v_user_a, v_user_b, v_user_auditor);
     DELETE FROM organizations WHERE id IN (v_org_a, v_org_b);
     RAISE NOTICE '✓ [CLEANUP] Multi-tenant test fixtures cleaned up.';
-    RAISE NOTICE 'ALL RESTRICTED-ROLE SECURITY TESTS UNDER connect_app PASSED 100%!';
+    RAISE NOTICE 'ALL RESTRICTED-ROLE SECURITY TESTS UNDER connect_app PASSED 100%%!';
 END $$;
