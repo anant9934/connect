@@ -554,32 +554,319 @@ CREATE POLICY rls_departments_delete ON departments
         )
     );
 
+-- Courses: Restrictive Isolation and RBAC Policies
+CREATE POLICY rls_tenant_courses ON courses
+    AS RESTRICTIVE USING (
+        connect_auth.is_super_admin() OR
+        organization_id = connect_auth.current_org_id()
+    );
+
 CREATE POLICY rls_courses_select_member ON courses
     AS PERMISSIVE FOR SELECT
     USING (organization_id = connect_auth.current_org_id());
 
+CREATE POLICY rls_courses_insert ON courses
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+        )
+    );
+
+CREATE POLICY rls_courses_update ON courses
+    AS PERMISSIVE FOR UPDATE
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+        )
+    )
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+        )
+    );
+
+CREATE POLICY rls_courses_delete ON courses
+    AS PERMISSIVE FOR DELETE
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
+    );
+
+-- Course Batches: Restrictive Isolation and RBAC Policies
 CREATE POLICY rls_tenant_batches ON course_batches
     AS RESTRICTIVE USING (
         connect_auth.is_super_admin() OR
         organization_id = connect_auth.current_org_id()
     );
 
+CREATE POLICY rls_batches_select ON course_batches
+    AS PERMISSIVE FOR SELECT
+    USING (
+        connect_auth.is_super_admin() OR
+        organization_id = connect_auth.current_org_id()
+    );
+
+CREATE POLICY rls_batches_insert ON course_batches
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+        )
+    );
+
+CREATE POLICY rls_batches_update ON course_batches
+    AS PERMISSIVE FOR UPDATE
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+        )
+    )
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+        )
+    );
+
+CREATE POLICY rls_batches_delete ON course_batches
+    AS PERMISSIVE FOR DELETE
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
+    );
+
+-- Faculty Allocations: Restrictive Isolation and RBAC Policies
 CREATE POLICY rls_tenant_allocations ON faculty_allocations
     AS RESTRICTIVE USING (
         connect_auth.is_super_admin() OR
         organization_id = connect_auth.current_org_id()
     );
 
+CREATE POLICY rls_allocations_select ON faculty_allocations
+    AS PERMISSIVE FOR SELECT
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            (
+                connect_auth.current_role() IN ('institution_admin', 'institution_auditor', 'department_coordinator') OR
+                faculty_user_id = connect_auth.current_user_id() OR
+                EXISTS (
+                    SELECT 1 FROM course_enrollments ce
+                    WHERE ce.course_batch_id = faculty_allocations.course_batch_id
+                      AND ce.student_user_id = connect_auth.current_user_id()
+                      AND ce.status = 'active'
+                )
+            )
+        )
+    );
+
+CREATE POLICY rls_allocations_insert ON faculty_allocations
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+        )
+    );
+
+CREATE POLICY rls_allocations_update ON faculty_allocations
+    AS PERMISSIVE FOR UPDATE
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+        )
+    )
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+        )
+    );
+
+CREATE POLICY rls_allocations_delete ON faculty_allocations
+    AS PERMISSIVE FOR DELETE
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
+    );
+
+-- Course Enrollments: Restrictive Isolation and RBAC Policies
 CREATE POLICY rls_tenant_enrollments ON course_enrollments
     AS RESTRICTIVE USING (
         connect_auth.is_super_admin() OR
         organization_id = connect_auth.current_org_id()
     );
 
+CREATE POLICY rls_enrollments_select ON course_enrollments
+    AS PERMISSIVE FOR SELECT
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            (
+                student_user_id = connect_auth.current_user_id() OR
+                connect_auth.current_role() IN ('institution_admin', 'institution_auditor', 'department_coordinator') OR
+                EXISTS (
+                    SELECT 1 FROM faculty_allocations fa
+                    WHERE fa.course_batch_id = course_enrollments.course_batch_id
+                      AND fa.faculty_user_id = connect_auth.current_user_id()
+                )
+            )
+        )
+    );
+
+CREATE POLICY rls_enrollments_insert ON course_enrollments
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+        )
+    );
+
+CREATE POLICY rls_enrollments_update ON course_enrollments
+    AS PERMISSIVE FOR UPDATE
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+        )
+    )
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'department_coordinator')
+        )
+    );
+
+CREATE POLICY rls_enrollments_delete ON course_enrollments
+    AS PERMISSIVE FOR DELETE
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
+    );
+
+-- Class Sessions: Restrictive Isolation and RBAC Policies
 CREATE POLICY rls_tenant_sessions ON class_sessions
     AS RESTRICTIVE USING (
         connect_auth.is_super_admin() OR
         organization_id = connect_auth.current_org_id()
+    );
+
+CREATE POLICY rls_sessions_select ON class_sessions
+    AS PERMISSIVE FOR SELECT
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            (
+                connect_auth.current_role() IN ('institution_admin', 'institution_auditor', 'department_coordinator') OR
+                EXISTS (
+                    SELECT 1 FROM faculty_allocations fa
+                    WHERE fa.id = class_sessions.faculty_allocation_id
+                      AND fa.faculty_user_id = connect_auth.current_user_id()
+                ) OR
+                EXISTS (
+                    SELECT 1 FROM course_enrollments ce
+                    WHERE ce.course_batch_id = class_sessions.course_batch_id
+                      AND ce.student_user_id = connect_auth.current_user_id()
+                      AND ce.status = 'active'
+                )
+            )
+        )
+    );
+
+CREATE POLICY rls_sessions_insert ON class_sessions
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                EXISTS (
+                    SELECT 1 FROM faculty_allocations fa
+                    WHERE fa.id = class_sessions.faculty_allocation_id
+                      AND fa.faculty_user_id = connect_auth.current_user_id()
+                      AND fa.status IN ('active', 'ended')
+                )
+            )
+        )
+    );
+
+CREATE POLICY rls_sessions_update ON class_sessions
+    AS PERMISSIVE FOR UPDATE
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                EXISTS (
+                    SELECT 1 FROM faculty_allocations fa
+                    WHERE fa.id = class_sessions.faculty_allocation_id
+                      AND fa.faculty_user_id = connect_auth.current_user_id()
+                      AND fa.status IN ('active', 'ended')
+                )
+            )
+        )
+    )
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                EXISTS (
+                    SELECT 1 FROM faculty_allocations fa
+                    WHERE fa.id = class_sessions.faculty_allocation_id
+                      AND fa.faculty_user_id = connect_auth.current_user_id()
+                      AND fa.status IN ('active', 'ended')
+                )
+            )
+        )
+    );
+
+CREATE POLICY rls_sessions_delete ON class_sessions
+    AS PERMISSIVE FOR DELETE
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
     );
 
 CREATE POLICY rls_tenant_attendance ON attendance_records
@@ -646,6 +933,25 @@ CREATE POLICY rls_attendance_update_faculty_admin ON attendance_records
     )
     WITH CHECK (
         organization_id = connect_auth.current_org_id()
+    );
+
+CREATE POLICY rls_attendance_insert ON attendance_records
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            (
+                connect_auth.current_role() = 'institution_admin' OR
+                EXISTS (
+                    SELECT 1 FROM class_sessions cs
+                    JOIN faculty_allocations fa ON cs.faculty_allocation_id = fa.id
+                    WHERE cs.id = attendance_records.class_session_id
+                      AND fa.faculty_user_id = connect_auth.current_user_id()
+                      AND fa.status IN ('active', 'ended')
+                )
+            )
+        )
     );
 
 -- Rooms: Explicitly Separated SELECT, INSERT, UPDATE, DELETE with Hardened Commons Protection
@@ -924,5 +1230,13 @@ GRANT EXECUTE ON FUNCTION connect_auth.current_role() TO connect_app, connect_wo
 GRANT EXECUTE ON FUNCTION connect_auth.is_super_admin() TO connect_app, connect_worker;
 GRANT EXECUTE ON FUNCTION connect_auth.constant_time_equals(TEXT, TEXT) TO connect_app, connect_worker;
 
--- Explicit Zero-Access Isolation on Internal HMAC Secret Table
+-- Domain Table Access for Application and Background Worker Runtime Roles
+GRANT USAGE ON SCHEMA public TO connect_app, connect_worker;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO connect_app, connect_worker;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO connect_app, connect_worker;
+
+-- Explicit Zero-Access Isolation on Internal HMAC Secret Table & Immutable Tables
 REVOKE ALL ON TABLE connect_auth.internal_keys FROM PUBLIC, connect_app, connect_worker;
+REVOKE DELETE ON attendance_records FROM PUBLIC, connect_app, connect_worker;
+REVOKE UPDATE, DELETE ON participant_connection_events FROM PUBLIC, connect_app, connect_worker;
+REVOKE UPDATE, DELETE ON attendance_overrule_audit_log FROM PUBLIC, connect_app, connect_worker;
