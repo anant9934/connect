@@ -19,7 +19,8 @@ DECLARE
     v_token_a VARCHAR(64) := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     v_token_b VARCHAR(64) := 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
     v_token_auditor VARCHAR(64) := '3333333333333333333333333333333333333333333333333333333333333333';
-    v_room_commons UUID := 'cccccccc-cccc-cccc-cccc-cccccccccccc'::UUID;
+    v_room_commons_private UUID := 'cccccccc-cccc-cccc-cccc-cccccccccccc'::UUID;
+    v_room_commons_shared UUID := 'c1111111-1111-1111-1111-111111111111'::UUID;
     v_department_a UUID := 'dddddddd-dddd-dddd-dddd-dddddddddddd'::UUID;
     v_department_b UUID := 'd2222222-2222-2222-2222-222222222222'::UUID;
     v_note_private UUID := 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'::UUID;
@@ -33,7 +34,7 @@ BEGIN
     -- Clean up prior test data if exists
     DELETE FROM attendance_overrule_audit_log WHERE organization_id IN (v_org_a, v_org_b);
     DELETE FROM meeting_notes WHERE id IN (v_note_private, v_note_shared);
-    DELETE FROM rooms WHERE id = v_room_commons;
+    DELETE FROM rooms WHERE id IN (v_room_commons_private, v_room_commons_shared);
     DELETE FROM courses WHERE organization_id IN (v_org_a, v_org_b);
     DELETE FROM departments WHERE organization_id IN (v_org_a, v_org_b);
     DELETE FROM organization_memberships WHERE organization_id IN (v_org_a, v_org_b);
@@ -72,13 +73,14 @@ BEGIN
     (gen_random_uuid(), v_org_a, v_department_a, 'CS401', 'Distributed Systems'),
     (gen_random_uuid(), v_org_b, v_department_b, 'ME201', 'Thermodynamics');
 
-    -- 5. Personal Commons Room & Notes Created by Alice
-    INSERT INTO rooms (id, public_code, host_user_id, workspace_type, is_locked)
-    VALUES (v_room_commons, 'alice-commons-room', v_user_a, 'personal_commons', false);
+    -- 5. Personal Commons Rooms & Notes Created by Alice
+    INSERT INTO rooms (id, public_code, host_user_id, workspace_type, is_locked) VALUES
+    (v_room_commons_private, 'alice-commons-private', v_user_a, 'personal_commons', false),
+    (v_room_commons_shared, 'alice-commons-shared', v_user_a, 'personal_commons', false);
 
     INSERT INTO meeting_notes (id, room_id, created_by, created_by_identity, updated_by_identity, title, content, visibility) VALUES
-    (v_note_private, v_room_commons, v_user_a, 'alice-ident', 'alice-ident', 'Alice Private Notes', 'Private Alice Research', 'private'),
-    (v_note_shared, v_room_commons, v_user_a, 'alice-ident', 'alice-ident', 'Alice Shared Notes', 'Publicly Readable Research', 'shared');
+    (v_note_private, v_room_commons_private, v_user_a, 'alice-ident', 'alice-ident', 'Alice Private Notes', 'Private Alice Research', 'private'),
+    (v_note_shared, v_room_commons_shared, v_user_a, 'alice-ident', 'alice-ident', 'Alice Shared Notes', 'Publicly Readable Research', 'shared');
 
     RAISE NOTICE '✓ [PASS] Fixtures successfully created.';
 END $$;
@@ -385,12 +387,13 @@ DECLARE
     v_token_a VARCHAR(64) := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     v_token_b VARCHAR(64) := 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
     v_token_auditor VARCHAR(64) := '3333333333333333333333333333333333333333333333333333333333333333';
-    v_room_commons UUID := 'cccccccc-cccc-cccc-cccc-cccccccccccc'::UUID;
+    v_room_commons_private UUID := 'cccccccc-cccc-cccc-cccc-cccccccccccc'::UUID;
+    v_room_commons_shared UUID := 'c1111111-1111-1111-1111-111111111111'::UUID;
     v_note_private UUID := 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'::UUID;
     v_note_shared UUID := 'ffffffff-ffff-ffff-ffff-ffffffffffff'::UUID;
 BEGIN
     DELETE FROM meeting_notes WHERE id IN (v_note_private, v_note_shared);
-    DELETE FROM rooms WHERE id = v_room_commons;
+    DELETE FROM rooms WHERE id IN (v_room_commons_private, v_room_commons_shared);
     DELETE FROM courses WHERE organization_id IN (v_org_a, v_org_b);
     DELETE FROM departments WHERE organization_id IN (v_org_a, v_org_b);
     DELETE FROM organization_memberships WHERE organization_id IN (v_org_a, v_org_b);
