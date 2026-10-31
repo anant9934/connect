@@ -8,7 +8,7 @@ Connect targets **PostgreSQL 16** as its production relational database engine (
 
 ---
 
-## 2. UUIDv7 Implementation & Monotonicity Analysis
+## 2. UUIDv7 Implementation & Ordering Analysis
 
 ### 2.1 RFC 9562 PL/pgSQL Implementation
 Because standard PostgreSQL does not yet ship a native C-extension `uuid_generate_v7()` built-in, Connect embeds an optimized, pure PL/pgSQL implementation conforming strictly to RFC 9562 in migration `000007_tenancy_and_academic_core.sql`.
@@ -34,13 +34,18 @@ END;
 $$;
 ```
 
-### 2.2 Monotonicity & B-Tree Index Fragmentation Evaluation
-- **Test Methodology**: Generated 100,000 UUIDs using `uuid_generate_v7()` under concurrent execution and compared B-tree index metrics against standard random UUIDv4 (`gen_random_uuid()`).
-- **Results**:
-  - **Index Leaf Page Splits**: UUIDv7 exhibited a **94.2% reduction in leaf page splits** compared to UUIDv4, as new keys append to the right edge of the index tree.
-  - **Index Size**: Index bloat was reduced by **38%** over 100,000 continuous insertions.
-  - **Monotonicity**: All generated UUIDs strictly satisfied `A < B` when generated at distinct millisecond timestamps ($T_A < T_B$).
-  - **Intra-Millisecond Collisions**: Within the same millisecond, 74 bits of cryptographically secure pseudo-randomness eliminate collision probability ($< 10^{-18}$).
+### 2.2 Time-Ordering vs. Strict Monotonicity
+- **Time-Ordered Clustering**: UUIDv7 embeds a 48-bit millisecond UNIX timestamp in the most significant bits. This produces time-locality for B-tree indices, eliminating the random mid-page splits characteristic of UUIDv4 (`gen_random_uuid()`).
+- **Monotonicity Boundaries**:
+  - RFC 9562 UUIDv7 without a centralized sequence generator is **time-ordered per millisecond**, but is **NOT strictly monotonic** across multiple database connections, concurrent workers, or during millisecond sub-intervals (where 74 pseudo-random bits provide uniqueness rather than a monotonic counter).
+  - Furthermore, system clock rollback or NTP adjustments can cause non-monotonic timestamps.
+- **Strict Ordering in Connect Domain**:
+  - For domain operations requiring strict, verifiable ordering (specifically attendance and connection auditing), Connect **does NOT rely on UUIDv7 for ordering**.
+  - Instead, `participant_connection_events` enforces an explicit, client-streamed sequence number:
+    `sequence_number BIGINT NOT NULL`
+    `CONSTRAINT uq_conn_events_stream UNIQUE (room_id, client_connection_id, sequence_number)`
+    `CONSTRAINT ck_conn_events_seq CHECK (sequence_number > 0)`
+  - This ensures causal ordering is preserved irrespective of clock skews or UUIDv7 generation order.
 
 ---
 

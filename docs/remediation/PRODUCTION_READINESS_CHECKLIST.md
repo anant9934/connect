@@ -10,31 +10,32 @@ This checklist provides the definitive production readiness assessment for the C
 
 | Gate | Domain | Evaluation Criteria | Verification Artifact | Status |
 | :---: | :--- | :--- | :--- | :---: |
-| **A** | Database Schema Integrity | PostgreSQL 16 DDL validity, UUIDv7 monotonicity, non-blocking index strategies, foreign key constraints | `migrations/000007_*.sql`, `POSTGRESQL_16_TEST_REPORT.md` | **PASS** |
-| **B** | RLS Context & Isolation | Cryptographic HMAC context signature, transaction-bound GUCs, 14-table RLS matrix with `FORCE RLS` | `migrations/000008_*.sql`, `RLS_POLICY_MATRIX.md`, `SECURITY_TEST_REPORT.md` | **PASS** |
-| **C** | Academic Lifecycle | Temporal membership checks, `valid_during` range enforcement, faculty allocation & enrollment state machines | `internal/academic/`, `academic_test.go` | **PASS** |
-| **D** | Attendance Ledger | Immutable event ledger (`UPDATE`/`DELETE` blocked), multi-tab interval union engine, overrule audit logging | `internal/attendance/`, `attendance_test.go`, `ATTENDANCE_ARCHITECTURE.md` | **PASS** |
-| **E** | Keyset Backfill Safety | 1,000-row batching, transaction per batch, restartable checkpointing in DB, replication lag throttling, quarantine | `cmd/backfill_tenancy/`, `backfill_test.go`, `MIGRATION_AND_BACKFILL_PLAN.md` | **PASS** |
+| **A** | Database Schema Integrity | PostgreSQL 16 DDL validity, UUIDv7 ordering, non-blocking index strategies, foreign key constraints | `migrations/000007_*.sql`, `POSTGRESQL_16_TEST_REPORT.md` | **BLOCKED (Pending Live PG16 Execution)** |
+| **B** | RLS Context & Isolation | Cryptographic HMAC context signature, transaction-bound GUCs, 14-table RLS matrix with `FORCE RLS` | `migrations/000008_*.sql`, `RLS_POLICY_MATRIX.md`, `SECURITY_TEST_REPORT.md` | **BLOCKED (Pending Live RLS Execution)** |
+| **C** | Academic Lifecycle | Temporal membership checks, `valid_during` range enforcement, faculty allocation & enrollment state machines | `internal/academic/`, `academic_test.go` | **PASS (Unit Verified)** |
+| **D** | Attendance Ledger | Immutable event ledger (`UPDATE`/`DELETE` blocked), multi-tab interval union engine, overrule audit logging | `internal/attendance/`, `attendance_test.go`, `ATTENDANCE_ARCHITECTURE.md` | **PASS (Unit Verified; DB Pending)** |
+| **E** | Keyset Backfill Safety | 1,000-row batching, transaction per batch, restartable checkpointing in DB, replication lag throttling, quarantine | `cmd/backfill_tenancy/`, `backfill_test.go`, `MIGRATION_AND_BACKFILL_PLAN.md` | **PASS (Unit Verified; Perf Model)** |
 | **F** | CI/CD Security Gating | Gitleaks blocking secret scanning in CI (`continue-on-error: false`), baseline allowlist, pre-commit health check | `.github/workflows/quality-gate.yml`, `.gitleaks.toml`, `health-check.sh` | **PASS** |
-| **G** | Production Operations & Secrets | Historical Supabase credential rotated out-of-band by owner; no live DB migration executed without explicit auth | Cloud Console, Stage B sign-off | **BLOCKED (External)** |
+| **G** | Production Operations & Secrets | Historical Supabase credential rotated out-of-band by owner; no live DB migration executed without explicit auth | Cloud Console, Stage B sign-off | **BLOCKED (External Dependency)** |
 
 ---
 
 ## 3. Detailed Gate Findings
 
-### Gate A: Database Schema Integrity (PASS)
+### Gate A: Database Schema Integrity (BLOCKED - Pending Live PG16 Execution)
 - **Criteria**: Valid PostgreSQL 16 DDL, RFC 9562 UUIDv7 generator, composite tenant foreign keys on all child entities.
-- **Verification Evidence**:
-  - DDL syntax validated against PostgreSQL 16 specifications.
-  - Composite foreign keys `(organization_id, ...)` prevent cross-tenant referencing across 100% of academic and session entities.
-  - All new indices configured for concurrent execution.
+- **Current Evidence & Status**:
+  - DDL syntax and constraint definitions are implemented in `migrations/000007_tenancy_and_academic_core.sql`.
+  - Composite foreign keys `(organization_id, ...)` are specified to prevent cross-tenant referencing across 100% of academic and session entities.
+  - **Blocker**: Full migration chain execution (000001–000008) against a live, disposable PostgreSQL 16 instance has not yet been executed in this environment due to absence of local Docker/Postgres daemon and strict prohibitions against unapproved execution on live databases.
 
-### Gate B: RLS Context & Multi-Tenant Isolation (PASS)
-- **Criteria**: Zero trust on client-supplied GUCs. Tampering with session variables causes immediate fail-closed denial.
-- **Verification Evidence**:
-  - `connect_auth.authenticate_session` produces HMAC-SHA256 signature binding user ID, org ID, super-admin flag, transaction ID (`pg_current_xact_id()`), and expiry timestamp.
-  - Unit tests verify tampering with `app.current_org_id` returns `NULL`, blocking all data visibility.
-  - All 14 multi-tenant tables enforce `FORCE ROW LEVEL SECURITY`.
+### Gate B: RLS Context & Multi-Tenant Isolation (BLOCKED - Pending Live RLS Execution)
+- **Criteria**: Zero trust on client-supplied GUCs. Tampering with session variables causes immediate fail-closed denial under a restricted database role (`connect_app`).
+- **Current Evidence & Status**:
+  - `connect_auth.authenticate_session` SQL procedure and Go bridge (`database.AuthenticateAndSetContext`) are authored and unit-tested in Go.
+  - The SQL function derives identity strictly from `sessions` and `users` using `p_token_hash` (the caller cannot supply arbitrary `user_id`).
+  - Added explicit least-privilege role grants for `connect_app`.
+  - **Blocker**: Verification of SQL error codes, live policy evaluation, and restricted `connect_app` query denials requires execution against a live PostgreSQL 16 instance.
 
 ### Gate C: Academic Domain Model & Temporal Consistency (PASS)
 - **Criteria**: Students and faculty cannot be assigned or attend sessions outside active membership periods or outside valid enrollment ranges.
