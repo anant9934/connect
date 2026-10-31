@@ -57,3 +57,46 @@ services:
         value: auto
       - key: CLAMAV_ENABLED
         value: "false"
+
+  - type: worker
+    name: tathastu-connect-worker
+    runtime: docker
+    dockerfilePath: ./connect-main/services/api/Dockerfile
+    dockerContext: ./connect-main/services/api
+    dockerCommand: /app/worker
+    plan: starter
+    region: singapore
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: DATABASE_URL
+        sync: false
+      - key: DB_MAX_OPEN_CONNS
+        value: 15
+      - key: DB_MAX_IDLE_CONNS
+        value: 5
+      - key: DB_CONN_MAX_LIFETIME_SEC
+        value: 300
+      - key: WORKER_CONCURRENCY
+        value: "5"
+      - key: WORKER_BATCH_SIZE
+        value: "10"
+      - key: WORKER_POLL_INTERVAL
+        value: "1s"
+      - key: WORKER_LEASE_TTL
+        value: "30s"
+      - key: STORAGE_PROVIDER
+        value: r2
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_REGION
+        value: auto

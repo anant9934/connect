@@ -1,5 +1,5 @@
 # ==============================================================================
-# Tathastu Connect - Hardened Go API Dockerfile (Staging / Production)
+# Tathastu Connect - Hardened Go API & Worker Dockerfile (Staging / Production)
 # ==============================================================================
 
 # Stage 1: Build binary
@@ -14,10 +14,13 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build stripped, statically-linked binary
+# Build stripped, statically-linked server and worker binaries
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-w -s -X main.buildVersion=staging-v0.1.0" \
-    -o /build/server ./cmd/server
+    -ldflags="-w -s -X main.buildVersion=production-v0.1.0" \
+    -o /build/server ./cmd/server && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s -X main.buildVersion=worker-v0.1.0" \
+    -o /build/worker ./cmd/worker
 
 # Stage 2: Minimal hardened runtime image
 FROM alpine:3.20
@@ -29,8 +32,9 @@ RUN apk --no-cache add ca-certificates tzdata && \
 
 WORKDIR /app
 
-# Copy binary from builder
+# Copy binaries from builder
 COPY --from=builder /build/server /app/server
+COPY --from=builder /build/worker /app/worker
 
 # Create storage directory owned by non-root user
 RUN mkdir -p /app/data/storage/private && \
