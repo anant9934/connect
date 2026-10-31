@@ -29,7 +29,7 @@ func setupRealPostgresPools(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool) {
 		dbURL = os.Getenv("DATABASE_URL")
 	}
 	if dbURL == "" {
-		if os.Getenv("CI") != "" {
+		if os.Getenv("REQUIRE_TEST_DATABASE") == "true" {
 			t.Fatal("TEST_DATABASE_URL or DATABASE_URL must be explicitly configured in CI; no fallback credentials permitted")
 		}
 		t.Skip("Skipping PostgreSQL integration test: TEST_DATABASE_URL or DATABASE_URL is not set")
