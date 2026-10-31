@@ -78,7 +78,7 @@ BEGIN
     END IF;
     RAISE NOTICE '✓ [PASS] Cryptographic HMAC key table is completely inaccessible to connect_app and PUBLIC.';
 
-    -- 5. Verify FORCE ROW LEVEL SECURITY Across All 14 Multi-Tenant Tables
+    -- 5. Verify FORCE ROW LEVEL SECURITY Across All 15 Multi-Tenant Tables
     SELECT count(*) INTO v_count
     FROM pg_tables t
     JOIN pg_class c ON c.relname = t.tablename
@@ -87,17 +87,32 @@ BEGIN
           'organizations', 'platform_administrators', 'organization_memberships',
           'departments', 'courses', 'course_batches', 'faculty_allocations',
           'course_enrollments', 'class_sessions', 'attendance_records',
-          'attendance_overrule_audit_log', 'rooms', 'meeting_notes', 'meeting_files'
+          'attendance_overrule_audit_log', 'rooms', 'meeting_notes', 'meeting_files',
+          'participant_connection_events'
       )
       AND c.relrowsecurity = true
       AND c.relforcerowsecurity = true;
 
-    IF v_count != 14 THEN
-        RAISE EXCEPTION 'ASSERTION FAILED: Expected 14 tables with relrowsecurity AND relforcerowsecurity = true, got %', v_count;
+    IF v_count != 15 THEN
+        RAISE EXCEPTION 'ASSERTION FAILED: Expected 15 tables with relrowsecurity AND relforcerowsecurity = true, got %', v_count;
     END IF;
-    RAISE NOTICE '✓ [PASS] All 14 multi-tenant tables strictly enforce FORCE ROW LEVEL SECURITY.';
+    RAISE NOTICE '✓ [PASS] All 15 multi-tenant tables strictly enforce FORCE ROW LEVEL SECURITY.';
 
-    -- 6. Verify Table Ownership
+    -- 6. Verify Schema Creation Restrictions (No Untrusted Objects in Trusted Schemas)
+    IF has_schema_privilege('public', 'public', 'CREATE') THEN
+        RAISE EXCEPTION 'SECURITY BREACH: PUBLIC must NOT have CREATE privilege on schema public!';
+    END IF;
+
+    IF has_schema_privilege('connect_app', 'public', 'CREATE') THEN
+        RAISE EXCEPTION 'SECURITY BREACH: connect_app must NOT have CREATE privilege on schema public!';
+    END IF;
+
+    IF has_schema_privilege('connect_app', 'connect_auth', 'CREATE') THEN
+        RAISE EXCEPTION 'SECURITY BREACH: connect_app must NOT have CREATE privilege on schema connect_auth!';
+    END IF;
+    RAISE NOTICE '✓ [PASS] Schema CREATE privileges revoked from PUBLIC and connect_app.';
+
+    -- 7. Verify Table Ownership
     SELECT count(*) INTO v_count
     FROM pg_tables
     WHERE schemaname = 'public'

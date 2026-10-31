@@ -140,3 +140,30 @@ func TestApplyManualOverrule_AuditTracking(t *testing.T) {
 		t.Errorf("unexpected audit entry state: %+v", audit)
 	}
 }
+
+func TestApplyManualOverrule_TenantScoping(t *testing.T) {
+	tenantA := uuid.New().String()
+	recA := &attendance.AttendanceRecord{
+		ID:                    uuid.New().String(),
+		OrganizationID:        tenantA,
+		ClassSessionID:        uuid.New().String(),
+		StudentUserID:         uuid.New().String(),
+		TotalConnectedSeconds: 1500,
+		AttendanceStatus:      "partial",
+		IsOverruled:           false,
+	}
+
+	actorID := uuid.New().String()
+	audit, err := attendance.ApplyManualOverrule(recA, "present", nil, actorID, "Verified verified medical submission", time.Now())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify tenant scoping
+	if audit.OrganizationID != tenantA {
+		t.Errorf("expected audit entry to strictly inherit record tenant %s, got %s", tenantA, audit.OrganizationID)
+	}
+	if audit.AttendanceRecordID != recA.ID {
+		t.Errorf("expected audit record ID %s, got %s", recA.ID, audit.AttendanceRecordID)
+	}
+}

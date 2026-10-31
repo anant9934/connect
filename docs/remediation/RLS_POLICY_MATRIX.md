@@ -130,3 +130,49 @@ CREATE POLICY rls_events_select ON participant_connection_events
 
 REVOKE UPDATE, DELETE ON participant_connection_events FROM connect_app, connect_worker;
 ```
+
+### 3.3 Attendance Overrule Audit Log RLS (Immutable Ledger)
+```sql
+ALTER TABLE attendance_overrule_audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_overrule_audit_log FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY rls_audit_log_select ON attendance_overrule_audit_log
+    AS PERMISSIVE FOR SELECT
+    USING (
+        connect_auth.is_super_admin()
+        OR (
+            organization_id = connect_auth.current_org_id()
+            AND EXISTS (
+                SELECT 1 FROM public.organization_memberships om
+                WHERE om.organization_id = attendance_overrule_audit_log.organization_id
+                  AND om.user_id = connect_auth.current_user_id()
+                  AND om.role IN ('institution_admin', 'institution_auditor', 'faculty')
+                  AND om.status = 'active'
+            )
+        )
+    );
+
+CREATE POLICY rls_audit_log_insert ON attendance_overrule_audit_log
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        organization_id = connect_auth.current_org_id()
+        AND overruled_by = connect_auth.current_user_id()
+        AND EXISTS (
+            SELECT 1 FROM public.organization_memberships om
+            WHERE om.organization_id = attendance_overrule_audit_log.organization_id
+              AND om.user_id = connect_auth.current_user_id()
+              AND om.role IN ('institution_admin', 'faculty')
+              AND om.status = 'active'
+        )
+    );
+
+REVOKE UPDATE, DELETE ON attendance_overrule_audit_log FROM PUBLIC, connect_app;
+```
+
+### 3.4 Hardened Personal Commons Lifecycle Authorization
+```sql
+-- Separated SELECT, INSERT, UPDATE, DELETE policies for rooms, meeting_notes, and meeting_files.
+-- Unconditional 'OR workspace_type = personal_commons' is permanently eliminated.
+-- Non-owners cannot modify or delete Commons rooms, notes, or files.
+-- Private notes and files in Commons rooms remain completely inaccessible to other users.
+```

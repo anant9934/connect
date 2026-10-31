@@ -11,16 +11,18 @@ ON CONFLICT (version) DO NOTHING;
 -- 1. Create Private Auth Schema & Internal Key Store
 CREATE SCHEMA IF NOT EXISTS connect_auth;
 REVOKE ALL ON SCHEMA connect_auth FROM PUBLIC;
+REVOKE CREATE ON SCHEMA connect_auth FROM PUBLIC, connect_app;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
 CREATE TABLE IF NOT EXISTS connect_auth.internal_keys (
     id INT PRIMARY KEY DEFAULT 1,
     secret_key BYTEA NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT pg_catalog.clock_timestamp()
 );
 
 -- Seed cryptographic HMAC secret if not present
 INSERT INTO connect_auth.internal_keys (id, secret_key)
-VALUES (1, gen_random_bytes(32))
+VALUES (1, public.gen_random_bytes(32))
 ON CONFLICT (id) DO NOTHING;
 
 REVOKE ALL ON TABLE connect_auth.internal_keys FROM PUBLIC;
@@ -52,12 +54,12 @@ DECLARE
     v_payload TEXT;
     v_sig TEXT;
 BEGIN
-    -- 1. Authoritative Session Lookup
+    -- 1. Authoritative Session Lookup (Explicitly Schema-Qualified)
     SELECT s.user_id, u.status INTO v_user_id, v_user_status
     FROM public.sessions s
     JOIN public.users u ON s.user_id = u.id
     WHERE s.token_hash = p_token_hash
-      AND s.expires_at > clock_timestamp()
+      AND s.expires_at > pg_catalog.clock_timestamp()
       AND s.revoked_at IS NULL;
 
     IF v_user_id IS NULL OR v_user_status != 'active' THEN
@@ -87,21 +89,21 @@ BEGIN
     END IF;
 
     -- 4. Bind to Current 64-bit Transaction ID & Expiration Window
-    v_xid := pg_current_xact_id()::TEXT;
-    v_exp := EXTRACT(EPOCH FROM (clock_timestamp() + INTERVAL '10 minutes'))::BIGINT;
+    v_xid := pg_catalog.pg_current_xact_id()::TEXT;
+    v_exp := pg_catalog.extract(epoch FROM (pg_catalog.clock_timestamp() + INTERVAL '10 minutes'))::BIGINT;
 
     -- 5. Retrieve Internal Secret & Compute HMAC-SHA256 Signature
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
     v_payload := v_user_id::TEXT || '|' || COALESCE(p_requested_org_id::TEXT, '') || '|' || v_is_super::TEXT || '|' || v_xid || '|' || v_exp::TEXT;
-    v_sig := encode(hmac(v_payload::BYTEA, v_secret, 'sha256'), 'hex');
+    v_sig := pg_catalog.encode(public.hmac(v_payload::BYTEA, v_secret, 'sha256'), 'hex');
 
     -- 6. Set Transaction-Local Session Variables (Scoped Strictly to this Transaction)
-    PERFORM set_config('app._user_id', v_user_id::TEXT, true);
-    PERFORM set_config('app._org_id', COALESCE(p_requested_org_id::TEXT, ''), true);
-    PERFORM set_config('app._is_super', CASE WHEN v_is_super THEN 'true' ELSE 'false' END, true);
-    PERFORM set_config('app._xid', v_xid, true);
-    PERFORM set_config('app._exp', v_exp::TEXT, true);
-    PERFORM set_config('app._sig', v_sig, true);
+    PERFORM pg_catalog.set_config('app._user_id', v_user_id::TEXT, true);
+    PERFORM pg_catalog.set_config('app._org_id', COALESCE(p_requested_org_id::TEXT, ''), true);
+    PERFORM pg_catalog.set_config('app._is_super', CASE WHEN v_is_super THEN 'true' ELSE 'false' END, true);
+    PERFORM pg_catalog.set_config('app._xid', v_xid, true);
+    PERFORM pg_catalog.set_config('app._exp', v_exp::TEXT, true);
+    PERFORM pg_catalog.set_config('app._sig', v_sig, true);
 
     RETURN QUERY SELECT v_user_id, p_requested_org_id, v_role, v_is_super, v_sig;
 END;
@@ -116,12 +118,12 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public, connect_auth
 LANGUAGE plpgsql STABLE AS $$
 DECLARE
-    v_user TEXT := current_setting('app._user_id', true);
-    v_org TEXT := current_setting('app._org_id', true);
-    v_super TEXT := current_setting('app._is_super', true);
-    v_xid TEXT := current_setting('app._xid', true);
-    v_exp TEXT := current_setting('app._exp', true);
-    v_sig TEXT := current_setting('app._sig', true);
+    v_user TEXT := pg_catalog.current_setting('app._user_id', true);
+    v_org TEXT := pg_catalog.current_setting('app._org_id', true);
+    v_super TEXT := pg_catalog.current_setting('app._is_super', true);
+    v_xid TEXT := pg_catalog.current_setting('app._xid', true);
+    v_exp TEXT := pg_catalog.current_setting('app._exp', true);
+    v_sig TEXT := pg_catalog.current_setting('app._sig', true);
     v_secret BYTEA;
     v_expected_sig TEXT;
 BEGIN
@@ -130,18 +132,18 @@ BEGIN
     END IF;
 
     -- Verify transaction binding
-    IF v_xid != pg_current_xact_id()::TEXT THEN
+    IF v_xid != pg_catalog.pg_current_xact_id()::TEXT THEN
         RETURN NULL; -- Fail closed: Cross-transaction signature reuse
     END IF;
 
     -- Verify expiration
-    IF EXTRACT(EPOCH FROM clock_timestamp()) > v_exp::BIGINT THEN
+    IF pg_catalog.extract(epoch FROM pg_catalog.clock_timestamp()) > v_exp::BIGINT THEN
         RETURN NULL; -- Fail closed: Expired context
     END IF;
 
     -- Verify cryptographic signature
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
-    v_expected_sig := encode(hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
+    v_expected_sig := pg_catalog.encode(public.hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
 
     IF v_sig != v_expected_sig THEN
         RETURN NULL; -- Fail closed: Forged or tampered GUC parameters!
@@ -155,18 +157,20 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION connect_auth.current_org_id() FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION connect_auth.current_user_id()
 RETURNS UUID
 SECURITY DEFINER
 SET search_path = pg_catalog, public, connect_auth
 LANGUAGE plpgsql STABLE AS $$
 DECLARE
-    v_user TEXT := current_setting('app._user_id', true);
-    v_org TEXT := current_setting('app._org_id', true);
-    v_super TEXT := current_setting('app._is_super', true);
-    v_xid TEXT := current_setting('app._xid', true);
-    v_exp TEXT := current_setting('app._exp', true);
-    v_sig TEXT := current_setting('app._sig', true);
+    v_user TEXT := pg_catalog.current_setting('app._user_id', true);
+    v_org TEXT := pg_catalog.current_setting('app._org_id', true);
+    v_super TEXT := pg_catalog.current_setting('app._is_super', true);
+    v_xid TEXT := pg_catalog.current_setting('app._xid', true);
+    v_exp TEXT := pg_catalog.current_setting('app._exp', true);
+    v_sig TEXT := pg_catalog.current_setting('app._sig', true);
     v_secret BYTEA;
     v_expected_sig TEXT;
 BEGIN
@@ -174,16 +178,16 @@ BEGIN
         RETURN NULL;
     END IF;
 
-    IF v_xid != pg_current_xact_id()::TEXT THEN
+    IF v_xid != pg_catalog.pg_current_xact_id()::TEXT THEN
         RETURN NULL;
     END IF;
 
-    IF EXTRACT(EPOCH FROM clock_timestamp()) > v_exp::BIGINT THEN
+    IF pg_catalog.extract(epoch FROM pg_catalog.clock_timestamp()) > v_exp::BIGINT THEN
         RETURN NULL;
     END IF;
 
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
-    v_expected_sig := encode(hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
+    v_expected_sig := pg_catalog.encode(public.hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
 
     IF v_sig != v_expected_sig THEN
         RETURN NULL;
@@ -193,18 +197,20 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION connect_auth.current_user_id() FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION connect_auth.is_super_admin()
 RETURNS BOOLEAN
 SECURITY DEFINER
 SET search_path = pg_catalog, public, connect_auth
 LANGUAGE plpgsql STABLE AS $$
 DECLARE
-    v_user TEXT := current_setting('app._user_id', true);
-    v_org TEXT := current_setting('app._org_id', true);
-    v_super TEXT := current_setting('app._is_super', true);
-    v_xid TEXT := current_setting('app._xid', true);
-    v_exp TEXT := current_setting('app._exp', true);
-    v_sig TEXT := current_setting('app._sig', true);
+    v_user TEXT := pg_catalog.current_setting('app._user_id', true);
+    v_org TEXT := pg_catalog.current_setting('app._org_id', true);
+    v_super TEXT := pg_catalog.current_setting('app._is_super', true);
+    v_xid TEXT := pg_catalog.current_setting('app._xid', true);
+    v_exp TEXT := pg_catalog.current_setting('app._exp', true);
+    v_sig TEXT := pg_catalog.current_setting('app._sig', true);
     v_secret BYTEA;
     v_expected_sig TEXT;
 BEGIN
@@ -212,16 +218,16 @@ BEGIN
         RETURN false;
     END IF;
 
-    IF v_xid != pg_current_xact_id()::TEXT THEN
+    IF v_xid != pg_catalog.pg_current_xact_id()::TEXT THEN
         RETURN false;
     END IF;
 
-    IF EXTRACT(EPOCH FROM clock_timestamp()) > v_exp::BIGINT THEN
+    IF pg_catalog.extract(epoch FROM pg_catalog.clock_timestamp()) > v_exp::BIGINT THEN
         RETURN false;
     END IF;
 
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
-    v_expected_sig := encode(hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
+    v_expected_sig := pg_catalog.encode(public.hmac((v_user || '|' || COALESCE(v_org, '') || '|' || COALESCE(v_super, 'false') || '|' || v_xid || '|' || v_exp)::BYTEA, v_secret, 'sha256'), 'hex');
 
     IF v_sig != v_expected_sig THEN
         RETURN false;
@@ -230,6 +236,8 @@ BEGIN
     RETURN (v_super = 'true');
 END;
 $$;
+
+REVOKE ALL ON FUNCTION connect_auth.is_super_admin() FROM PUBLIC;
 
 -- 4. Enable Row-Level Security & Force RLS Across All Protected Tables
 ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
@@ -260,6 +268,8 @@ ALTER TABLE meeting_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE meeting_files FORCE ROW LEVEL SECURITY;
 ALTER TABLE participant_connection_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE participant_connection_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE attendance_overrule_audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_overrule_audit_log FORCE ROW LEVEL SECURITY;
 
 -- 5. Restrictive Tenant Boundary Policies (Using Cryptographically Verified Org Context)
 CREATE POLICY rls_tenant_departments ON departments
@@ -364,51 +374,240 @@ CREATE POLICY rls_attendance_update_faculty_admin ON attendance_records
         organization_id = connect_auth.current_org_id()
     );
 
--- Rooms: Dual Scope (Personal Workspace vs Institutional vs Commons)
-CREATE POLICY rls_rooms_access ON rooms
-    AS PERMISSIVE FOR ALL
+-- Rooms: Explicitly Separated SELECT, INSERT, UPDATE, DELETE with Hardened Commons Protection
+CREATE POLICY rls_rooms_select ON rooms
+    AS PERMISSIVE FOR SELECT
     USING (
         connect_auth.is_super_admin()
         OR (workspace_type = 'personal_workspace' AND host_user_id = connect_auth.current_user_id())
-        OR (workspace_type = 'personal_commons')
         OR (workspace_type = 'institutional' AND organization_id = connect_auth.current_org_id())
+        OR (
+            workspace_type = 'personal_commons'
+            AND (
+                host_user_id = connect_auth.current_user_id()
+                OR (connect_auth.current_user_id() IS NOT NULL AND is_locked = false)
+            )
+        )
+    );
+
+CREATE POLICY rls_rooms_insert ON rooms
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        connect_auth.is_super_admin()
+        OR (workspace_type IN ('personal_workspace', 'personal_commons') AND host_user_id = connect_auth.current_user_id() AND organization_id IS NULL)
+        OR (workspace_type = 'institutional' AND host_user_id = connect_auth.current_user_id() AND organization_id = connect_auth.current_org_id())
+    );
+
+CREATE POLICY rls_rooms_update ON rooms
+    AS PERMISSIVE FOR UPDATE
+    USING (
+        connect_auth.is_super_admin()
+        OR (workspace_type IN ('personal_workspace', 'personal_commons') AND host_user_id = connect_auth.current_user_id())
+        OR (
+            workspace_type = 'institutional'
+            AND organization_id = connect_auth.current_org_id()
+            AND (
+                host_user_id = connect_auth.current_user_id()
+                OR EXISTS (
+                    SELECT 1 FROM public.organization_memberships om
+                    WHERE om.organization_id = rooms.organization_id
+                      AND om.user_id = connect_auth.current_user_id()
+                      AND om.role = 'institution_admin'
+                      AND om.status = 'active'
+                )
+            )
+        )
     )
     WITH CHECK (
         connect_auth.is_super_admin()
-        OR (workspace_type = 'personal_workspace' AND host_user_id = connect_auth.current_user_id())
+        OR (workspace_type IN ('personal_workspace', 'personal_commons') AND host_user_id = connect_auth.current_user_id())
         OR (workspace_type = 'institutional' AND organization_id = connect_auth.current_org_id())
     );
 
--- Meeting Notes & Files: Inherit from Parent Room
-CREATE POLICY rls_notes_parent ON meeting_notes
-    AS PERMISSIVE FOR ALL
+CREATE POLICY rls_rooms_delete ON rooms
+    AS PERMISSIVE FOR DELETE
+    USING (
+        connect_auth.is_super_admin()
+        OR (workspace_type IN ('personal_workspace', 'personal_commons') AND host_user_id = connect_auth.current_user_id())
+        OR (
+            workspace_type = 'institutional'
+            AND organization_id = connect_auth.current_org_id()
+            AND (
+                host_user_id = connect_auth.current_user_id()
+                OR EXISTS (
+                    SELECT 1 FROM public.organization_memberships om
+                    WHERE om.organization_id = rooms.organization_id
+                      AND om.user_id = connect_auth.current_user_id()
+                      AND om.role = 'institution_admin'
+                      AND om.status = 'active'
+                )
+            )
+        )
+    );
+
+-- Meeting Notes: Separated Lifecycle Policies (Creator-Exclusive Modification in Commons)
+CREATE POLICY rls_notes_select ON meeting_notes
+    AS PERMISSIVE FOR SELECT
     USING (
         connect_auth.is_super_admin()
         OR EXISTS (
-            SELECT 1 FROM rooms r
+            SELECT 1 FROM public.rooms r
             WHERE r.id = meeting_notes.room_id
               AND (
                   (r.workspace_type = 'personal_workspace' AND (r.host_user_id = connect_auth.current_user_id() OR meeting_notes.created_by = connect_auth.current_user_id()))
-                  OR (r.workspace_type = 'personal_commons')
                   OR (r.workspace_type = 'institutional' AND r.organization_id = connect_auth.current_org_id())
+                  OR (
+                      r.workspace_type = 'personal_commons'
+                      AND (
+                          meeting_notes.created_by = connect_auth.current_user_id()
+                          OR (connect_auth.current_user_id() IS NOT NULL AND meeting_notes.visibility = 'shared')
+                      )
+                  )
               )
         )
     );
 
-CREATE POLICY rls_files_parent ON meeting_files
-    AS PERMISSIVE FOR ALL
+CREATE POLICY rls_notes_insert ON meeting_notes
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        connect_auth.is_super_admin()
+        OR (
+            created_by = connect_auth.current_user_id()
+            AND EXISTS (
+                SELECT 1 FROM public.rooms r
+                WHERE r.id = meeting_notes.room_id
+                  AND (
+                      (r.workspace_type = 'personal_workspace' AND (r.host_user_id = connect_auth.current_user_id() OR meeting_notes.created_by = connect_auth.current_user_id()))
+                      OR (r.workspace_type = 'institutional' AND r.organization_id = connect_auth.current_org_id())
+                      OR (r.workspace_type = 'personal_commons' AND connect_auth.current_user_id() IS NOT NULL)
+                  )
+            )
+        )
+    );
+
+CREATE POLICY rls_notes_update ON meeting_notes
+    AS PERMISSIVE FOR UPDATE
+    USING (
+        connect_auth.is_super_admin()
+        OR created_by = connect_auth.current_user_id()
+    )
+    WITH CHECK (
+        connect_auth.is_super_admin()
+        OR created_by = connect_auth.current_user_id()
+    );
+
+CREATE POLICY rls_notes_delete ON meeting_notes
+    AS PERMISSIVE FOR DELETE
+    USING (
+        connect_auth.is_super_admin()
+        OR created_by = connect_auth.current_user_id()
+    );
+
+-- Meeting Files: Separated Lifecycle Policies (Uploader-Exclusive Modification in Commons)
+CREATE POLICY rls_files_select ON meeting_files
+    AS PERMISSIVE FOR SELECT
     USING (
         connect_auth.is_super_admin()
         OR EXISTS (
-            SELECT 1 FROM rooms r
+            SELECT 1 FROM public.rooms r
             WHERE r.id = meeting_files.room_id
               AND (
-                  (r.workspace_type = 'personal_workspace' AND r.host_user_id = connect_auth.current_user_id())
-                  OR (r.workspace_type = 'personal_commons')
+                  (r.workspace_type = 'personal_workspace' AND (r.host_user_id = connect_auth.current_user_id() OR meeting_files.uploaded_by = connect_auth.current_user_id()))
                   OR (r.workspace_type = 'institutional' AND r.organization_id = connect_auth.current_org_id())
+                  OR (
+                      r.workspace_type = 'personal_commons'
+                      AND (
+                          meeting_files.uploaded_by = connect_auth.current_user_id()
+                          OR (connect_auth.current_user_id() IS NOT NULL AND meeting_files.is_public = true)
+                      )
+                  )
               )
         )
     );
+
+CREATE POLICY rls_files_insert ON meeting_files
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        connect_auth.is_super_admin()
+        OR (
+            uploaded_by = connect_auth.current_user_id()
+            AND EXISTS (
+                SELECT 1 FROM public.rooms r
+                WHERE r.id = meeting_files.room_id
+                  AND (
+                      (r.workspace_type = 'personal_workspace' AND (r.host_user_id = connect_auth.current_user_id() OR meeting_files.uploaded_by = connect_auth.current_user_id()))
+                      OR (r.workspace_type = 'institutional' AND r.organization_id = connect_auth.current_org_id())
+                      OR (r.workspace_type = 'personal_commons' AND connect_auth.current_user_id() IS NOT NULL)
+                  )
+            )
+        )
+    );
+
+CREATE POLICY rls_files_update ON meeting_files
+    AS PERMISSIVE FOR UPDATE
+    USING (
+        connect_auth.is_super_admin()
+        OR uploaded_by = connect_auth.current_user_id()
+    )
+    WITH CHECK (
+        connect_auth.is_super_admin()
+        OR uploaded_by = connect_auth.current_user_id()
+    );
+
+CREATE POLICY rls_files_delete ON meeting_files
+    AS PERMISSIVE FOR DELETE
+    USING (
+        connect_auth.is_super_admin()
+        OR uploaded_by = connect_auth.current_user_id()
+    );
+
+-- Attendance Overrule Audit Log: Tenant-Scoped Read and Strict Authorized Insert
+CREATE POLICY rls_audit_log_select ON attendance_overrule_audit_log
+    AS PERMISSIVE FOR SELECT
+    USING (
+        connect_auth.is_super_admin()
+        OR (
+            organization_id = connect_auth.current_org_id()
+            AND EXISTS (
+                SELECT 1 FROM public.organization_memberships om
+                WHERE om.organization_id = attendance_overrule_audit_log.organization_id
+                  AND om.user_id = connect_auth.current_user_id()
+                  AND om.role IN ('institution_admin', 'institution_auditor', 'faculty')
+                  AND om.status = 'active'
+            )
+        )
+    );
+
+CREATE POLICY rls_audit_log_insert ON attendance_overrule_audit_log
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        organization_id = connect_auth.current_org_id()
+        AND overruled_by = connect_auth.current_user_id()
+        AND EXISTS (
+            SELECT 1 FROM public.organization_memberships om
+            WHERE om.organization_id = attendance_overrule_audit_log.organization_id
+              AND om.user_id = connect_auth.current_user_id()
+              AND om.role IN ('institution_admin', 'faculty')
+              AND om.status = 'active'
+        )
+    );
+
+-- Trigger Blocking Any Direct Modification or Deletion on Audit Records
+CREATE OR REPLACE FUNCTION fn_block_audit_log_mutation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    RAISE EXCEPTION 'SECURITY VIOLATION: attendance_overrule_audit_log records are immutable and cannot be updated or deleted.'
+        USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tr_block_audit_log_mutation ON attendance_overrule_audit_log;
+CREATE TRIGGER tr_block_audit_log_mutation
+    BEFORE UPDATE OR DELETE ON attendance_overrule_audit_log
+    FOR EACH ROW EXECUTE FUNCTION fn_block_audit_log_mutation();
 
 -- Append-Only Event Ledger
 CREATE POLICY rls_events_insert ON participant_connection_events
