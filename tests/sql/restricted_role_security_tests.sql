@@ -73,8 +73,8 @@ BEGIN
     (gen_random_uuid(), v_org_b, v_department_b, 'ME201', 'Thermodynamics');
 
     -- 5. Personal Commons Room & Notes Created by Alice
-    INSERT INTO rooms (id, title, host_user_id, workspace_type, is_locked)
-    VALUES (v_room_commons, 'Alice Open Research Room', v_user_a, 'personal_commons', false);
+    INSERT INTO rooms (id, public_code, host_user_id, workspace_type, is_locked)
+    VALUES (v_room_commons, 'alice-commons-room', v_user_a, 'personal_commons', false);
 
     INSERT INTO meeting_notes (id, room_id, created_by, created_by_identity, updated_by_identity, title, content, visibility) VALUES
     (v_note_private, v_room_commons, v_user_a, 'alice-ident', 'alice-ident', 'Alice Private Notes', 'Private Alice Research', 'private'),
