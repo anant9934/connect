@@ -10,6 +10,17 @@ ON CONFLICT (version) DO NOTHING;
 
 -- 1. Create Private Auth Schema & Internal Key Store
 CREATE SCHEMA IF NOT EXISTS connect_auth;
+
+-- Provision the runtime role before any GRANT/REVOKE references it.
+-- This migration must run with CREATEROLE (or superuser) privileges.
+DO $
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'connect_app') THEN
+        CREATE ROLE connect_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+    END IF;
+END
+$;
+
 REVOKE ALL ON SCHEMA connect_auth FROM PUBLIC;
 REVOKE CREATE ON SCHEMA connect_auth FROM PUBLIC, connect_app;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -634,13 +645,7 @@ REVOKE DELETE ON attendance_records FROM PUBLIC;
 REVOKE UPDATE, DELETE ON participant_connection_events FROM PUBLIC;
 REVOKE UPDATE, DELETE ON attendance_overrule_audit_log FROM PUBLIC;
 
--- 5. Role Separation, Mandatory Provisioning, and Least-Privilege Enforcements
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'connect_app') THEN
-        CREATE ROLE connect_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-    END IF;
-END $$;
+-- 5. Role Separation and Least-Privilege Enforcements (role provisioned above)
 
 -- Blanket revocation of schema, table, and function privileges from PUBLIC
 REVOKE ALL ON SCHEMA connect_auth FROM PUBLIC;
