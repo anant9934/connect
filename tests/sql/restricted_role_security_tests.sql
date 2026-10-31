@@ -15,8 +15,8 @@ DECLARE
     v_org_b UUID := 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'::UUID;
     v_user_a UUID := 'a1111111-1111-1111-1111-111111111111'::UUID;
     v_user_b UUID := 'b2222222-2222-2222-2222-222222222222'::UUID;
-    v_token_a VARCHAR(64) := 'token_hash_alice_tenant_a_0123456789abcdef0123456789abcdef01234567';
-    v_token_b VARCHAR(64) := 'token_hash_bob_tenant_b_0123456789abcdef0123456789abcdef0123456789';
+    v_token_a VARCHAR(64) := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    v_token_b VARCHAR(64) := 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
     v_room_commons UUID := 'cccccccc-cccc-cccc-cccc-cccccccccccc'::UUID;
     v_department_a UUID := 'dddddddd-dddd-dddd-dddd-dddddddddddd'::UUID;
     v_department_b UUID := 'd2222222-2222-2222-2222-222222222222'::UUID;
@@ -127,7 +127,7 @@ END $$;
 -- Test 2.3: Organization Escalation Attempt
 DO $$
 DECLARE
-    v_token_a VARCHAR(64) := 'token_hash_alice_tenant_a_0123456789abcdef0123456789abcdef01234567';
+    v_token_a VARCHAR(64) := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     v_org_b UUID := 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'::UUID;
 BEGIN
     RAISE NOTICE '[ROLE: connect_app] Test 2.3: Testing cross-org authentication escalation...';
@@ -144,7 +144,7 @@ END $$;
 -- Test 2.4: Cross-Tenant SELECT, INSERT, UPDATE, DELETE Denial via RLS
 DO $$
 DECLARE
-    v_token_a VARCHAR(64) := 'token_hash_alice_tenant_a_0123456789abcdef0123456789abcdef01234567';
+    v_token_a VARCHAR(64) := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     v_org_a UUID := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::UUID;
     v_org_b UUID := 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'::UUID;
     v_count INT;
@@ -201,7 +201,7 @@ END $$;
 -- Test 2.5: Personal Commons Authorization (No Unconditional Access)
 DO $$
 DECLARE
-    v_token_b VARCHAR(64) := 'token_hash_bob_tenant_b_0123456789abcdef0123456789abcdef0123456789';
+    v_token_b VARCHAR(64) := 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
     v_org_b UUID := 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'::UUID;
     v_note_private UUID := 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'::UUID;
     v_note_shared UUID := 'ffffffff-ffff-ffff-ffff-ffffffffffff'::UUID;
@@ -247,7 +247,7 @@ END $$;
 -- Test 2.6: Attendance Audit Log Immutability Under connect_app
 DO $$
 DECLARE
-    v_token_a VARCHAR(64) := 'token_hash_alice_tenant_a_0123456789abcdef0123456789abcdef01234567';
+    v_token_a VARCHAR(64) := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     v_org_a UUID := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::UUID;
 BEGIN
     RAISE NOTICE '[ROLE: connect_app] Test 2.6: Testing attendance audit log immutability...';
@@ -283,8 +283,8 @@ DECLARE
     v_org_b UUID := 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'::UUID;
     v_user_a UUID := 'a1111111-1111-1111-1111-111111111111'::UUID;
     v_user_b UUID := 'b2222222-2222-2222-2222-222222222222'::UUID;
-    v_token_a VARCHAR(64) := 'token_hash_alice_tenant_a_0123456789abcdef0123456789abcdef01234567';
-    v_token_b VARCHAR(64) := 'token_hash_bob_tenant_b_0123456789abcdef0123456789abcdef0123456789';
+    v_token_a VARCHAR(64) := 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    v_token_b VARCHAR(64) := 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
     v_room_commons UUID := 'cccccccc-cccc-cccc-cccc-cccccccccccc'::UUID;
     v_note_private UUID := 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'::UUID;
     v_note_shared UUID := 'ffffffff-ffff-ffff-ffff-ffffffffffff'::UUID;
