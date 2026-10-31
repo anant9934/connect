@@ -1,0 +1,11 @@
+# Gitleaks Configuration for Tathastu Connect
+# Reference: https://github.com/gitleaks/gitleaks
+
+title = "Connect Gitleaks Configuration"
+
+[allowlist]
+description = "Historical credentials in legacy commits remediated in 53c4915 awaiting BFG/git-filter-repo cleanup"
+commits = [
+  "4f0e50d1a686c07839836889cb06b5e2ce757f4d",
+  "5a38a10eb764a1f3242d0239e131a9f3d2b6af6a"
+]
