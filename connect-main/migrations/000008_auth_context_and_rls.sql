@@ -11,19 +11,22 @@ ON CONFLICT (version) DO NOTHING;
 -- 1. Create Private Auth Schema & Internal Key Store
 CREATE SCHEMA IF NOT EXISTS connect_auth;
 
--- Provision the runtime role before any GRANT/REVOKE references it.
+-- Provision runtime application and background worker roles before any GRANT/REVOKE references them.
 -- This migration must run with CREATEROLE (or superuser) privileges.
 DO $role$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'connect_app') THEN
         CREATE ROLE connect_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'connect_worker') THEN
+        CREATE ROLE connect_worker WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+    END IF;
 END
 $role$;
 
 REVOKE ALL ON SCHEMA connect_auth FROM PUBLIC;
-REVOKE CREATE ON SCHEMA connect_auth FROM PUBLIC, connect_app;
-REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+REVOKE CREATE ON SCHEMA connect_auth FROM PUBLIC, connect_app, connect_worker;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC, connect_app, connect_worker;
 
 CREATE TABLE IF NOT EXISTS connect_auth.internal_keys (
     id INT PRIMARY KEY DEFAULT 1,
@@ -38,7 +41,39 @@ ON CONFLICT (id) DO NOTHING;
 
 REVOKE ALL ON TABLE connect_auth.internal_keys FROM PUBLIC;
 
--- 2. Authenticate Session Procedure (Generates HMAC Signature Bound to Transaction ID)
+-- 2. Cryptographic Constant-Time String Equality (Timing-Attack Resistant)
+CREATE OR REPLACE FUNCTION connect_auth.constant_time_equals(a TEXT, b TEXT)
+RETURNS BOOLEAN
+IMMUTABLE
+STRICT
+PARALLEL SAFE
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_len_a INT;
+    v_len_b INT;
+    v_diff INT := 0;
+    i INT;
+BEGIN
+    IF a IS NULL OR b IS NULL THEN
+        RETURN false;
+    END IF;
+    v_len_a := pg_catalog.octet_length(a);
+    v_len_b := pg_catalog.octet_length(b);
+    IF v_len_a != v_len_b THEN
+        RETURN false;
+    END IF;
+    FOR i IN 1..v_len_a LOOP
+        v_diff := v_diff | (pg_catalog.get_byte(a::BYTEA, i - 1) # pg_catalog.get_byte(b::BYTEA, i - 1));
+    END LOOP;
+    RETURN v_diff = 0;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION connect_auth.constant_time_equals(TEXT, TEXT) FROM PUBLIC;
+
+-- 3. Authenticate Session Procedure (Generates HMAC Signature Bound to Transaction ID)
 CREATE OR REPLACE FUNCTION connect_auth.authenticate_session(
     p_token_hash VARCHAR(64),
     p_requested_org_id UUID DEFAULT NULL
@@ -662,12 +697,13 @@ REVOKE ALL ON SCHEMA connect_auth FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA connect_auth FROM PUBLIC;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA connect_auth FROM PUBLIC;
 
--- Mandatory Grants to Application Runtime Role (No Silent Skipping)
-GRANT USAGE ON SCHEMA connect_auth TO connect_app;
-GRANT EXECUTE ON FUNCTION connect_auth.authenticate_session(VARCHAR, UUID) TO connect_app;
-GRANT EXECUTE ON FUNCTION connect_auth.current_org_id() TO connect_app;
-GRANT EXECUTE ON FUNCTION connect_auth.current_user_id() TO connect_app;
-GRANT EXECUTE ON FUNCTION connect_auth.is_super_admin() TO connect_app;
+-- Mandatory Grants to Application and Background Worker Runtime Roles (No Silent Skipping)
+GRANT USAGE ON SCHEMA connect_auth TO connect_app, connect_worker;
+GRANT EXECUTE ON FUNCTION connect_auth.authenticate_session(VARCHAR, UUID) TO connect_app, connect_worker;
+GRANT EXECUTE ON FUNCTION connect_auth.current_org_id() TO connect_app, connect_worker;
+GRANT EXECUTE ON FUNCTION connect_auth.current_user_id() TO connect_app, connect_worker;
+GRANT EXECUTE ON FUNCTION connect_auth.is_super_admin() TO connect_app, connect_worker;
+GRANT EXECUTE ON FUNCTION connect_auth.constant_time_equals(TEXT, TEXT) TO connect_app, connect_worker;
 
 -- Explicit Zero-Access Isolation on Internal HMAC Secret Table
-REVOKE ALL ON TABLE connect_auth.internal_keys FROM PUBLIC, connect_app;
+REVOKE ALL ON TABLE connect_auth.internal_keys FROM PUBLIC, connect_app, connect_worker;
