@@ -1,0 +1,182 @@
+# CONNECT — BACKGROUND WORKER LIVE DEPLOYMENT VERIFICATION REPORT
+
+**Date:** 2026-11-01
+**Target Environment:** Production (`main`)
+**Backend API:** `https://connect-a2fi.onrender.com` (Render Service `srv-dbj507nlk1mc73897go0`)
+**Target Worker Service:** `tathastu-connect-worker` (Render Background Worker)
+**Database:** Neon PostgreSQL Pooler (`us-east-2`)
+**Verified Git SHA:** `48cd105b97d3e24095a4e5cbd84d6fb49a4e2f60`
+**Auditor:** Senior Go SRE & Distributed Systems Engineer
+
+---
+
+## 1. FORMAL VERIFICATION VERDICT
+
+```text
+========================================================================================
+                                FINAL VERDICT:
+                 BLOCKED — WORKER SERVICE ABSENT FROM RENDER
+========================================================================================
+```
+
+### Executive Summary
+While the background worker code (`cmd/worker/main.go`, `internal/worker/runner.go`), multi-binary Dockerfile, and `render.yaml` specification have been pushed to `main` at commit `48cd105b97d3e24095a4e5cbd84d6fb49a4e2f60`, **no background worker service exists or runs on Render**.
+
+Direct inspection of the Render account via the Render Management API (`GET /services`) confirmed that **only one service exists**: the HTTP API web service (`connect`, `srv-dbj507nlk1mc73897go0`). No worker service or blueprint has been instantiated.
+
+Empirical end-to-end probing confirmed this reality: a live test job (`system.audit_ping`) enqueued directly into the production PostgreSQL database remained stranded in `pending` status with `locked_by = NULL` and `fencing_token = 0` until manually cleaned up. **No deployed worker daemon is polling or processing background jobs in production.**
+
+---
+
+## 2. THE FOUR VERIFICATION LEVELS
+
+| Verification Level | Required Standard | Status | Evidence |
+| :--- | :--- | :--- | :--- |
+| **Level 1: Code Implementation** | Go worker runner, registry, backoff, fencing, default handlers | **PASS** | Implemented in `cmd/worker` & `internal/worker/` |
+| **Level 2: Database Acceptance Tests** | 7-phase empirical outbox leasing, heartbeat, fencing rejection | **PASS** | Executed against live Neon PostgreSQL (100% pass) |
+| **Level 3: Cloud Configuration** | Multi-binary Docker build & `render.yaml` specification | **PASS** | Pushed to `origin/main` at commit `48cd105` |
+| **Level 4: Production Execution** | Live deployed worker container claiming and executing jobs | **BLOCKED** | Worker service absent on Render; jobs remain pending |
+
+---
+
+## 3. GIT AND DEPLOYMENT IDENTITY AUDIT
+
+### 3.1 Repository Commit Verification
+- **Target Commit:** `48cd105b97d3e24095a4e5cbd84d6fb49a4e2f60`
+- **Origin Status:** `origin/main` is exactly at `48cd105b97d3e24095a4e5cbd84d6fb49a4e2f60`.
+- **Commit Subject:** `docs(audit): document background worker verification and update readiness matrix`
+
+### 3.2 Render Web Service (`tathastu-connect-api`)
+Queried via Render API (`GET /services/srv-dbj507nlk1mc73897go0/deploys?limit=1`):
+- **Service ID:** `srv-dbj507nlk1mc73897go0`
+- **Service Name:** `connect`
+- **Service Type:** `web_service`
+- **Active Deploy ID:** `dep-dbj6hhmq1p3s73af1ui0`
+- **Deployed Commit:** `48cd105b97d3e24095a4e5cbd84d6fb49a4e2f60`
+- **Deploy Status:** `live`
+- **Deploy Trigger:** `new_commit`
+- **Finished At:** `2026-10-31T22:18:08.272993Z`
+- **Container Entrypoint:** `/app/server` (HTTP API Chi daemon on port 8080)
+
+### 3.3 Render Background Worker Service (`tathastu-connect-worker`)
+Queried via Render API (`GET /services?limit=20`):
+- **Service Existence:** **FALSE (Service does NOT exist)**
+- **Running Instance Count:** **0**
+- **Worker Deployment SHA:** **N/A (Never deployed)**
+- **Startup Logs:** **N/A (No instance provisioned)**
+- **Root Cause:** A `render.yaml` declaration does not automatically provision services on Render unless the repository is connected to a Render Blueprint (`GET /blueprints` returned `[]`). Individual services must be created or the blueprint linked.
+
+---
+
+## 4. RUNTIME CONFIGURATION INSPECTION
+
+Comparison of worker requirements vs. Render environment:
+
+| Configuration Parameter | Source / Code Variable | Render Web API (`srv-dbj507nlk1mc73897go0`) | Dedicated Worker Service |
+| :--- | :--- | :--- | :--- |
+| **PostgreSQL Database** | `DATABASE_URL` | Configured | **NOT CONFIGURED** (Service absent) |
+| **Environment Mode** | `APP_ENV=production` | Configured | **NOT CONFIGURED** |
+| **Worker Concurrency** | `WORKER_CONCURRENCY` (default 5) | Absent | **NOT CONFIGURED** |
+| **Batch Size** | `WORKER_BATCH_SIZE` (default 10) | Absent | **NOT CONFIGURED** |
+| **Poll Interval** | `WORKER_POLL_INTERVAL` (default 1s) | Absent | **NOT CONFIGURED** |
+| **Lease TTL** | `WORKER_LEASE_TTL` (default 30s) | Absent | **NOT CONFIGURED** |
+| **Storage Provider** | `STORAGE_PROVIDER=r2` | Configured | **NOT CONFIGURED** |
+| **R2 Credentials** | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Configured | **NOT CONFIGURED** |
+
+---
+
+## 5. LIVE PRODUCTION JOB EXECUTION PROBE
+
+To empirically verify whether any background worker daemon was active, a harmless test job was enqueued into the production Neon PostgreSQL database:
+
+### Probe Parameters
+- **Job ID:** `ad89fff1-cc0d-4c0d-9de7-2d1afb7a944b`
+- **Queue:** `default`
+- **Idempotency Key:** `probe-worker-deployment-0016e583`
+- **Job Type:** `system.audit_ping`
+- **Payload:** `{"source":"live_deployment_probe","probeId":"0016e583","enqueuedAt":"2026-10-31T22:27:22Z"}`
+- **Initial State:** `status = 'pending'`, `fencing_token = 0`, `attempt_count = 0`
+
+### Empirical Polling Trace
+```json
+{"time":"2026-11-01T03:57:22.155788+05:30","level":"INFO","msg":"probing_live_worker_deployment","probe_id":"0016e583"}
+{"time":"2026-11-01T03:57:23.597563+05:30","level":"INFO","msg":"probe_job_enqueued","job_id":"ad89fff1-cc0d-4c0d-9de7-2d1afb7a944b","status":"pending"}
+{"time":"2026-11-01T03:57:28.170118+05:30","level":"INFO","msg":"polled_job_state","status":"pending","locked_by":null,"fencing_token":0}
+{"time":"2026-11-01T03:57:29.914480+05:30","level":"INFO","msg":"polled_job_state","status":"pending","locked_by":null,"fencing_token":0}
+{"time":"2026-11-01T03:57:37.046237+05:30","level":"INFO","msg":"polled_job_state","status":"pending","locked_by":null,"fencing_token":0}
+{"time":"2026-11-01T03:57:41.873751+05:30","level":"INFO","msg":"polled_job_state","status":"pending","locked_by":null,"fencing_token":0}
+
+[RESULT] Probe job ad89fff1-cc0d-4c0d-9de7-2d1afb7a944b was NOT claimed by any worker. Status remained 'pending'.
+[DIAGNOSIS] Confirmed: No active background worker daemon is running on Render or polling the database.
+```
+
+- **Execution Claim:** None. The job was never locked, leased, or executed.
+- **Cleanup:** Row `ad89fff1-cc0d-4c0d-9de7-2d1afb7a944b` was manually deleted from `background_jobs`.
+- **Remaining Database Test Rows:** 0.
+
+---
+
+## 6. PRODUCER-TO-HANDLER COVERAGE MATRIX
+
+Codebase audit of all call sites across `connect-main/services/api/`:
+
+| Producer Call Site | Job Type | Registered Handler | Actual Worker Execution | Operational Result |
+| :--- | :--- | :--- | :--- | :--- |
+| `cmd/verify_worker` | `system.audit_ping` | `NewAuditPingHandler` | Executed in local test harness only | **UNCONNECTED TO RUNTIME** (No worker deployed) |
+| None (Unimplemented) | `room.cleanup` | `NewRoomCleanupHandler` | Never claimed | **UNCONNECTED PRODUCER** (No producer enqueues this job) |
+| None (Unimplemented) | `attendance.reconcile` | `NewAttendanceReconcileHandler` | Never claimed | **UNCONNECTED PRODUCER** (No producer enqueues this job) |
+| None (Unimplemented) | `file.purge` | `NewFilePurgeHandler` | Never claimed | **UNCONNECTED PRODUCER** (No producer enqueues this job) |
+
+### Key Architectural Finding
+Even if the worker daemon is deployed, **no existing application domain handlers in the API (`room`, `attendance`, `files`, `auth`) currently call `worker.EnqueueJob` or `worker.Enqueue`**. The queue infrastructure and handlers are implemented, but application domain producers have not yet been wired to emit asynchronous outbox jobs.
+
+---
+
+## 7. OPERATIONAL HEALTH & QUEUE METRICS
+
+Current state queried directly from Neon PostgreSQL:
+
+| Metric | Measured Value | Source |
+| :--- | :--- | :--- |
+| **Worker Uptime** | 0s | Render API (Service absent) |
+| **Running Instance Count** | 0 | Render API |
+| **Worker Restart Count** | 0 | Render API |
+| **Total Pending Jobs** | 0 | `background_jobs` table query |
+| **Total Processing Jobs** | 0 | `background_jobs` table query |
+| **Total Completed Jobs** | 0 | `background_jobs` table query |
+| **Total Failed Jobs** | 0 | `background_jobs` table query |
+| **Total Dead-Letter Jobs**| 0 | `background_jobs` table query |
+| **Oldest Pending Job Age**| 0s | `background_jobs` table query |
+| **Database Pool Errors** | 0 | Neon connection pool metrics |
+| **Active In-Flight Jobs** | 0 | Worker metrics |
+
+---
+
+## 8. HIGHEST-PRIORITY REMAINING ACTION
+
+To transition the Background Worker subsystem from `BLOCKED` to `PASS`:
+
+### Immediate Action Required
+**Deploy the `tathastu-connect-worker` service on Render:**
+
+1. **Option A (Via Render Dashboard):**
+   - In Render Dashboard, click **New +** -> **Background Worker**.
+   - Connect repository `https://github.com/anant9934/connect` (branch `main`).
+   - Set **Runtime**: `Docker`.
+   - Set **Root Directory**: `connect-main/services/api`.
+   - Set **Dockerfile Path**: `./Dockerfile`.
+   - Set **Docker Command**: `/app/worker`.
+   - Add Environment Variables:
+     - `APP_ENV` = `production`
+     - `DATABASE_URL` = `[Neon PostgreSQL connection string]`
+     - `LOG_LEVEL` = `info`
+     - `WORKER_CONCURRENCY` = `5`
+     - `WORKER_POLL_INTERVAL` = `1s`
+     - `WORKER_LEASE_TTL` = `30s`
+     - `STORAGE_PROVIDER` = `r2`
+     - `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_REGION` = `[R2 credentials]`
+
+2. **Option B (Via Render Blueprints):**
+   - In Render Dashboard, click **New +** -> **Blueprint**.
+   - Select repository `https://github.com/anant9934/connect`.
+   - Render will parse `render.yaml` and provision `tathastu-connect-worker` alongside `tathastu-connect-api`.
