@@ -68,7 +68,8 @@ SELECT
     current_database() || '|' ||
     current_user || '|' ||
     current_setting('server_version_num') || '|' ||
-    (SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public');
+    (SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public') || '|' ||
+    (SELECT rolsuper::text FROM pg_catalog.pg_roles WHERE rolname = current_user);
 " 2>&1) || {
   log_fail "Failed to connect to target database: ${IDENTITY_CHECK}"
   exit 1
@@ -78,11 +79,20 @@ CURRENT_DB=$(echo "${IDENTITY_CHECK}" | cut -d'|' -f1)
 CURRENT_USER=$(echo "${IDENTITY_CHECK}" | cut -d'|' -f2)
 PG_VERSION_NUM=$(echo "${IDENTITY_CHECK}" | cut -d'|' -f3)
 TABLE_COUNT=$(echo "${IDENTITY_CHECK}" | cut -d'|' -f4)
+IS_SUPERUSER=$(echo "${IDENTITY_CHECK}" | cut -d'|' -f5)
 
 log_info "Connected Target Database: ${CURRENT_DB}"
 log_info "Connected User: ${CURRENT_USER}"
 log_info "PostgreSQL server_version_num: ${PG_VERSION_NUM}"
 log_info "Pre-existing Public Tables: ${TABLE_COUNT}"
+log_info "Connected role superuser: ${IS_SUPERUSER}"
+
+# Fixture setup deliberately runs under a trusted superuser; the attack phase
+# switches to connect_app. A non-superuser setup role cannot bypass FORCE RLS.
+if [ "${IS_SUPERUSER}" != "true" ]; then
+  log_fail "BLOCKED: PG16 harness requires a disposable PostgreSQL superuser for migration and fixture setup."
+  exit 1
+fi
 
 # Require an explicitly named disposable database. This is an additional guard,
 # not a substitute for verifying the target in the cloud/provider console.
