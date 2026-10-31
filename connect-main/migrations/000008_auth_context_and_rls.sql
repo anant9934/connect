@@ -373,24 +373,186 @@ ALTER TABLE participant_connection_events FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_overrule_audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_overrule_audit_log FORCE ROW LEVEL SECURITY;
 
--- 5. Restrictive Tenant Boundary Policies (Using Cryptographically Verified Org Context)
+-- 5. Multi-Tenant Boundary and RBAC Permissive Policies
+
+-- Organizations: Multi-Tenant Boundary and Lifecycle Policies
+CREATE POLICY rls_tenant_organizations ON organizations
+    AS RESTRICTIVE USING (
+        connect_auth.is_super_admin() OR
+        id = connect_auth.current_org_id()
+    );
+
+CREATE POLICY rls_organizations_select ON organizations
+    AS PERMISSIVE FOR SELECT
+    USING (
+        connect_auth.is_super_admin() OR
+        id = connect_auth.current_org_id()
+    );
+
+CREATE POLICY rls_organizations_insert ON organizations
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        connect_auth.is_super_admin()
+    );
+
+CREATE POLICY rls_organizations_update ON organizations
+    AS PERMISSIVE FOR UPDATE
+    USING (
+        connect_auth.is_super_admin() OR (
+            id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
+    )
+    WITH CHECK (
+        connect_auth.is_super_admin() OR (
+            id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
+    );
+
+CREATE POLICY rls_organizations_delete ON organizations
+    AS PERMISSIVE FOR DELETE
+    USING (
+        connect_auth.is_super_admin()
+    );
+
+-- Platform Administrators: Platform Super-Admin Access Strictly Enforced
+CREATE POLICY rls_tenant_platform_administrators ON platform_administrators
+    AS RESTRICTIVE USING (
+        connect_auth.is_super_admin() OR
+        user_id = connect_auth.current_user_id()
+    );
+
+CREATE POLICY rls_platform_admins_select ON platform_administrators
+    AS PERMISSIVE FOR SELECT
+    USING (
+        connect_auth.is_super_admin() OR
+        user_id = connect_auth.current_user_id()
+    );
+
+CREATE POLICY rls_platform_admins_insert ON platform_administrators
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        connect_auth.is_super_admin()
+    );
+
+CREATE POLICY rls_platform_admins_update ON platform_administrators
+    AS PERMISSIVE FOR UPDATE
+    USING (
+        connect_auth.is_super_admin()
+    )
+    WITH CHECK (
+        connect_auth.is_super_admin()
+    );
+
+CREATE POLICY rls_platform_admins_delete ON platform_administrators
+    AS PERMISSIVE FOR DELETE
+    USING (
+        connect_auth.is_super_admin()
+    );
+
+-- Organization Memberships: Tenant Boundary and Role Separation
+CREATE POLICY rls_tenant_memberships ON organization_memberships
+    AS RESTRICTIVE USING (
+        connect_auth.is_super_admin() OR
+        organization_id = connect_auth.current_org_id()
+    );
+
+CREATE POLICY rls_memberships_select ON organization_memberships
+    AS PERMISSIVE FOR SELECT
+    USING (
+        connect_auth.is_super_admin() OR
+        user_id = connect_auth.current_user_id() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'institution_auditor')
+        )
+    );
+
+CREATE POLICY rls_memberships_insert ON organization_memberships
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
+    );
+
+CREATE POLICY rls_memberships_update ON organization_memberships
+    AS PERMISSIVE FOR UPDATE
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
+    )
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
+    );
+
+CREATE POLICY rls_memberships_delete ON organization_memberships
+    AS PERMISSIVE FOR DELETE
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
+    );
+
+-- Departments: Restrictive Isolation and RBAC Policies
 CREATE POLICY rls_tenant_departments ON departments
     AS RESTRICTIVE USING (
         connect_auth.is_super_admin() OR
         organization_id = connect_auth.current_org_id()
     );
 
-CREATE POLICY rls_tenant_courses ON courses
-    AS RESTRICTIVE USING (
-        connect_auth.is_super_admin() OR
-        organization_id = connect_auth.current_org_id()
-    );
-
--- Permissive read access for authenticated active members of the selected tenant.
--- authenticate_session() only establishes this context after validating active membership.
 CREATE POLICY rls_departments_select_member ON departments
     AS PERMISSIVE FOR SELECT
     USING (organization_id = connect_auth.current_org_id());
+
+CREATE POLICY rls_departments_insert ON departments
+    AS PERMISSIVE FOR INSERT
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
+    );
+
+CREATE POLICY rls_departments_update ON departments
+    AS PERMISSIVE FOR UPDATE
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
+    )
+    WITH CHECK (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
+    );
+
+CREATE POLICY rls_departments_delete ON departments
+    AS PERMISSIVE FOR DELETE
+    USING (
+        connect_auth.is_super_admin() OR
+        (
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() = 'institution_admin'
+        )
+    );
 
 CREATE POLICY rls_courses_select_member ON courses
     AS PERMISSIVE FOR SELECT
