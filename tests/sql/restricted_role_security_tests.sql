@@ -18,6 +18,8 @@ DECLARE
     v_token_a VARCHAR(64) := 'token_hash_alice_tenant_a_0123456789abcdef0123456789abcdef01234567';
     v_token_b VARCHAR(64) := 'token_hash_bob_tenant_b_0123456789abcdef0123456789abcdef0123456789';
     v_room_commons UUID := 'cccccccc-cccc-cccc-cccc-cccccccccccc'::UUID;
+    v_department_a UUID := 'dddddddd-dddd-dddd-dddd-dddddddddddd'::UUID;
+    v_department_b UUID := 'd2222222-2222-2222-2222-222222222222'::UUID;
     v_note_private UUID := 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'::UUID;
     v_note_shared UUID := 'ffffffff-ffff-ffff-ffff-ffffffffffff'::UUID;
 BEGIN
@@ -53,17 +55,17 @@ BEGIN
 
     -- 3. Memberships
     INSERT INTO organization_memberships (organization_id, user_id, role, status) VALUES
-    (v_org_a, v_user_a, 'faculty', 'active'),
-    (v_org_b, v_user_b, 'faculty', 'active');
+    (v_org_a, v_user_a, 'institution_member', 'active'),
+    (v_org_b, v_user_b, 'institution_member', 'active');
 
     -- 4. Departments & Courses
-    INSERT INTO departments (id, organization_id, name) VALUES
-    (gen_random_uuid(), v_org_a, 'Computer Science Alpha'),
-    (gen_random_uuid(), v_org_b, 'Mechanical Engineering Beta');
+    INSERT INTO departments (id, organization_id, code, name) VALUES
+    (v_department_a, v_org_a, 'CS', 'Computer Science Alpha'),
+    (v_department_b, v_org_b, 'ME', 'Mechanical Engineering Beta');
 
-    INSERT INTO courses (id, organization_id, name, code) VALUES
-    (gen_random_uuid(), v_org_a, 'Distributed Systems CS401', 'CS401'),
-    (gen_random_uuid(), v_org_b, 'Thermodynamics ME201', 'ME201');
+    INSERT INTO courses (id, organization_id, department_id, code, title) VALUES
+    (gen_random_uuid(), v_org_a, v_department_a, 'CS401', 'Distributed Systems'),
+    (gen_random_uuid(), v_org_b, v_department_b, 'ME201', 'Thermodynamics');
 
     -- 5. Personal Commons Room & Notes Created by Alice
     INSERT INTO rooms (id, title, host_user_id, workspace_type, is_locked)
@@ -153,6 +155,13 @@ BEGIN
     -- Authenticate as Alice in Org A
     PERFORM * FROM connect_auth.authenticate_session(v_token_a, v_org_a);
 
+    -- Positive control: Alice must see the seeded course in her own tenant.
+    SELECT count(*) INTO v_count FROM courses WHERE organization_id = v_org_a;
+    IF v_count != 1 THEN
+        RAISE EXCEPTION 'RLS FALSE POSITIVE: Alice should see exactly 1 course in Tenant A, got %.', v_count;
+    END IF;
+    RAISE NOTICE '✓ [PASS] Same-tenant positive control returned 1 row.';
+
     -- 1. SELECT Isolation: Alice must see Org A courses, but 0 Org B courses
     SELECT count(*) INTO v_count FROM courses WHERE organization_id = v_org_b;
     IF v_count != 0 THEN
@@ -162,8 +171,10 @@ BEGIN
 
     -- 2. INSERT Isolation: Alice cannot insert course into Org B
     BEGIN
-        INSERT INTO courses (id, organization_id, name, code)
-        VALUES (gen_random_uuid(), v_org_b, 'Malicious Course', 'HACK101');
+        INSERT INTO courses (id, organization_id, department_id, code, title)
+        VALUES (gen_random_uuid(), v_org_b,
+                'd2222222-2222-2222-2222-222222222222'::UUID,
+                'HACK101', 'Malicious Course');
         RAISE EXCEPTION 'SECURITY BREACH: Alice was able to INSERT course into Tenant B!';
     EXCEPTION
         WHEN check_violation OR insufficient_privilege THEN
@@ -171,7 +182,7 @@ BEGIN
     END;
 
     -- 3. UPDATE Isolation: Alice cannot update Org B courses
-    UPDATE courses SET name = 'Defaced Course' WHERE organization_id = v_org_b;
+    UPDATE courses SET title = 'Defaced Course' WHERE organization_id = v_org_b;
     GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
     IF v_rows_affected > 0 THEN
         RAISE EXCEPTION 'SECURITY BREACH: Alice updated % rows in Tenant B!', v_rows_affected;
