@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - 'remediation/**'
   pull_request:
     branches:
       - main
+      - 'remediation/**'
     types: [opened, synchronize, reopened, edited]
 
 permissions:
