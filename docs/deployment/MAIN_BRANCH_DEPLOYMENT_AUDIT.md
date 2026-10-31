@@ -3,10 +3,10 @@
 **Document ID:** `CONNECT-DEPLOY-AUDIT-MAIN-20261101`
 **Repository:** `https://github.com/anant9934/connect`
 **Deployment Target Branch:** `main`
-**Inspected Commit SHA:** `86f8f87059a5840d24bf51a77e812d62d29aa450`
+**Inspected Commit SHA:** `86f8f87059a5840d24bf51a77e812d62d29aa450` (Remediated in `8dd227a` and `04a2b0d`)
 **Lead Engineer:** Principal DevOps Engineer, Senior Go Backend Engineer & Production SRE
 **Date:** November 1, 2026
-**Status:** **`AUDIT COMPLETE — DEPLOYMENT DEFECTS IDENTIFIED`**
+**Status:** **`AUDIT COMPLETE — DEPLOYMENT DEFECTS RESOLVED ON MAIN`**
 
 ---
 
@@ -146,3 +146,23 @@ The repository uses a monorepo structure where core services reside inside the `
 
 ### Blocker 4: Environment Variables Setup
 - **Fix:** Provide exact environment variable catalog in `docs/deployment/ENVIRONMENT_VARIABLES.md` for both Vercel and Render dashboards.
+
+---
+
+## 7. RESOLUTION RECORD & REMEDIATION COMMITS
+
+All identified blockers have been resolved on branch `main`:
+
+1. **Commit `8dd227a1a98cdc9952f6b1c80a9d11763fed311c`**:
+   - `connect-main/services/api/Dockerfile`: Updated base builder image from non-existent `golang:1.26-alpine` to stable `golang:1.23-alpine`.
+   - `connect-main/migrations/000008_auth_context_and_rls.sql`: Resolved invalid column references `course_batch_id` with relational joins `cb.id = ce.batch_id` and added missing common columns (`visibility`, `uploaded_by`, `is_public`).
+   - `render.yaml`: Created repository-root blueprint pointing to `./connect-main/services/api/Dockerfile` with build context `./connect-main/services/api`.
+   - `tests/sql/restricted_role_security_tests.sql`: Updated room test fixture and formatted notice escaping.
+   - `.github/workflows/quality-gate.yml`: Upgraded Node.js to version 22, removed breaking `-- --run` flag from web test step, and added live PostgreSQL 16 service container test execution.
+
+2. **Commit `04a2b0d0b58d9821c8ea525a7410f308b19e08b6`**:
+   - `docs/deployment/ENVIRONMENT_VARIABLES.md`: Comprehensive environment variable reference for Vercel and Render.
+   - `docs/deployment/VERCEL_DEPLOYMENT.md`: Step-by-step Vercel frontend deployment and rewrite proxy configuration guide.
+   - `docs/deployment/RENDER_DEPLOYMENT.md`: Step-by-step Render backend Docker deployment and health check configuration guide.
+   - `docs/deployment/PRODUCTION_VALIDATION_REPORT.md`: Production smoke test script and validation matrix.
+   - `docs/deployment/ROLLBACK_RUNBOOK.md`: Standard emergency rollback procedures for frontend, backend, and database.
