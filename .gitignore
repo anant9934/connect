@@ -37,6 +37,7 @@ out/
 
 # Python artifacts
 __pycache__/
+# Python build artifacts
 *.py[cod]
 *$py.class
 *.so
@@ -51,8 +52,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
 parts/
 sdist/
 var/
