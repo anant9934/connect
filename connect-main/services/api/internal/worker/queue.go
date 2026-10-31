@@ -222,3 +222,142 @@ func HeartbeatJob(ctx context.Context, pool *pgxpool.Pool, jobID uuid.UUID, fenc
 	}
 	return nil
 }
+
+// DeadLetterJob forces a job immediately into dead_letter status without consuming further attempts.
+// Guarded by monotonic fencing token and processing status.
+func DeadLetterJob(ctx context.Context, pool *pgxpool.Pool, jobID uuid.UUID, fencingToken int64, lastErr string) error {
+	query := `
+		UPDATE background_jobs
+		SET status = 'dead_letter',
+		    last_error = $3,
+		    locked_by = NULL,
+		    locked_until = NULL,
+		    updated_at = clock_timestamp()
+		WHERE id = $1 AND fencing_token = $2 AND status = 'processing';
+	`
+	tag, err := pool.Exec(ctx, query, jobID, fencingToken, lastErr)
+	if err != nil {
+		return fmt.Errorf("failed to dead-letter job: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("fencing token mismatch or job not in processing state (lease lost)")
+	}
+	return nil
+}
+
+// Enqueue inserts a background job using connection pool directly (when no transaction exists).
+func Enqueue(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	queue string,
+	idempotencyKey string,
+	payload any,
+	scheduledAt *time.Time,
+) (*Job, error) {
+	if idempotencyKey == "" {
+		return nil, fmt.Errorf("idempotency key is required for job enqueue")
+	}
+	if queue == "" {
+		queue = DefaultQueue
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal job payload: %w", err)
+	}
+
+	schedTime := time.Now()
+	if scheduledAt != nil {
+		schedTime = *scheduledAt
+	}
+
+	query := `
+		INSERT INTO background_jobs (
+			queue, idempotency_key, payload, status, scheduled_at
+		) VALUES (
+			$1, $2, $3::jsonb, $4, $5
+		)
+		ON CONFLICT (idempotency_key) DO NOTHING
+		RETURNING id, queue, idempotency_key, payload, status, attempt_count, max_attempts,
+		          scheduled_at, locked_by, locked_until, fencing_token, last_error, created_at, updated_at;
+	`
+
+	var j Job
+	err = pool.QueryRow(ctx, query, queue, idempotencyKey, payloadBytes, StatusPending, schedTime).Scan(
+		&j.ID,
+		&j.Queue,
+		&j.IdempotencyKey,
+		&j.Payload,
+		&j.Status,
+		&j.AttemptCount,
+		&j.MaxAttempts,
+		&j.ScheduledAt,
+		&j.LockedBy,
+		&j.LockedUntil,
+		&j.FencingToken,
+		&j.LastError,
+		&j.CreatedAt,
+		&j.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			// Idempotent duplicate: already enqueued
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to enqueue job: %w", err)
+	}
+
+	return &j, nil
+}
+
+// QueueStats provides operational depth metrics for an individual queue.
+type QueueStats struct {
+	Queue            string
+	PendingCount     int64
+	ProcessingCount  int64
+	FailedCount      int64
+	DeadLetterCount  int64
+	CompletedCount   int64
+	OldestPendingAge time.Duration
+}
+
+// GetQueueStats queries PostgreSQL for real-time queue depth and backlog statistics.
+func GetQueueStats(ctx context.Context, pool *pgxpool.Pool, queue string) (*QueueStats, error) {
+	if queue == "" {
+		queue = DefaultQueue
+	}
+
+	query := `
+		SELECT
+			COALESCE(COUNT(*) FILTER (WHERE status = 'pending'), 0) AS pending_count,
+			COALESCE(COUNT(*) FILTER (WHERE status = 'processing'), 0) AS processing_count,
+			COALESCE(COUNT(*) FILTER (WHERE status = 'failed'), 0) AS failed_count,
+			COALESCE(COUNT(*) FILTER (WHERE status = 'dead_letter'), 0) AS dead_letter_count,
+			COALESCE(COUNT(*) FILTER (WHERE status = 'completed'), 0) AS completed_count,
+			COALESCE(EXTRACT(EPOCH FROM (clock_timestamp() - MIN(scheduled_at) FILTER (WHERE status = 'pending'))), 0) AS oldest_pending_sec
+		FROM background_jobs
+		WHERE queue = $1;
+	`
+
+	var stats QueueStats
+	stats.Queue = queue
+	var oldestSec float64
+
+	err := pool.QueryRow(ctx, query, queue).Scan(
+		&stats.PendingCount,
+		&stats.ProcessingCount,
+		&stats.FailedCount,
+		&stats.DeadLetterCount,
+		&stats.CompletedCount,
+		&oldestSec,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch queue stats: %w", err)
+	}
+
+	if oldestSec > 0 {
+		stats.OldestPendingAge = time.Duration(oldestSec * float64(time.Second))
+	}
+
+	return &stats, nil
+}

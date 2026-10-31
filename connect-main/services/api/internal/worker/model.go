@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +23,22 @@ const (
 	DefaultLeaseTTL    = 30 * time.Second
 )
 
+// Standard queue names
+const (
+	QueueDefault            = "default"
+	QueueAttendanceCritical = "attendance_critical"
+	QueueWebhooks           = "webhooks"
+	QueueMediaProcessing    = "media_processing"
+)
+
+// Standard job type constants
+const (
+	TypeSystemAuditPing     = "system.audit_ping"
+	TypeRoomCleanup         = "room.cleanup"
+	TypeAttendanceReconcile = "attendance.reconcile"
+	TypeFilePurge           = "file.purge"
+)
+
 // Job represents a durable background task stored in the outbox.
 type Job struct {
 	ID             uuid.UUID
@@ -38,4 +55,11 @@ type Job struct {
 	LastError      *string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+// JobPayload provides standard structured envelope for job type dispatching.
+type JobPayload struct {
+	Type      string          `json:"type"`
+	Data      json.RawMessage `json:"data,omitempty"`
+	CreatedAt time.Time       `json:"createdAt,omitempty"`
 }
