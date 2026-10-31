@@ -7,6 +7,10 @@
 -- Enable cryptographic extensions for non-guessable identifiers
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- pgcrypto supplies gen_random_bytes() and HMAC-SHA256 used by later migrations.
+-- Keep it in public because the security functions explicitly qualify its functions.
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+
 -- Schema migration & system heartbeat metadata table
 CREATE TABLE IF NOT EXISTS schema_metadata (
     id SERIAL PRIMARY KEY,
