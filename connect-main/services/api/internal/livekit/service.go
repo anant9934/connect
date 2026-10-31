@@ -49,10 +49,18 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		// Creation privilege only; never grant administrative or listing access
 		vg.RoomCreate = true
 
+	case strings.HasSuffix(path, "/DeleteRoom"):
+		// LiveKit SFU requires RoomCreate alongside room scope to delete a room
+		if roomCode == "" {
+			return nil, fmt.Errorf("security violation: livekit operation %s requires explicit room scope", path)
+		}
+		vg.Room = roomCode
+		vg.RoomCreate = true
+		vg.RoomAdmin = true
+
 	case strings.HasSuffix(path, "/UpdateParticipant"),
 		strings.HasSuffix(path, "/RemoveParticipant"),
 		strings.HasSuffix(path, "/MutePublishedTrack"),
-		strings.HasSuffix(path, "/DeleteRoom"),
 		strings.HasSuffix(path, "/GetParticipant"),
 		strings.HasSuffix(path, "/ListParticipants"),
 		strings.HasSuffix(path, "/UpdateSubscriptions"),

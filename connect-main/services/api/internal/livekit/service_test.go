@@ -144,6 +144,20 @@ func TestRoomManager_TwirpTransportLeastPrivilege(t *testing.T) {
 	assert.True(t, claims2.Video.RoomAdmin)
 	assert.Equal(t, targetRoom, claims2.Video.Room)
 
+	// 2b. DeleteRoom with explicit room scope -> requires RoomCreate + RoomAdmin + targetRoom
+	reqDel, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://livekit.example.com/twirp/livekit.RoomService/DeleteRoom", nil)
+	require.NoError(t, err)
+	_, err = transport.RoundTrip(reqDel)
+	require.NoError(t, err)
+
+	authHeaderDel := cap.lastReq.Header.Get("Authorization")
+	tokenDel := strings.TrimPrefix(authHeaderDel, "Bearer ")
+	verifierDel, _ := livekitauth.ParseAPIToken(tokenDel)
+	_, claimsDel, _ := verifierDel.Verify([]byte(apiSecret))
+	assert.True(t, claimsDel.Video.RoomAdmin, "DeleteRoom token must have RoomAdmin")
+	assert.True(t, claimsDel.Video.RoomCreate, "DeleteRoom token must have RoomCreate for LiveKit SFU termination")
+	assert.Equal(t, targetRoom, claimsDel.Video.Room)
+
 	// 3. ListRooms discovery endpoint -> RoomList ONLY (no RoomAdmin, no RoomCreate)
 	reqDisc, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://livekit.example.com/twirp/livekit.RoomService/ListRooms", nil)
 	require.NoError(t, err)
