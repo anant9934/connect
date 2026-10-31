@@ -227,3 +227,34 @@ func TestAttackScenario_DelimiterAmbiguityResistance(t *testing.T) {
 		t.Fatalf("SECURITY FAILURE: Serialized payloads collided: %s == %s", p1, p2)
 	}
 }
+
+func TestAttackScenario_MultibyteUnicodeSerialization(t *testing.T) {
+	secret := []byte("test_secret_key_32_bytes_long_12")
+	user := uuid.New().String()
+	nonce := "a1b2c3d4e5f60718"
+	xid := "1014"
+	exp := time.Now().Add(10 * time.Minute).Unix()
+
+	// Multibyte Unicode role (e.g., Devanagari or internationalized role identifier)
+	unicodeRole := "तथास्तु_coordinator"
+	// Verify that Go len() returns byte count (UTF-8 octets), exactly matching PostgreSQL octet_length()
+	byteCount := len([]byte(unicodeRole))
+	if len(unicodeRole) != byteCount {
+		t.Fatalf("Encoding mismatch: len(string) %d != len([]byte) %d", len(unicodeRole), byteCount)
+	}
+
+	sig := computeHMAC(secret, user, "", false, unicodeRole, nonce, xid, exp)
+
+	// Valid context with exact multibyte Unicode role succeeds
+	valid, reason := verifyHMACContext(secret, user, "", false, unicodeRole, nonce, xid, xid, exp, sig)
+	if !valid {
+		t.Fatalf("SECURITY FAILURE: Valid multibyte Unicode context rejected: %s", reason)
+	}
+
+	// Attacker attempts Unicode lookalike or fullwidth delimiter collision (e.g. U+FF5C fullwidth pipe '｜')
+	lookalikeRole := "तथास्तु｜coordinator"
+	valid, _ = verifyHMACContext(secret, user, "", false, lookalikeRole, nonce, xid, xid, exp, sig)
+	if valid {
+		t.Fatal("SECURITY FAILURE: Unicode lookalike delimiter spoofed legitimate HMAC signature!")
+	}
+}
