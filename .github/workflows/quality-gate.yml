@@ -103,3 +103,39 @@ jobs:
           done
           echo "All migration files verified."
 
+  postgres-16-integration:
+    name: PostgreSQL 16 Integration & Security Harness
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: connect_admin
+          POSTGRES_PASSWORD: connect_disposable_ci_password_456
+          POSTGRES_DB: connect_test_ci_runner
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install PostgreSQL Client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Execute PostgreSQL 16 Migration & Security Test Harness
+        env:
+          CONFIRM_DISPOSABLE_DB: "true"
+          TEST_DATABASE_URL: "postgres://connect_admin:connect_disposable_ci_password_456@localhost:5432/connect_test_ci_runner?sslmode=disable"
+        run: |
+          chmod +x scripts/test_pg16_migrations.sh
+          ./scripts/test_pg16_migrations.sh
+
