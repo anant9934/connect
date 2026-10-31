@@ -79,3 +79,18 @@ func TestClassifyRoom_EmptyStringsTreatedAsNil(t *testing.T) {
 		t.Errorf("expected nil orgID, got %v", orgID)
 	}
 }
+
+func TestClassifyRoom_AmbiguousFlagQuarantines(t *testing.T) {
+	hostID := uuid.New().String()
+	// Even with a valid hostID, if isAmbiguous is true, it MUST quarantine
+	wsType, orgID, isLocked := ClassifyRoom(nil, &hostID, false, true)
+	if wsType != "quarantine_unclassified" {
+		t.Errorf("expected quarantine_unclassified for ambiguous record, got %s", wsType)
+	}
+	if !isLocked {
+		t.Error("expected quarantined room to be locked (isLocked = true)")
+	}
+	if orgID != nil {
+		t.Errorf("expected nil orgID, got %v", orgID)
+	}
+}

@@ -28,7 +28,13 @@ type ClassificationStats struct {
 }
 
 // ClassifyRoom determines workspace classification based on verified relational evidence.
-func ClassifyRoom(classSessionID *string, hostUserID *string, isCollaborationNode bool) (workspaceType string, orgID *string, isLocked bool) {
+// It eliminates unsafe host-inference: ambiguous, conflicted, or unattributable records are quarantined.
+func ClassifyRoom(classSessionID *string, hostUserID *string, isCollaborationNode bool, isAmbiguous ...bool) (workspaceType string, orgID *string, isLocked bool) {
+	// Rule 0: Ambiguous or Conflicted Records -> Immediate Quarantine
+	if len(isAmbiguous) > 0 && isAmbiguous[0] {
+		return "quarantine_unclassified", nil, true
+	}
+
 	// Rule 1: Institutional Academic Sessions
 	if classSessionID != nil && *classSessionID != "" {
 		return "institutional", nil, false // Org ID retained from parent class session
@@ -40,7 +46,7 @@ func ClassifyRoom(classSessionID *string, hostUserID *string, isCollaborationNod
 		return "personal_commons", &commons, false
 	}
 
-	// Rule 3: Personal Private Sandbox (Ad-hoc meeting owned by valid host)
+	// Rule 3: Personal Private Sandbox (Verified ad-hoc meeting owned by valid host with zero conflict)
 	if hostUserID != nil && *hostUserID != "" {
 		return "personal_workspace", nil, false
 	}
@@ -121,7 +127,7 @@ func RunBackfill(ctx context.Context, pool *pgxpool.Pool, batchSize int, throttl
 		rows, err := tx.Query(ctx, `
 			SELECT id, host_user_id, class_session_id
 			FROM rooms
-			WHERE id > $1::uuid AND workspace_type IS NULL
+			WHERE id > $1::uuid AND (workspace_type IS NULL OR workspace_type = '' OR workspace_type = 'unclassified')
 			ORDER BY id ASC
 			LIMIT $2;
 		`, cursorID, batchSize)
@@ -212,7 +218,7 @@ func RunBackfill(ctx context.Context, pool *pgxpool.Pool, batchSize int, throttl
 		SET organization_id = r.organization_id,
 		    workspace_type = r.workspace_type
 		FROM rooms r
-		WHERE n.room_id = r.id AND n.workspace_type IS NULL;
+		WHERE n.room_id = r.id AND (n.workspace_type IS NULL OR n.workspace_type = '' OR n.workspace_type = 'unclassified');
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to backfill meeting notes: %w", err)
@@ -223,7 +229,7 @@ func RunBackfill(ctx context.Context, pool *pgxpool.Pool, batchSize int, throttl
 		SET organization_id = r.organization_id,
 		    workspace_type = r.workspace_type
 		FROM rooms r
-		WHERE f.room_id = r.id AND f.workspace_type IS NULL;
+		WHERE f.room_id = r.id AND (f.workspace_type IS NULL OR f.workspace_type = '' OR f.workspace_type = 'unclassified');
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to backfill meeting files: %w", err)
@@ -233,12 +239,12 @@ func RunBackfill(ctx context.Context, pool *pgxpool.Pool, batchSize int, throttl
 	_, _ = pool.Exec(ctx, `
 		UPDATE meeting_notes
 		SET workspace_type = 'quarantine_unclassified'
-		WHERE workspace_type IS NULL;
+		WHERE workspace_type IS NULL OR workspace_type = '' OR workspace_type = 'unclassified';
 	`)
 	_, _ = pool.Exec(ctx, `
 		UPDATE meeting_files
 		SET workspace_type = 'quarantine_unclassified'
-		WHERE workspace_type IS NULL;
+		WHERE workspace_type IS NULL OR workspace_type = '' OR workspace_type = 'unclassified';
 	`)
 
 	// Mark checkpoint completed
