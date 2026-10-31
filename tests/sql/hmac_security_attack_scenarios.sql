@@ -96,13 +96,15 @@ BEGIN
 
     -- Generate signature with a stale xid
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
-    v_payload := v_user::TEXT || '||false|' || v_stale_xid || '|' || v_exp::TEXT;
+    v_payload := connect_auth.serialize_hmac_payload(v_user::TEXT, '', 'false', '', 'a1b2c3d4e5f60718', v_stale_xid, v_exp::TEXT);
     v_valid_sig_for_stale_xid := encode(hmac(v_payload::BYTEA, v_secret, 'sha256'), 'hex');
 
     -- Replay that signature in the CURRENT transaction
     PERFORM set_config('app._user_id', v_user::TEXT, true);
     PERFORM set_config('app._org_id', '', true);
     PERFORM set_config('app._is_super', 'false', true);
+    PERFORM set_config('app._role', '', true);
+    PERFORM set_config('app._nonce', 'a1b2c3d4e5f60718', true);
     PERFORM set_config('app._xid', v_stale_xid, true);
     PERFORM set_config('app._exp', v_exp::TEXT, true);
     PERFORM set_config('app._sig', v_valid_sig_for_stale_xid, true);
@@ -151,12 +153,14 @@ BEGIN
     RAISE NOTICE 'Executing Attack Scenario 6: Expired Context Rejection...';
 
     SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
-    v_payload := v_user::TEXT || '||false|' || v_xid || '|' || v_expired_time::TEXT;
+    v_payload := connect_auth.serialize_hmac_payload(v_user::TEXT, '', 'false', '', 'a1b2c3d4e5f60718', v_xid, v_expired_time::TEXT);
     v_expired_sig := encode(hmac(v_payload::BYTEA, v_secret, 'sha256'), 'hex');
 
     PERFORM set_config('app._user_id', v_user::TEXT, true);
     PERFORM set_config('app._org_id', '', true);
     PERFORM set_config('app._is_super', 'false', true);
+    PERFORM set_config('app._role', '', true);
+    PERFORM set_config('app._nonce', 'a1b2c3d4e5f60718', true);
     PERFORM set_config('app._xid', v_xid, true);
     PERFORM set_config('app._exp', v_expired_time::TEXT, true);
     PERFORM set_config('app._sig', v_expired_sig, true);
@@ -204,4 +208,44 @@ BEGIN
     DELETE FROM users WHERE id = v_test_user_id;
 END $$;
 
-RAISE NOTICE 'ALL 7 ADVERSARIAL ATTACK SCENARIOS SUCCESSFULLY DEFENDED AND VERIFIED!';
+-- ------------------------------------------------------------------------------
+-- Attack Scenario 8: Delimiter Collision and Parameter Boundary Injection
+-- ------------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_secret BYTEA;
+    v_user UUID := '11111111-1111-1111-1111-111111111111'::UUID;
+    v_xid TEXT := pg_current_xact_id()::TEXT;
+    v_exp BIGINT := EXTRACT(EPOCH FROM (clock_timestamp() + INTERVAL '10 minutes'))::BIGINT;
+    v_nonce TEXT := 'a1b2c3d4e5f60718';
+    v_payload TEXT;
+    v_sig TEXT;
+    v_result UUID;
+BEGIN
+    RAISE NOTICE 'Executing Attack Scenario 8: Delimiter Collision / Field Injection...';
+
+    SELECT secret_key INTO v_secret FROM connect_auth.internal_keys WHERE id = 1;
+
+    -- Legitimate signature computed with canonical serializer
+    v_payload := connect_auth.serialize_hmac_payload(v_user::TEXT, '', 'false', 'institution_member', v_nonce, v_xid, v_exp::TEXT);
+    v_sig := encode(hmac(v_payload::BYTEA, v_secret, 'sha256'), 'hex');
+
+    -- Attacker attempts to shift delimiters by setting a forged role containing a delimiter
+    PERFORM set_config('app._user_id', v_user::TEXT, true);
+    PERFORM set_config('app._org_id', '', true);
+    PERFORM set_config('app._is_super', 'false', true);
+    PERFORM set_config('app._role', 'institution_member|injected', true);
+    PERFORM set_config('app._nonce', v_nonce, true);
+    PERFORM set_config('app._xid', v_xid, true);
+    PERFORM set_config('app._exp', v_exp::TEXT, true);
+    PERFORM set_config('app._sig', v_sig, true);
+
+    v_result := connect_auth.current_user_id();
+    IF v_result IS NOT NULL THEN
+        RAISE EXCEPTION 'VULNERABILITY DETECTED: Delimiter collision injection succeeded!';
+    END IF;
+
+    RAISE NOTICE '✓ [BLOCKED] Attack 8 Neutralized: Delimiter manipulation resulted in signature verification failure.';
+END $$;
+
+RAISE NOTICE 'ALL 8 ADVERSARIAL ATTACK SCENARIOS SUCCESSFULLY DEFENDED AND VERIFIED!';
