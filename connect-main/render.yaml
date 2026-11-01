@@ -4,7 +4,7 @@ services:
     runtime: docker
     dockerfilePath: ./services/api/Dockerfile
     dockerContext: ./services/api
-    plan: starter
+    plan: free
     region: singapore # or oregon / frankfurt
     healthCheckPath: /health/live
     autoDeploy: false
