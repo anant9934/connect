@@ -29,6 +29,11 @@ import (
 	"github.com/tathastu/connect/services/api/internal/server"
 )
 
+// allowAll keeps rate limits out of this test; they have their own coverage.
+type allowAll struct{}
+
+func (allowAll) Allow(context.Context, string, int, time.Duration) (bool, error) { return true, nil }
+
 type apiClient struct {
 	t      *testing.T
 	router http.Handler
@@ -113,10 +118,7 @@ func newRuntimeRouter(t *testing.T, app *pgxpool.Pool) http.Handler {
 		TathastuAudience:   "tathastu-connect-service",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	limiter, err := ratelimit.NewDevMemoryLimiter(cfg.AppEnv)
-	if err != nil {
-		t.Fatal(err)
-	}
+	var limiter ratelimit.Limiter = allowAll{}
 	auditService := audit.NewService(app, logger)
 	authService := auth.NewService(auth.NewPgxRepository(app), auditService, time.Hour, time.Hour)
 	roomService := room.NewService(room.NewPgxRepository(app), room.NewPolicy(), auditService, livekit.NewTokenService("test_key", "test_secret_that_is_long_enough_for_tests"), nil)
