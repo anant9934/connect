@@ -155,11 +155,13 @@ jobs:
         env:
           ADMIN_URL: "postgres://connect_admin:connect_disposable_ci_password_456@localhost:5432/connect_test_ci_runner?sslmode=disable"
         run: |
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000012.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000011.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000010.sql
           psql "$ADMIN_URL" -tAc "SELECT to_regclass('participant_media_sessions') IS NULL" | grep -qx t
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000010_trusted_sessions_and_attendance_policies.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000011_service_role_access.sql
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000012_fix_allocation_policy_recursion.sql
 
       - name: Verify RLS Under Restricted Runtime Roles
         env:

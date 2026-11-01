@@ -34,11 +34,14 @@ echo "PASS: existing data survived the upgrade"
 
 echo "== Step 3: rollback and re-apply"
 "${PSQL[@]}" < "${MIGRATIONS}/000011_service_role_access.sql"
+"${PSQL[@]}" < "${MIGRATIONS}/000012_fix_allocation_policy_recursion.sql"
+"${PSQL[@]}" < "${ROOT}/tests/sql/rollback_000012.sql"
 "${PSQL[@]}" < "${ROOT}/tests/sql/rollback_000011.sql"
 "${PSQL[@]}" < "${ROOT}/tests/sql/rollback_000010.sql"
 "${PSQL[@]}" -tAc "SELECT to_regclass('participant_media_sessions') IS NULL" | grep -qx t
 "${PSQL[@]}" < "${MIGRATIONS}/000010_trusted_sessions_and_attendance_policies.sql"
 "${PSQL[@]}" < "${MIGRATIONS}/000011_service_role_access.sql"
+"${PSQL[@]}" < "${MIGRATIONS}/000012_fix_allocation_policy_recursion.sql"
 echo "PASS: rollback and re-apply"
 
 echo "== Step 4: RLS tests under each restricted runtime role"

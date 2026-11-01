@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/livekit/protocol/webhook"
 	"github.com/tathastu/connect/services/api/internal/attendance"
+	"github.com/tathastu/connect/services/api/internal/database"
 )
 
 type workflowTenant struct {
@@ -245,13 +247,48 @@ func TestWorkflowDB_ClassSessionAttendance(t *testing.T) {
 		t.Fatal("database linked a room to another tenant's class session")
 	}
 
+	// Real user contexts: a student sees only their own record, and a member of
+	// tenant B sees nothing from tenant A even when asking for tenant B's data.
+	login := func(userID string) string {
+		t.Helper()
+		token := uuid.NewString() + uuid.NewString()[:28]
+		if _, err := admin.Exec(ctx, `INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '1 hour')`, userID, token); err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	visible := func(token, orgID string) (records, classes int) {
+		t.Helper()
+		if err := database.WithAuthContext(ctx, app, token, &orgID, func(tx pgx.Tx, _ *database.AuthContext) error {
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM attendance_records`).Scan(&records); err != nil {
+				return err
+			}
+			return tx.QueryRow(ctx, `SELECT count(*) FROM class_sessions`).Scan(&classes)
+		}); err != nil {
+			t.Fatalf("context query: %v", err)
+		}
+		return records, classes
+	}
+	if r, c := visible(login(present), a.orgID); r != 1 || c != 1 {
+		t.Errorf("student A: saw %d records and %d classes, want 1 and 1", r, c)
+	}
+	if r, c := visible(login(a.facultyID), a.orgID); r != len(want) || c != 1 {
+		t.Errorf("faculty A: saw %d records and %d classes, want %d and 1", r, c, len(want))
+	}
+	if r, c := visible(login(bStudent), b.orgID); r != 0 || c != 1 {
+		t.Errorf("student B: saw %d records and %d classes, want 0 and 1", r, c)
+	}
+	if err := database.WithAuthContext(ctx, app, login(bStudent), &a.orgID, func(pgx.Tx, *database.AuthContext) error { return nil }); err == nil {
+		t.Error("student B obtained a context in tenant A")
+	}
+
 	// The API role with no auth context can neither read nor write attendance.
-	var visible int
-	if err := app.QueryRow(ctx, `SELECT count(*) FROM attendance_records`).Scan(&visible); err != nil {
+	var unscoped int
+	if err := app.QueryRow(ctx, `SELECT count(*) FROM attendance_records`).Scan(&unscoped); err != nil {
 		t.Fatal(err)
 	}
-	if visible != 0 {
-		t.Fatalf("connect_app without context read %d attendance records", visible)
+	if unscoped != 0 {
+		t.Fatalf("connect_app without context read %d attendance records", unscoped)
 	}
 	if _, err := app.Exec(ctx, `INSERT INTO attendance_records (organization_id, batch_id, class_session_id, student_user_id) VALUES ($1, $2, $3, $4)`, a.orgID, a.batchID, a.sessionID, notEnrolled); err == nil {
 		t.Fatal("connect_app without context inserted attendance")
