@@ -12,8 +12,17 @@ Compact checkpoint. Resume from here. Budget: free tier only.
 | Runtime DB role | `neondb_owner` through the pooler, not `connect_app` |
 | Vercel | Project `connect`, root `connect-main/apps/web`, production branch `main` |
 
+## Verified on disposable Postgres 16 (CI run 41338955770, commit `8b4258a`)
+
+- Migrations 000001-000011, SQL security suites, 000010 and 000011 rollback and re-apply.
+- Webhook store as `connect_app` and `connect_worker`: room visible, duplicate delivery, unknown room.
+- Attendance job as `connect_worker`, for a room with no class session only.
+- Web and mobile typecheck and tests, web build, Go tests.
+
 ## Open
 
-1. **RLS gate:** CI job `postgres-16-integration` runs the role tests on a disposable Postgres 16.
-2. **Runtime role:** production does not use the restricted roles. See `RELEASE_READINESS.md`.
-3. Tenant-dependent features wait on item 2.
+1. Full attendance workflow with a class session, enrollments and a policy: **not yet tested**.
+2. Tenant isolation is untested at API level. The API uses `neondb_owner` and sets no per-request auth
+   context, so it cannot simply move to `connect_app`. The in-process worker shares that pool.
+3. Tenant-dependent features wait on items 1 and 2.
+4. Investigate latency: API in Ohio; `.env` comment places Redis in Singapore, and the rate limiter calls it per request.
