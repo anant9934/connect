@@ -12,11 +12,12 @@ Compact checkpoint. Resume from here. Budget: free tier only.
 | Runtime DB role | `neondb_owner` through the pooler, not `connect_app` |
 | Vercel | Project `connect`, root `connect-main/apps/web`, production branch `main` |
 
-## Verified on disposable Postgres 16 (CI run 41361616420, commit `e790366`)
+## Verified on disposable Postgres 16 (CI run 41362764262, commit `a3d8ac3`)
 
-- Migrations 000001-000016, SQL security suites, rollback and re-apply of 000010-000016.
+- Migrations 000001-000017, SQL security suites, rollback and re-apply of 000010-000017.
 - `TestWorkflowDB_APITenantIsolation`: the full router with auth, room, notes and files all on `connect_app`:
-  account lifecycle, room flow, forged leave and identity theft, waiting room, institutional rooms, suspended member.
+  account lifecycle, room flow, forged leave and identity theft, waiting room, institutional rooms, suspended member,
+  scheduled meetings and passcodes.
 - `TestWorkflowDB_EveryTableHasRLS`: every public table has forced RLS; only `schema_metadata` is exempt.
 - `TestWorkflowDB_NotesHTTP`, `FilesHTTP`, `WebhookHTTPBoundary`, `AttendanceQueueLifecycle`,
   `WorkerRestartRecovery`, `ClassSessionAttendance`, `AuthContextIsolation`.
@@ -31,16 +32,19 @@ Limits:
 - The API still connects as `neondb_owner` in production, where RLS may not apply. Moving to `connect_app` and
   `connect_worker` needs a separate worker pool and owner approval.
 - SECURITY DEFINER functions and foreign key checks need the table owner to bypass RLS; unconfirmed in production.
-- Deploy order: migrations 000013-000016 must be applied before this code, or the API fails.
+- Deploy order: migrations 000013-000017 must be applied before this code, or the API fails.
 - Behavior change: guests are refused in institutional rooms. Mobile has no waiting room screen yet.
 
 ## Current phase: product scope, Phase 1 gaps
 
-Security foundation items 1-6 are done at the level above. Attendance is not Phase 3; see `FEATURE_REGISTER.md`.
+Security foundation items 1-6 are done at the level above. Scheduled meetings and passcodes are built and tested at
+the API level; their web and mobile screens are typechecked only, never run in a browser or on a device.
+Attendance is not Phase 3; see `FEATURE_REGISTER.md`.
 
 ## Next action
 
-Scheduled meetings and passcodes (P1-02, P1-03), then co-host, then course management, recurring scheduling.
+Co-host and host transfer (P1-07), then course management API and screens (P2-06), which scheduling of classes,
+attendance views, notifications and the course workspaces all depend on.
 
 ## Not started or blocked
 

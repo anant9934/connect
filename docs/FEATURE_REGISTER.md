@@ -17,11 +17,11 @@ Search-based entries show whether code exists, not that it works.
 | High | 31 reachable Go standard-library vulnerabilities from pinning Go 1.26.0. | Fixed on branch: 0 reachable on Go 1.26.10 |
 | High | Health check skipped nested Go tests yet printed PASSED. | Fixed on branch |
 | High | Reconciler silently skipped a class when its room or session lookup failed. | Fixed on branch: job now errors and retries, verified in CI |
-| High | API runs as `neondb_owner` with no request context; RLS likely bypassed in production. | Code converted and tested in CI run 41361616420; production still connects as owner until approved |
+| High | API runs as `neondb_owner` with no request context; RLS likely bypassed in production. | Code converted and tested in CI run 41362764262; production still connects as owner until approved |
 | High | RLS recursion between `faculty_allocations` and `course_enrollments` broke non-admin class reads. | Fixed by `000012`, verified in CI |
 | Medium | RLS may silently hide rows from the shared pool (see `RELEASE_READINESS.md`). | Unverified |
 | Medium | Readiness matrix overstates scope and marks a missed latency target as PASS. | Superseded by `RELEASE_READINESS.md` |
-| High | `/participants` public, forged `/leave`, guest token minting for supplied identities, waiting room not persisted, no RLS on users and participants. | Fixed on branch, verified in CI run 41361616420 |
+| High | `/participants` public, forged `/leave`, guest token minting for supplied identities, waiting room not persisted, no RLS on users and participants. | Fixed on branch, verified in CI run 41362764262 |
 | Low | Root `package.json` scripts hardcode a Windows path; 100+ milestone reports clutter `connect-main/`. | Open |
 
 ## Register
@@ -33,8 +33,8 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | ID | Phase | Feature | Backend | Web | Android | Status | Blockers or gaps |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | P1-01 | 1 | Instant meeting, join by code | `room` | yes | yes | TESTING | |
-| P1-02 | 1 | Scheduled meetings | no | no | no | NOT_STARTED | |
-| P1-03 | 1 | Meeting passcodes | no | no | no | NOT_STARTED | |
+| P1-02 | 1 | Scheduled meetings | `room`, `000017` | `/schedule` | no | TESTING | API passes in CI run 41362764262; web page typechecked only, not run in a browser; no reminders; no mobile screen |
+| P1-03 | 1 | Meeting passcodes | `room`, `000017` | yes | yes | TESTING | API passes in CI run 41362764262; web and mobile prompts typechecked only, not run in a browser or on a device |
 | P1-04 | 1 | Lock, end, waiting room | `room` | yes | partial | TESTING | Web flow verified at API level only; Android has no waiting room screen |
 | P1-05 | 1 | Mic, camera, screen share via LiveKit | token | yes | yes | TESTING | Device evidence is historical |
 | P1-06 | 1 | Remove, mute, speaker roles | `room` | yes | partial | TESTING | |
