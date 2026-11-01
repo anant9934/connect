@@ -17,12 +17,24 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { Participant as LiveKitParticipant, LocalParticipant } from 'livekit-client';
-import { AdmissionRequest } from '@/features/rooms/types';
+import { AdmissionRequest, RoomModeration } from '@/features/rooms/types';
+
+const COHOST_PERMISSION_LABELS: Record<string, string> = {
+  admit: 'Admit from waiting room',
+  mute: 'Mute participants',
+  remove: 'Remove participants',
+  lock: 'Lock the meeting',
+  speakers: 'Manage speakers',
+};
+
+const roleLabel = (role?: string): string =>
+  role === 'host' ? 'Host' : role === 'co-host' ? 'Co-host' : role === 'speaker' ? 'Speaker' : 'Participant';
 
 interface ParticipantsPanelProps {
   localParticipant: LocalParticipant | null;
   remoteParticipants: LiveKitParticipant[];
   isHost: boolean;
+  moderation: RoomModeration;
   isLocked: boolean;
   pendingAdmissions: AdmissionRequest[];
   raisedHands: Set<string>;
@@ -37,6 +49,7 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
   localParticipant,
   remoteParticipants,
   isHost,
+  moderation,
   isLocked,
   pendingAdmissions,
   raisedHands,
@@ -47,6 +60,10 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
   onClose,
 }) => {
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+
+  const [showSettings, setShowSettings] = useState(false);
+  const { permissions, roles } = moderation;
+  const isModerator = Object.values(permissions).some(Boolean);
 
   const totalCount = (localParticipant ? 1 : 0) + remoteParticipants.length;
 
@@ -79,8 +96,66 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
         </button>
       </div>
 
-      {/* Host Meeting Moderation Bar */}
-      {isHost && (
+      {moderation.error && (
+        <p role="alert" className="px-4 py-2 text-xs text-red-700 bg-red-50 border-b border-red-200">
+          {moderation.error}
+        </p>
+      )}
+
+      {isModerator && permissions.mute && (
+        <div className="px-4 py-2 bg-[#FAFAF8] border-b border-[#E5E7EB] flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={moderation.onMuteAll}
+            className="px-2.5 py-1 rounded-lg text-xs font-medium border bg-[#FFFFFF] border-[#D1D5DB] text-[#374151] hover:bg-[#F9FAFB] min-h-[32px]"
+          >
+            Mute all
+          </button>
+          {isHost && (
+            <button
+              type="button"
+              onClick={() => setShowSettings((open) => !open)}
+              aria-expanded={showSettings}
+              className="px-2.5 py-1 rounded-lg text-xs font-medium text-[#7658E8] hover:underline min-h-[32px]"
+            >
+              Meeting permissions
+            </button>
+          )}
+        </div>
+      )}
+
+      {isHost && showSettings && (
+        <fieldset className="px-4 py-3 bg-[#FAFAF8] border-b border-[#E5E7EB] space-y-2">
+          <legend className="sr-only">Meeting permissions</legend>
+          <label className="flex items-center gap-2 text-xs text-[#1C1C1C]">
+            <input
+              type="checkbox"
+              checked={moderation.participantsCanPublish}
+              onChange={(e) => moderation.onUpdatePermissions(moderation.coHostPermissions, e.target.checked)}
+            />
+            Participants can use mic, camera and screen share
+          </label>
+          <p className="text-[11px] font-semibold text-[#6B7280] pt-1">Co-hosts can:</p>
+          {Object.entries(COHOST_PERMISSION_LABELS).map(([key, label]) => (
+            <label key={key} className="flex items-center gap-2 text-xs text-[#1C1C1C]">
+              <input
+                type="checkbox"
+                checked={moderation.coHostPermissions[key] ?? false}
+                onChange={(e) =>
+                  moderation.onUpdatePermissions(
+                    { ...moderation.coHostPermissions, [key]: e.target.checked },
+                    moderation.participantsCanPublish
+                  )
+                }
+              />
+              {label}
+            </label>
+          ))}
+        </fieldset>
+      )}
+
+      {/* Meeting Moderation Bar */}
+      {permissions.lock && (
         <div className="px-4 py-2.5 bg-[#FAFAF8] border-b border-[#E5E7EB] flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-xs text-[#1C1C1C]">
             {isLocked ? (
@@ -108,7 +183,7 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
       {/* Content List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#FAFAF8]">
         {/* Waiting Room Section for Host */}
-        {isHost && pendingAdmissions.length > 0 && (
+        {permissions.admit && pendingAdmissions.length > 0 && (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs font-semibold text-amber-800 bg-[#FFF2BE] px-3 py-1.5 rounded-xl border border-amber-200">
               <span>Waiting to Join ({pendingAdmissions.length})</span>
@@ -164,10 +239,10 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
                     <span className="text-xs font-semibold text-[#1C1C1C] truncate">
                       {localParticipant.name || 'You'} (You)
                     </span>
-                    {isHost && (
+                    {(isHost || roles[localParticipant.identity] === 'co-host') && (
                       <span className="px-1.5 py-0.5 rounded-md bg-[#FFF2BE] text-amber-900 text-[10px] font-semibold flex items-center gap-1 border border-amber-200">
                         <Crown className="w-2.5 h-2.5" />
-                        Host
+                        {isHost ? 'Host' : 'Co-host'}
                       </span>
                     )}
                   </div>
@@ -212,7 +287,7 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
                       {isSpeaking ? (
                         <span className="text-[#7658E8] font-medium">Speaking...</span>
                       ) : (
-                        'Participant'
+                        roleLabel(roles[p.identity])
                       )}
                     </span>
                   </div>
@@ -231,10 +306,36 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
                     {p.isCameraEnabled ? <Video className="w-3.5 h-3.5" /> : <VideoOff className="w-3.5 h-3.5" />}
                   </span>
 
-                  {/* Host Moderation Actions */}
-                  {isHost && (
+                  {/* Moderation Actions: co-hosts never act on the host or each other */}
+                  {isModerator && (isHost || !['host', 'co-host'].includes(roles[p.identity] ?? '')) && (
                     <div className="flex items-center gap-1 ml-1 pl-1 border-l border-[#E5E7EB]">
-                      {p.isMicrophoneEnabled && (
+                      {isHost && p.identity.startsWith('user:') && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              roles[p.identity] === 'co-host'
+                                ? moderation.onRevokeCoHost(p.identity)
+                                : moderation.onGrantCoHost(p.identity)
+                            }
+                            className="px-1.5 py-1 rounded-lg text-[10px] font-medium text-[#6B7280] hover:text-[#7658E8] hover:bg-[#EEE8FF] transition-colors"
+                          >
+                            {roles[p.identity] === 'co-host' ? 'Revoke co-host' : 'Make co-host'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(`Make ${p.name || 'this person'} the host? You will become a participant.`)) {
+                                moderation.onTransferHost(p.identity);
+                              }
+                            }}
+                            className="px-1.5 py-1 rounded-lg text-[10px] font-medium text-[#6B7280] hover:text-[#7658E8] hover:bg-[#EEE8FF] transition-colors"
+                          >
+                            Make host
+                          </button>
+                        </>
+                      )}
+                      {permissions.mute && p.isMicrophoneEnabled && (
                         <button
                           onClick={() => onMuteParticipant(p.identity)}
                           className="p-1 rounded-lg text-[#6B7280] hover:text-amber-700 hover:bg-amber-50 transition-colors"
@@ -244,14 +345,16 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
                           <MicOff className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      <button
-                        onClick={() => setConfirmRemoveId(p.identity)}
-                        className="p-1 rounded-lg text-[#6B7280] hover:text-red-700 hover:bg-red-50 transition-colors"
-                        title="Remove from meeting"
-                        aria-label="Remove participant"
-                      >
-                        <UserX className="w-3.5 h-3.5" />
-                      </button>
+                      {permissions.remove && (
+                        <button
+                          onClick={() => setConfirmRemoveId(p.identity)}
+                          className="p-1 rounded-lg text-[#6B7280] hover:text-red-700 hover:bg-red-50 transition-colors"
+                          title="Remove from meeting"
+                          aria-label="Remove participant"
+                        >
+                          <UserX className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

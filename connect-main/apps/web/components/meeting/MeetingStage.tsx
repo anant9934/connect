@@ -20,7 +20,7 @@ import { NotesPanel } from './NotesPanel';
 import { FilesPanel } from './FilesPanel';
 import { TransportDiagnostics } from './TransportDiagnostics';
 import { ChatMessage } from '@/features/chat/types';
-import { AdmissionRequest } from '@/features/rooms/types';
+import { AdmissionRequest, RoomModeration } from '@/features/rooms/types';
 import { TransportParticipant, TransportTrackPublication, MediaTransport } from '@/features/meeting/transport';
 
 interface MeetingStageProps {
@@ -31,6 +31,7 @@ interface MeetingStageProps {
   screenSharePub: TrackPublication | TransportTrackPublication | any;
   screenShareParticipant: Participant | TransportParticipant | any;
   isHost: boolean;
+  moderation: RoomModeration;
   isLocked: boolean;
   isMicMuted: boolean;
   isVideoMuted: boolean;
@@ -77,6 +78,7 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
   screenSharePub,
   screenShareParticipant,
   isHost,
+  moderation,
   isLocked,
   isMicMuted,
   isVideoMuted,
@@ -334,6 +336,7 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
               localParticipant={localParticipant}
               remoteParticipants={remoteParticipants}
               isHost={isHost}
+              moderation={moderation}
               isLocked={isLocked}
               pendingAdmissions={pendingAdmissions}
               raisedHands={raisedHands}

@@ -20,6 +20,13 @@ import {
   endRoom,
   getRoom,
   removeParticipant,
+  getMyRole,
+  getParticipants,
+  grantCoHost,
+  revokeCoHost,
+  transferHost,
+  muteAllParticipants,
+  updateRoomPermissions,
   muteParticipant,
   getPendingAdmissions,
   decideAdmission,
@@ -89,6 +96,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [isHost, setIsHost] = useState(initialIsHost);
+  const [myPermissions, setMyPermissions] = useState<Record<string, boolean>>(
+    initialIsHost ? { admit: true, mute: true, remove: true, lock: true, speakers: true } : {}
+  );
+  const [participantRoles, setParticipantRoles] = useState<Record<string, string>>({});
+  const [participantsCanPublish, setParticipantsCanPublish] = useState(true);
+  const [coHostPermissions, setCoHostPermissions] = useState<Record<string, boolean>>({});
+  const [moderationError, setModerationError] = useState<string | null>(null);
 
   // Phase 3 & 4 States: Panels, Chat, Reactions, Notes, Files, Host Moderation
   const [activePanel, setActivePanel] = useState<'chat' | 'participants' | 'notes' | 'files' | null>(null);
@@ -482,6 +496,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       try {
         const currentRoom = await getRoom(roomCode);
         setIsLocked(currentRoom.isLocked);
+        setParticipantsCanPublish(currentRoom.participantsCanPublish ?? true);
+        setCoHostPermissions(currentRoom.coHostPermissions ?? {});
         if (currentRoom.status === 'ended') {
           setMeetingEnded(true);
           transportRef.current?.disconnect();
@@ -524,9 +540,31 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     isHost,
   ]);
 
-  // Periodic poll for pending admissions (Host only)
+  // Follow role changes made by the host, including transfers and succession
   useEffect(() => {
-    if (!isHost) return;
+    let isMounted = true;
+    async function syncRoles() {
+      try {
+        const [me, participants] = await Promise.all([getMyRole(roomCode), getParticipants(roomCode)]);
+        if (!isMounted) return;
+        setIsHost(me.isHost);
+        setMyPermissions(me.permissions || {});
+        setParticipantRoles(Object.fromEntries(participants.map((p) => [p.identity, p.identity === me.hostIdentity ? 'host' : p.role])));
+      } catch {
+        // Keeps the last known roles; the server still enforces every action
+      }
+    }
+    syncRoles();
+    const interval = setInterval(syncRoles, 3000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [roomCode]);
+
+  // Periodic poll for pending admissions (anyone allowed to admit)
+  useEffect(() => {
+    if (!myPermissions.admit) return;
 
     let isMounted = true;
     async function fetchAdmissions() {
@@ -547,7 +585,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       isMounted = false;
       clearInterval(interval);
     };
-  }, [isHost, roomCode]);
+  }, [myPermissions.admit, roomCode]);
 
   // Handle Controls Interactions
   const handleToggleMic = async () => {
@@ -680,7 +718,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const handleToggleLock = async () => {
-    if (!isHost) return;
+    if (!myPermissions.lock) return;
     try {
       if (isLocked) {
         await unlockRoom(roomCode);
@@ -814,7 +852,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Phase 3: Host Moderation Actions
   const handleRemoveParticipant = async (identity: string) => {
-    if (!isHost) return;
+    if (!myPermissions.remove) return;
     try {
       await removeParticipant(roomCode, identity);
     } catch {
@@ -823,7 +861,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const handleMuteParticipant = async (identity: string) => {
-    if (!isHost) return;
+    if (!myPermissions.mute) return;
     try {
       const rp = remoteParticipants.find((p) => p.identity === identity);
       const micPub = rp?.getTrackPublication(Track.Source.Microphone);
@@ -835,8 +873,34 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
+  const runModeration = async (action: () => Promise<void>, failure: string) => {
+    setModerationError(null);
+    try {
+      await action();
+    } catch (err: any) {
+      setModerationError(err?.message || failure);
+    }
+  };
+
+  const moderation = {
+    permissions: myPermissions,
+    roles: participantRoles,
+    participantsCanPublish,
+    coHostPermissions,
+    error: moderationError,
+    onGrantCoHost: (identity: string) => runModeration(() => grantCoHost(roomCode, identity), 'Could not make this person a co-host.'),
+    onRevokeCoHost: (identity: string) => runModeration(() => revokeCoHost(roomCode, identity), 'Could not revoke co-host.'),
+    onTransferHost: (identity: string) => runModeration(() => transferHost(roomCode, identity), 'Could not transfer the host role.'),
+    onMuteAll: () => runModeration(() => muteAllParticipants(roomCode), 'Could not mute everyone.'),
+    onUpdatePermissions: (coHost: Record<string, boolean>, canPublish: boolean) => {
+      setCoHostPermissions(coHost);
+      setParticipantsCanPublish(canPublish);
+      runModeration(() => updateRoomPermissions(roomCode, coHost, canPublish), 'Could not change meeting permissions.');
+    },
+  };
+
   const handleAdmitGuest = async (requestID: string) => {
-    if (!isHost) return;
+    if (!myPermissions.admit) return;
     try {
       await decideAdmission(roomCode, requestID, 'admitted');
       setPendingAdmissions((prev) => prev.filter((p) => p.id !== requestID));
@@ -846,7 +910,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const handleDenyGuest = async (requestID: string) => {
-    if (!isHost) return;
+    if (!myPermissions.admit) return;
     try {
       await decideAdmission(roomCode, requestID, 'denied');
       setPendingAdmissions((prev) => prev.filter((p) => p.id !== requestID));
@@ -998,6 +1062,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         screenSharePub={screenSharePub}
         screenShareParticipant={screenShareParticipant}
         isHost={isHost}
+        moderation={moderation}
         isLocked={isLocked}
         isMicMuted={isMicMuted}
         isVideoMuted={isVideoMuted}
