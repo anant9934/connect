@@ -73,7 +73,11 @@ func (e *notesEnv) addTenantRoom() tenantRoom {
 	e.t.Helper()
 	suffix := uuid.NewString()[:8]
 	var r tenantRoom
-	r.code = "nt-" + suffix
+	code, err := room.GeneratePublicCode()
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	r.code = code
 	if err := e.admin.QueryRow(e.ctx, `INSERT INTO organizations (slug, name) VALUES ($1, 'Tenant') RETURNING id::text`, "notes-"+suffix).Scan(&r.orgID); err != nil {
 		e.t.Fatal(err)
 	}
