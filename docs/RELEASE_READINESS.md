@@ -28,7 +28,8 @@ meeting backend's infrastructure only. It did not cover classroom, lab or AI fea
 
 ## Blockers to the RLS gate
 
-No disposable PostgreSQL exists: Docker is not installed and no Neon API key is available. Running
+No disposable PostgreSQL exists: Docker Desktop, the approved route, is not installed. Once it is
+running, `scripts/verify_disposable_db.sh` performs the checks. It has been syntax-checked only. Running
 downloaded Postgres binaries and reading production catalogs were both blocked by this session's
 permission policy and were not retried another way. Render has no API key here, so its plan is
 unverified too. `TestRLS_WebhookStoreUnderRuntimeRole` is written but has **never run**.
@@ -54,7 +55,7 @@ the new RLS test, 3 Redis tests, 1 R2 test and 1 worker lifecycle test, all need
   no rows: webhooks are dropped as unknown rooms and reconciliation silently skips the class.
   The reconciler also still discards the error from its `rooms` lookup. Test this first.
 - Android builds and device behaviour.
-- Which Render plan is live. `render.yaml` says `starter`; the audit docs describe free tier.
+- Which Render plan is live. The owner states Free; `render.yaml` was corrected from `starter` to `free` on the branch. Confirm in the dashboard that Blueprint sync did not already change it.
 
 ## Rollout of the trusted-attendance branch
 

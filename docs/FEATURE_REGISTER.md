@@ -43,7 +43,7 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | P1-10 | 1 | Password recovery, email verification | no | no | no | BLOCKED | Needs email provider choice and disposable database |
 | P1-11 | 1 | Profile and avatar | `auth` | yes | yes | TESTING | |
 | P1-12 | 1 | Notes and file sharing (R2) | `notes`, `files` | yes | unconfirmed | TESTING | ClamAV disabled in `render.yaml` |
-| P2-01 | 2 | Recording and playback | token grant only | no | no | BLOCKED | Design ready in `PLATFORM_INTEGRATION_DESIGNS.md`; awaiting paid-plan approval |
+| P2-01 | 2 | Recording and playback | token grant only | no | no | BLOCKED | Free tier allows 60 shared minutes only; no paid plan authorized |
 | P2-02 | 2 | Meeting history | `/rooms/history` | basic | no | IN_PROGRESS | No search, attendance or recording links |
 | P2-03 | 2 | Recurring scheduling, reminders | no | no | no | NOT_STARTED | |
 | P2-04 | 2 | Presentation tools | no | no | no | NOT_STARTED | |
@@ -61,11 +61,11 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | P3-08 | 3 | Whiteboard, breakout rooms | no | no | no | NOT_STARTED | |
 | P4-01 | 4 | Course workspaces and exercises | no | no | no | NOT_STARTED | |
 | P4-02 | 4 | Multi-language editor | no | no | no | NOT_STARTED | |
-| P4-03 | 4 | Isolated code execution | no | no | no | BLOCKED | Design ready; awaiting host and cost approval |
+| P4-03 | 4 | Isolated code execution | no | no | no | BLOCKED | No free host can run it safely; local sandbox only, production disabled |
 | P4-04 | 4 | Assignments and auto-evaluation | no | no | no | NOT_STARTED | Evaluation depends on P4-03 |
 | P4-05 | 4 | Live preview, SQL lab, visualizers | no | no | no | NOT_STARTED | |
 | P4-06 | 4 | Progress dashboard | no | no | no | NOT_STARTED | |
-| P5-01 | 5 | Transcription, captions | no | no | no | BLOCKED | Needs P2-01 and a speech provider with credentials |
-| P5-02 | 5 | Summaries and study materials | no | no | no | BLOCKED | Needs P5-01 and an LLM provider with credentials |
+| P5-01 | 5 | Transcription, captions | no | no | no | BLOCKED | Needs P2-01 and a genuinely free speech option |
+| P5-02 | 5 | Summaries and study materials | no | no | no | BLOCKED | Needs P5-01 and a genuinely free LLM option |
 | P5-03 | 5 | Faculty review and publishing | no | no | no | NOT_STARTED | |
 | P5-04 | 5 | Token and cost tracking | `aiproviders` cost calculation | no | no | IN_PROGRESS | No persistence; needs disposable database |

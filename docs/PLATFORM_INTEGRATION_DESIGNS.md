@@ -1,6 +1,21 @@
 # Platform Integration Designs and Cost Estimates
 
-Status: **proposal, awaiting approval**. Nothing here is provisioned. Prices were read from web
+Status: **proposal**. Nothing here is provisioned.
+
+**Owner rule (2026-11-01): free tier only.** No paid plan, VPS, email purchase or paid API usage is
+authorized. Paid options below are reference only, and each recommendation is replaced by the
+"Free-tier decision" in this section:
+
+| Area | Free-tier decision | Status |
+| :--- | :--- | :--- |
+| Recording | Build only within its 60 shared minutes, about one class. Enforce a usage cap and refuse to start when spent | PARTIALLY IMPLEMENTABLE |
+| Code execution | Develop and test the sandbox locally; production execution stays disabled | BLOCKED in production |
+| Email | Keep the abstraction. Brevo's and Resend's free tiers are candidates; both need a domain and quota confirmation | Not selected |
+| Speech and LLM | Interfaces only; test with fakes or genuinely free local options | PARTIALLY IMPLEMENTABLE |
+| Worker | In-process worker on Render free. Jobs wait while the service sleeps and no latency is promised | Accepted limitation |
+
+Other free-tier quotas (Render, Neon, Upstash, R2, Vercel) are **not yet verified** and must be read
+from the live account dashboards before dependent features are built. Prices were read from web
 sources on 2026-11-01; confirm them on each vendor's pricing page before approving.
 
 ## 1. LiveKit recording
