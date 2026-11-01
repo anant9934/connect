@@ -102,18 +102,22 @@ func NewRoomCleanupHandler(pool *pgxpool.Pool, logger *slog.Logger) HandlerFunc 
 			}
 
 			// 2. Deny any lingering pending waiting room admissions
-			_, _ = pool.Exec(ctx, `
+			if _, err := pool.Exec(ctx, `
 				UPDATE room_admissions
 				SET status = 'denied', decided_at = clock_timestamp()
 				WHERE room_id = $1 AND status = 'pending';
-			`, data.RoomID)
+			`, data.RoomID); err != nil {
+				return fmt.Errorf("room cleanup admissions failed: %w", err)
+			}
 
 			// 3. Close open participants who never emitted leave
-			_, _ = pool.Exec(ctx, `
+			if _, err := pool.Exec(ctx, `
 				UPDATE room_participants
 				SET left_at = clock_timestamp()
 				WHERE room_id = $1 AND left_at IS NULL;
-			`, data.RoomID)
+			`, data.RoomID); err != nil {
+				return fmt.Errorf("room cleanup participants failed: %w", err)
+			}
 
 			logger.Info("room_cleanup_by_id_processed",
 				slog.String("job_id", job.ID.String()),

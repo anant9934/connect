@@ -109,7 +109,7 @@ func (c apiClient) signup() (id, token string) {
 	return res.User.ID, token
 }
 
-func newRuntimeRouter(t *testing.T, app *pgxpool.Pool) http.Handler {
+func newRuntimeRouter(t *testing.T, app *pgxpool.Pool, configure func(*auth.Service)) http.Handler {
 	t.Helper()
 	cfg := &config.Config{
 		AppEnv:             config.EnvDevelopment,
@@ -122,6 +122,9 @@ func newRuntimeRouter(t *testing.T, app *pgxpool.Pool) http.Handler {
 	var limiter ratelimit.Limiter = allowAll{}
 	auditService := audit.NewService(app, logger)
 	authService := auth.NewService(auth.NewPgxRepository(app), auditService, time.Hour, time.Hour)
+	if configure != nil {
+		configure(authService)
+	}
 	roomService := room.NewService(room.NewPgxRepository(app), room.NewPolicy(), auditService, livekit.NewTokenService("test_key", "test_secret_that_is_long_enough_for_tests"), nil)
 	validator := notes.NewPgxRoomValidator(app)
 	return server.BuildRouter(cfg, logger, limiter,
@@ -156,7 +159,24 @@ func TestWorkflowDB_APITenantIsolation(t *testing.T) {
 	room.SetGuestTokenSecret([]byte("isolation-integration-test-secret-012345"))
 	t.Cleanup(room.ResetGuestTokenSecretForTest)
 
-	api := apiClient{t: t, router: newRuntimeRouter(t, app)}
+	// Stands in for Google's token validation; the audience and email are chosen per token.
+	googleEmail := uuid.NewString() + "@example.test"
+	googleServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := map[string]string{"iss": "https://accounts.google.com", "aud": "connect-web", "sub": "g-" + r.URL.Query().Get("id_token"), "email": googleEmail, "email_verified": "true"}
+		switch r.URL.Query().Get("id_token") {
+		case "other-app":
+			claims["aud"] = "attacker-app"
+		case "unverified":
+			claims["email_verified"] = "false"
+		}
+		_ = json.NewEncoder(w).Encode(claims)
+	}))
+	t.Cleanup(googleServer.Close)
+
+	api := apiClient{t: t, router: newRuntimeRouter(t, app, func(s *auth.Service) {
+		s.SetGoogleClientIDs([]string{"connect-web"})
+		s.SetGoogleTokenInfoURL(googleServer.URL)
+	})}
 	roomPath := func(code string) string { return "/api/v1/rooms/" + code }
 
 	createRoom := func(token string, waiting bool) string {
@@ -182,6 +202,44 @@ func TestWorkflowDB_APITenantIsolation(t *testing.T) {
 		}
 		api.want("logout", http.StatusOK, http.MethodPost, "/api/v1/auth/logout", caller{token: token}, nil)
 		api.want("revoked session", http.StatusUnauthorized, http.MethodGet, "/api/v1/users/me/profile", caller{token: token}, nil)
+	})
+
+	t.Run("password, preferences and google linking under the restricted role", func(t *testing.T) {
+		id, token := api.signup()
+		me := caller{token: token}
+		var email string
+		if err := admin.QueryRow(ctx, `SELECT email_normalized FROM users WHERE id = $1`, id).Scan(&email); err != nil {
+			t.Fatal(err)
+		}
+		api.want("preferences", http.StatusOK, http.MethodPost, "/api/v1/users/me/preferences", me, map[string]any{"preferences": map[string]any{"theme": "dark"}})
+		var theme string
+		if err := admin.QueryRow(ctx, `SELECT preferences->>'theme' FROM users WHERE id = $1`, id).Scan(&theme); err != nil || theme != "dark" {
+			t.Errorf("preferences not saved: %q, err=%v", theme, err)
+		}
+
+		api.want("google from another app", http.StatusBadRequest, http.MethodPost, "/api/v1/users/me/link-google", me, map[string]any{"idToken": "other-app"})
+		api.want("link google", http.StatusOK, http.MethodPost, "/api/v1/users/me/link-google", me, map[string]any{"idToken": "linked"})
+		var googleID string
+		if err := admin.QueryRow(ctx, `SELECT COALESCE(google_id, '') FROM users WHERE id = $1`, id).Scan(&googleID); err != nil || googleID != "g-linked" {
+			t.Errorf("google not linked: %q, err=%v", googleID, err)
+		}
+		_, otherToken := api.signup()
+		api.want("google already linked elsewhere", http.StatusBadRequest, http.MethodPost, "/api/v1/users/me/link-google", caller{token: otherToken}, map[string]any{"idToken": "linked"})
+
+		api.want("wrong current password", http.StatusUnauthorized, http.MethodPost, "/api/v1/users/me/change-password", me, map[string]any{"currentPassword": "not-it", "newPassword": "another-horse-battery-7"})
+		api.want("change password", http.StatusOK, http.MethodPost, "/api/v1/users/me/change-password", me, map[string]any{"currentPassword": "correct-horse-battery-9", "newPassword": "another-horse-battery-7"})
+		api.want("old password", http.StatusUnauthorized, http.MethodPost, "/api/v1/auth/login", caller{}, map[string]any{"email": email, "password": "correct-horse-battery-9"})
+		api.want("new password", http.StatusOK, http.MethodPost, "/api/v1/auth/login", caller{}, map[string]any{"email": email, "password": "another-horse-battery-7"})
+	})
+
+	t.Run("google sign in refuses other apps and unverified addresses", func(t *testing.T) {
+		api.want("another app", http.StatusUnauthorized, http.MethodPost, "/api/v1/auth/google", caller{}, map[string]any{"idToken": "other-app"})
+		api.want("unverified", http.StatusUnauthorized, http.MethodPost, "/api/v1/auth/google", caller{}, map[string]any{"idToken": "unverified"})
+		var users int
+		if err := admin.QueryRow(ctx, `SELECT count(*) FROM users WHERE email_normalized = $1`, googleEmail).Scan(&users); err != nil || users != 0 {
+			t.Errorf("refused sign in created %d accounts, err=%v", users, err)
+		}
+		api.want("valid token creates account", http.StatusOK, http.MethodPost, "/api/v1/auth/google", caller{}, map[string]any{"idToken": "fresh"})
 	})
 
 	t.Run("runtime role cannot list accounts or read audit", func(t *testing.T) {
