@@ -50,6 +50,8 @@ export function PrejoinScreen({ roomCode, onJoinSuccess, onBack }: PrejoinScreen
 
 
   const [displayName, setDisplayName] = useState('');
+  const [hasPasscode, setHasPasscode] = useState(false);
+  const [passcode, setPasscode] = useState('');
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('front');
@@ -95,6 +97,7 @@ export function PrejoinScreen({ roomCode, onJoinSuccess, onBack }: PrejoinScreen
           mediaDiagnostics.log('room', 'PrejoinRoomCheck', { details: { roomCode } });
           const res = await defaultApiClient.getRoom(roomCode);
           if (active) {
+            setHasPasscode(!!res.room.hasPasscode);
             if (res.room.status === 'ended') {
               setRoomStatus('Ended');
               setIsRoomAvailable(false);
@@ -188,7 +191,7 @@ export function PrejoinScreen({ roomCode, onJoinSuccess, onBack }: PrejoinScreen
     try {
       // Step 1: Register participant and obtain room-scoped guest credential
       mediaDiagnostics.log('room', 'JoinRoomRequest', { details: { roomCode, name } });
-      const joinRes = await defaultApiClient.joinRoom(roomCode, name);
+      const joinRes = await defaultApiClient.joinRoom(roomCode, name, passcode.trim());
 
       // Step 2: Request LiveKit access token with registered identity and guest token
       const participantIdentity = joinRes.participant?.identity;
@@ -400,6 +403,23 @@ export function PrejoinScreen({ roomCode, onJoinSuccess, onBack }: PrejoinScreen
                   editable={!loading && !isTransitioning}
                 />
               </View>
+
+              {hasPasscode ? (
+                <View style={[styles.nameGroup, isCompact && styles.nameGroupCompact]}>
+                  <Text style={styles.inputLabel}>Meeting passcode</Text>
+                  <TextInput
+                    style={[styles.nameInput, isCompact && styles.nameInputCompact]}
+                    value={passcode}
+                    onChangeText={setPasscode}
+                    placeholder="Not needed if you are the host"
+                    placeholderTextColor="#9C988D"
+                    secureTextEntry
+                    autoCapitalize="none"
+                    accessibilityLabel="Meeting passcode"
+                    editable={!loading && !isTransitioning}
+                  />
+                </View>
+              ) : null}
 
               {/* Join Action */}
               <TouchableOpacity

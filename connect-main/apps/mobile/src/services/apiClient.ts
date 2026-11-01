@@ -32,6 +32,7 @@ export interface MobileRoomInfo {
   waitingRoomEnabled?: boolean;
   maxParticipants: number;
   createdAt: string;
+  hasPasscode?: boolean;
 }
 
 export interface MobileParticipant {
@@ -279,13 +280,13 @@ export class TathastuApiClient {
     });
   }
 
-  public async joinRoom(code: string, displayName?: string, identity?: string): Promise<MobileJoinResponse> {
+  public async joinRoom(code: string, displayName?: string, passcode?: string): Promise<MobileJoinResponse> {
     const norm = normalizeRoomCode(code);
     const res = await this.request<MobileJoinResponse>(
       `/api/v1/rooms/${encodeURIComponent(norm)}/join`,
       {
         method: 'POST',
-        body: JSON.stringify({ displayName, identity }),
+        body: JSON.stringify({ displayName, passcode: passcode || undefined }),
       }
     );
 

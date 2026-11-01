@@ -149,6 +149,9 @@ export default function MeetingHistoryPage() {
           <ArrowLeft className="w-4 h-4" />
           <span>Back to Home</span>
         </Link>
+        <Link href="/schedule" className="text-xs font-semibold text-[#7258E8] hover:underline">
+          Schedule a meeting
+        </Link>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl bg-[#FFF5D6] text-[#B45309] flex items-center justify-center font-bold text-xs shadow-xs">
             TM

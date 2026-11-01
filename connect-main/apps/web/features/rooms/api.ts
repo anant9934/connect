@@ -27,10 +27,35 @@ export async function getRoom(code: string): Promise<Room> {
   return res.room;
 }
 
-export async function joinRoom(code: string, displayName?: string, identity?: string): Promise<JoinRoomResponse> {
+export interface ScheduleMeetingInput {
+  title: string;
+  scheduledStart: string;
+  scheduledEnd: string;
+  timeZone: string;
+  passcode?: string;
+  waitingRoomEnabled?: boolean;
+}
+
+export async function scheduleMeeting(input: ScheduleMeetingInput): Promise<CreateRoomResponse> {
+  return apiFetch<CreateRoomResponse>('/api/v1/rooms', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getUpcomingMeetings(): Promise<Room[]> {
+  const res = await apiFetch<{ rooms: Room[] }>('/api/v1/rooms/upcoming', { method: 'GET' });
+  return res.rooms || [];
+}
+
+export async function cancelMeeting(code: string): Promise<void> {
+  await apiFetch(`/api/v1/rooms/${encodeURIComponent(code)}/cancel`, { method: 'POST' });
+}
+
+export async function joinRoom(code: string, displayName?: string, passcode?: string): Promise<JoinRoomResponse> {
   return apiFetch<JoinRoomResponse>(`/api/v1/rooms/${encodeURIComponent(code)}/join`, {
     method: 'POST',
-    body: JSON.stringify({ displayName, identity }),
+    body: JSON.stringify({ displayName, passcode: passcode || undefined }),
   });
 }
 

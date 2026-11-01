@@ -6,6 +6,11 @@ export interface Room {
   waitingRoomEnabled?: boolean;
   maxParticipants: number;
   createdAt: string;
+  title?: string;
+  scheduledStart?: string;
+  scheduledEnd?: string;
+  timeZone?: string;
+  hasPasscode?: boolean;
 }
 
 export interface Participant {
