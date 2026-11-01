@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/mail"
+	neturl "net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -33,6 +34,9 @@ type Service struct {
 	auditService    *audit.Service
 	idleTimeout     time.Duration
 	absoluteTimeout time.Duration
+
+	googleClientIDs    map[string]bool
+	googleTokenInfoURL string
 }
 
 // NewService constructs the auth service.
@@ -377,6 +381,8 @@ func (s *Service) UpdatePreferences(ctx context.Context, userID string, prefs ma
 }
 
 type GoogleTokenInfo struct {
+	Aud           string `json:"aud"`
+	Iss           string `json:"iss"`
 	Sub           string `json:"sub"`
 	Email         string `json:"email"`
 	EmailVerified string `json:"email_verified"`
@@ -384,12 +390,40 @@ type GoogleTokenInfo struct {
 	Picture       string `json:"picture"`
 }
 
-func verifyGoogleToken(ctx context.Context, idToken string) (*GoogleTokenInfo, error) {
+const defaultGoogleTokenInfoURL = "https://oauth2.googleapis.com/tokeninfo"
+
+// ErrGoogleSignInUnavailable means no Google client IDs are configured, so no token can be trusted.
+var ErrGoogleSignInUnavailable = errors.New("Google sign-in is not configured")
+
+// SetGoogleClientIDs lists the OAuth clients whose tokens are accepted. A token Google issued
+// to any other application must be refused, or that application could sign in as its users.
+func (s *Service) SetGoogleClientIDs(clientIDs []string) {
+	s.googleClientIDs = make(map[string]bool, len(clientIDs))
+	for _, id := range clientIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			s.googleClientIDs[id] = true
+		}
+	}
+}
+
+// SetGoogleTokenInfoURL points token validation at a test server.
+func (s *Service) SetGoogleTokenInfoURL(tokenInfoURL string) {
+	s.googleTokenInfoURL = tokenInfoURL
+}
+
+func (s *Service) verifyGoogleToken(ctx context.Context, idToken string) (*GoogleTokenInfo, error) {
+	if len(s.googleClientIDs) == 0 {
+		return nil, ErrGoogleSignInUnavailable
+	}
 	if strings.TrimSpace(idToken) == "" {
 		return nil, errors.New("empty id token")
 	}
 
-	url := fmt.Sprintf("https://oauth2.googleapis.com/tokeninfo?id_token=%s", idToken)
+	endpoint := s.googleTokenInfoURL
+	if endpoint == "" {
+		endpoint = defaultGoogleTokenInfoURL
+	}
+	url := endpoint + "?id_token=" + neturl.QueryEscape(idToken)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -414,13 +448,19 @@ func verifyGoogleToken(ctx context.Context, idToken string) (*GoogleTokenInfo, e
 	if info.Sub == "" || info.Email == "" {
 		return nil, errors.New("missing essential claims in Google ID token")
 	}
+	if !s.googleClientIDs[info.Aud] {
+		return nil, errors.New("Google ID token was issued to a different application")
+	}
+	if info.Iss != "accounts.google.com" && info.Iss != "https://accounts.google.com" {
+		return nil, errors.New("Google ID token has an unexpected issuer")
+	}
 
 	return &info, nil
 }
 
 // GoogleAuth authenticates or registers a user via verified Google ID token
 func (s *Service) GoogleAuth(ctx context.Context, idToken, clientIP, requestID string) (*SessionResult, error) {
-	info, err := verifyGoogleToken(ctx, idToken)
+	info, err := s.verifyGoogleToken(ctx, idToken)
 	if err != nil {
 		return nil, err
 	}
@@ -431,6 +471,11 @@ func (s *Service) GoogleAuth(ctx context.Context, idToken, clientIP, requestID s
 	user, err := s.repo.GetUserByGoogleID(ctx, info.Sub)
 	if err != nil && !errors.Is(err, ErrUserNotFound) {
 		return nil, err
+	}
+
+	// An unverified address proves nothing, so it cannot claim or create an account.
+	if user == nil && info.EmailVerified != "true" {
+		return nil, errors.New("Google has not verified this email address")
 	}
 
 	// If not found by Google ID, check if email exists
@@ -506,7 +551,7 @@ func (s *Service) GoogleAuth(ctx context.Context, idToken, clientIP, requestID s
 
 // LinkGoogle links a verified Google ID token to the authenticated user account
 func (s *Service) LinkGoogle(ctx context.Context, userID, idToken string) error {
-	info, err := verifyGoogleToken(ctx, idToken)
+	info, err := s.verifyGoogleToken(ctx, idToken)
 	if err != nil {
 		return err
 	}

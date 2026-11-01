@@ -104,6 +104,7 @@ func main() {
 	}
 
 	authService := auth.NewService(authRepo, auditService, cfg.SessionIdleTimeout, cfg.SessionAbsoluteTimeout)
+	authService.SetGoogleClientIDs(cfg.GoogleClientIDs)
 	authHandler := auth.NewHandlers(authService, limiter, cfg.AppEnv == config.EnvProduction)
 
 	var roomRepo room.Repository

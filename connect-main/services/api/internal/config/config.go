@@ -41,6 +41,7 @@ type Config struct {
 	TathastuIntegrationURL string
 	TathastuIssuer         string
 	TathastuAudience       string
+	GoogleClientIDs        []string
 
 	// Cloud Object Storage (Cloudflare R2 / AWS S3)
 	StorageProvider   string
@@ -180,6 +181,7 @@ func Load() (*Config, error) {
 		TathastuIntegrationURL: getEnv("TATHASTU_INTEGRATION_URL", "https://api.aitathastu.internal"),
 		TathastuIssuer:         getEnv("TATHASTU_ISSUER", "https://auth.aitathastu.internal"),
 		TathastuAudience:       getEnv("TATHASTU_AUDIENCE", "tathastu-connect-service"),
+		GoogleClientIDs:        strings.Split(getEnv("GOOGLE_CLIENT_IDS", ""), ","),
 		StorageProvider:        getEnv("STORAGE_PROVIDER", "local"),
 		R2Endpoint:             getEnv("R2_ENDPOINT", ""),
 		R2Bucket:               getEnv("R2_BUCKET", ""),
