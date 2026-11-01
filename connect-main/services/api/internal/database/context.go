@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // AuthContext holds the verified identity context returned by PostgreSQL connect_auth.authenticate_session.
@@ -31,11 +32,11 @@ func AuthenticateAndSetContext(ctx context.Context, tx pgx.Tx, tokenHash string,
 	`
 
 	var (
-		userID   string
-		orgID    *string
-		role     *string
-		isSuper  bool
-		authSig  string
+		userID  string
+		orgID   *string
+		role    *string
+		isSuper bool
+		authSig string
 	)
 
 	err := tx.QueryRow(ctx, query, tokenHash, requestedOrgID).Scan(
@@ -56,4 +57,24 @@ func AuthenticateAndSetContext(ctx context.Context, tx pgx.Tx, tokenHash string,
 		IsSuperAdmin:   isSuper,
 		AuthSig:        authSig,
 	}, nil
+}
+
+// WithAuthContext runs fn in one transaction carrying the verified, transaction-local
+// identity of tokenHash. The context ends with the transaction, so pooled connections
+// cannot leak it. Any error, including a denied organization, rolls everything back.
+func WithAuthContext(ctx context.Context, pool *pgxpool.Pool, tokenHash string, orgID *string, fn func(pgx.Tx, *AuthContext) error) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	auth, err := AuthenticateAndSetContext(ctx, tx, tokenHash, orgID)
+	if err != nil {
+		return err
+	}
+	if err := fn(tx, auth); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
