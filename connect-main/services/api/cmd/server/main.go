@@ -23,6 +23,7 @@ import (
 	"github.com/tathastu/connect/services/api/internal/redis"
 	"github.com/tathastu/connect/services/api/internal/room"
 	"github.com/tathastu/connect/services/api/internal/server"
+	"github.com/tathastu/connect/services/api/internal/worker"
 )
 
 const buildVersion = "v0.1.0"
@@ -191,11 +192,62 @@ func main() {
 	router := server.BuildRouter(cfg, logger, limiter, healthHandler, systemHandler, assertionHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler)
 	srv := server.New(cfg, logger, router)
 
-	// 7. Channel for OS interruption signals
+	// 7. Initialize In-Process Background Worker (if enabled)
+	var workerRunner *worker.Runner
+	var workerCancel context.CancelFunc
+	workerDone := make(chan struct{})
+
+	if cfg.WorkerEnabled && db != nil && db.Pool != nil {
+		runnerCfg := worker.DefaultRunnerConfig()
+		hostname, _ := os.Hostname()
+		if hostname == "" {
+			hostname = "inproc"
+		}
+		runnerCfg.WorkerID = fmt.Sprintf("inproc-%s-%d", hostname, os.Getpid())
+		runnerCfg.Concurrency = cfg.WorkerConcurrency
+		runnerCfg.BatchSize = cfg.WorkerBatchSize
+		runnerCfg.PollInterval = cfg.WorkerPollInterval
+		runnerCfg.LeaseTTL = cfg.WorkerLeaseTTL
+		runnerCfg.HeartbeatInterval = cfg.WorkerLeaseTTL / 3
+
+		workerRegistry := worker.NewRegistry()
+		worker.RegisterDefaultHandlers(workerRegistry, db.Pool, logger)
+
+		var err error
+		workerRunner, err = worker.NewRunner(db.Pool, workerRegistry, logger, runnerCfg)
+		if err != nil {
+			logger.Error("failed_to_initialize_inproc_worker", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+
+		var workerCtx context.Context
+		workerCtx, workerCancel = context.WithCancel(context.Background())
+		go func() {
+			defer close(workerDone)
+			logger.Info("inproc_worker_started",
+				slog.String("worker_id", runnerCfg.WorkerID),
+				slog.Int("concurrency", runnerCfg.Concurrency),
+				slog.Duration("poll_interval", runnerCfg.PollInterval),
+				slog.Duration("lease_ttl", runnerCfg.LeaseTTL),
+			)
+			if err := workerRunner.Run(workerCtx); err != nil && err != context.Canceled {
+				logger.Error("inproc_worker_terminated_with_error", slog.String("error", err.Error()))
+			}
+		}()
+	} else {
+		close(workerDone)
+		if !cfg.WorkerEnabled {
+			logger.Info("inproc_worker_disabled_by_config")
+		} else {
+			logger.Warn("inproc_worker_disabled_no_database_pool")
+		}
+	}
+
+	// 8. Channel for OS interruption signals
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
-	// 8. Start HTTP Server in background
+	// 9. Start HTTP Server in background
 	serverErrors := make(chan error, 1)
 	go func() {
 		serverErrors <- srv.Start()
@@ -203,22 +255,43 @@ func main() {
 
 	logger.Info("server_ready_for_traffic", slog.Int("port", cfg.Port), slog.String("env", cfg.AppEnv))
 
-	// 9. Block until interrupt signal or unrecoverable error
+	// 10. Block until interrupt signal or unrecoverable error
 	select {
 	case err := <-serverErrors:
 		logger.Error("server_listener_error", slog.String("error", err.Error()))
+		if workerCancel != nil {
+			workerCancel()
+			workerRunner.Stop()
+			<-workerDone
+		}
 		os.Exit(1)
 	case sig := <-stop:
 		logger.Info("shutdown_signal_received", slog.String("signal", sig.String()))
 
+		// Phase 1: Stop accepting new background jobs and drain in-flight jobs
+		if workerCancel != nil {
+			logger.Info("stopping_inproc_worker")
+			workerCancel()
+			workerRunner.Stop()
+		}
+
+		// Phase 2: Shut down HTTP server gracefully
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutdownCancel()
 
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			logger.Error("graceful_shutdown_failed", slog.String("error", err.Error()))
 			_ = fmt.Errorf("forced shutdown: %w", err)
-			os.Exit(1)
 		}
-		logger.Info("server_shutdown_completed_cleanly")
+
+		// Phase 3: Wait for in-flight background jobs to complete
+		select {
+		case <-workerDone:
+			logger.Info("inproc_worker_drained_successfully")
+		case <-time.After(15 * time.Second):
+			logger.Warn("inproc_worker_drain_timed_out")
+		}
+
+		logger.Info("server_and_worker_shutdown_completed_cleanly")
 	}
 }

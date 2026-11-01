@@ -21,6 +21,7 @@ type AuditPingData struct {
 type RoomCleanupData struct {
 	MaxAgeHours int    `json:"maxAgeHours"`
 	TenantID    string `json:"tenantId,omitempty"`
+	RoomID      string `json:"roomId,omitempty"`
 }
 
 // AttendanceReconcileData represents parameters for attendance reconciliation.
@@ -74,6 +75,27 @@ func NewRoomCleanupHandler(pool *pgxpool.Pool, logger *slog.Logger) HandlerFunc 
 		if len(payload.Data) > 0 {
 			_ = json.Unmarshal(payload.Data, &data)
 		}
+
+		if data.RoomID != "" {
+			query := `
+				UPDATE rooms
+				SET status = 'ended',
+				    ended_at = COALESCE(ended_at, clock_timestamp())
+				WHERE id = $1;
+			`
+			tag, err := pool.Exec(ctx, query, data.RoomID)
+			if err != nil {
+				logger.Error("room_cleanup_by_id_failed", slog.String("room_id", data.RoomID), slog.String("error", err.Error()))
+				return fmt.Errorf("room cleanup by id query failed: %w", err)
+			}
+			logger.Info("room_cleanup_by_id_processed",
+				slog.String("job_id", job.ID.String()),
+				slog.String("room_id", data.RoomID),
+				slog.Int64("rooms_affected", tag.RowsAffected()),
+			)
+			return nil
+		}
+
 		if data.MaxAgeHours <= 0 {
 			data.MaxAgeHours = 24
 		}
@@ -81,10 +103,10 @@ func NewRoomCleanupHandler(pool *pgxpool.Pool, logger *slog.Logger) HandlerFunc 
 		// Reconcile and clean up stale rooms older than threshold
 		query := `
 			UPDATE rooms
-			SET is_active = false,
-			    updated_at = clock_timestamp()
-			WHERE is_active = true
-			  AND updated_at < clock_timestamp() - ($1 || ' hours')::interval;
+			SET status = 'ended',
+			    ended_at = COALESCE(ended_at, clock_timestamp())
+			WHERE status != 'ended'
+			  AND created_at < clock_timestamp() - ($1 || ' hours')::interval;
 		`
 		tag, err := pool.Exec(ctx, query, fmt.Sprintf("%d", data.MaxAgeHours))
 		if err != nil {
@@ -112,6 +134,29 @@ func NewAttendanceReconcileHandler(pool *pgxpool.Pool, logger *slog.Logger) Hand
 		var data AttendanceReconcileData
 		if len(payload.Data) > 0 {
 			_ = json.Unmarshal(payload.Data, &data)
+		}
+
+		if data.SessionID != "" {
+			cutoff := time.Now().UTC()
+			if !data.Before.IsZero() {
+				cutoff = data.Before
+			}
+			query := `
+				UPDATE room_participants
+				SET left_at = $2
+				WHERE room_id = $1 AND left_at IS NULL;
+			`
+			tag, err := pool.Exec(ctx, query, data.SessionID, cutoff)
+			if err != nil {
+				logger.Error("attendance_reconcile_query_failed", slog.String("error", err.Error()))
+				return fmt.Errorf("attendance reconcile query failed: %w", err)
+			}
+			logger.Info("attendance_reconcile_processed",
+				slog.String("job_id", job.ID.String()),
+				slog.String("session_id", data.SessionID),
+				slog.Int64("participants_closed", tag.RowsAffected()),
+			)
+			return nil
 		}
 
 		logger.Info("attendance_reconcile_processed",

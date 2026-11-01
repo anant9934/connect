@@ -2,7 +2,9 @@ package room
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"sort"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tathastu/connect/services/api/internal/worker"
 )
 
 // Room represents meeting session record in the database.
@@ -189,13 +192,48 @@ func (r *PgxRepository) SetRoomLocked(ctx context.Context, roomID string, locked
 }
 
 func (r *PgxRepository) EndRoom(ctx context.Context, roomID string, endedAt time.Time) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin end room transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	query := `
 		UPDATE rooms
 		SET status = 'ended', ended_at = $1
 		WHERE id = $2
 	`
-	_, err := r.pool.Exec(ctx, query, endedAt, roomID)
-	return err
+	tag, err := tx.Exec(ctx, query, endedAt, roomID)
+	if err != nil {
+		return fmt.Errorf("failed to update room status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrRoomNotFound
+	}
+
+	// Transactional outbox 1: Room cleanup job
+	cleanupKey := fmt.Sprintf("room-cleanup-%s-%d", roomID, endedAt.Unix())
+	cleanupPayload := worker.JobPayload{
+		Type:      worker.TypeRoomCleanup,
+		Data:      json.RawMessage(fmt.Sprintf(`{"roomId":"%s","maxAgeHours":24}`, roomID)),
+		CreatedAt: endedAt,
+	}
+	if _, err := worker.EnqueueJob(ctx, tx, worker.QueueDefault, cleanupKey, cleanupPayload, nil); err != nil {
+		return fmt.Errorf("failed to enqueue room cleanup job: %w", err)
+	}
+
+	// Transactional outbox 2: Attendance reconcile job
+	reconcileKey := fmt.Sprintf("attendance-reconcile-%s-%d", roomID, endedAt.Unix())
+	reconcilePayload := worker.JobPayload{
+		Type:      worker.TypeAttendanceReconcile,
+		Data:      json.RawMessage(fmt.Sprintf(`{"sessionId":"%s","before":"%s"}`, roomID, endedAt.Format(time.RFC3339))),
+		CreatedAt: endedAt,
+	}
+	if _, err := worker.EnqueueJob(ctx, tx, worker.QueueAttendanceCritical, reconcileKey, reconcilePayload, nil); err != nil {
+		return fmt.Errorf("failed to enqueue attendance reconcile job: %w", err)
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (r *PgxRepository) UpsertParticipant(ctx context.Context, p *Participant) error {

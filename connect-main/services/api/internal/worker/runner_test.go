@@ -248,3 +248,50 @@ func TestDefaultHandlers_MalformedPayload(t *testing.T) {
 		t.Fatal("malformed payload error must be permanent")
 	}
 }
+
+func TestDefaultHandlers_FilePurge(t *testing.T) {
+	logger := slog.Default()
+	handler := worker.NewFilePurgeHandler(logger)
+
+	purgePayload, _ := json.Marshal(worker.JobPayload{
+		Type: worker.TypeFilePurge,
+		Data: json.RawMessage(`{"fileKeys":["uploads/room-1/sample.pdf"]}`),
+	})
+
+	job := &worker.Job{
+		ID:      uuid.New(),
+		Payload: purgePayload,
+	}
+
+	err := handler.Handle(context.Background(), job)
+	if err != nil {
+		t.Fatalf("expected file purge handler to succeed, got: %v", err)
+	}
+}
+
+func TestRunnerConfig_FreeTierConservativeSettings(t *testing.T) {
+	cfg := worker.RunnerConfig{
+		WorkerID:     "free-tier-inproc",
+		Concurrency:  1,
+		BatchSize:    1,
+		PollInterval: 5 * time.Second,
+		LeaseTTL:     30 * time.Second,
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("free tier config must be valid: %v", err)
+	}
+
+	if cfg.Concurrency != 1 {
+		t.Errorf("expected concurrency 1, got %d", cfg.Concurrency)
+	}
+	if cfg.BatchSize != 1 {
+		t.Errorf("expected batch size 1, got %d", cfg.BatchSize)
+	}
+	if cfg.PollInterval != 5*time.Second {
+		t.Errorf("expected poll interval 5s, got %v", cfg.PollInterval)
+	}
+	if cfg.HeartbeatInterval != 10*time.Second {
+		t.Errorf("expected heartbeat interval 10s (LeaseTTL / 3), got %v", cfg.HeartbeatInterval)
+	}
+}

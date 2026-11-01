@@ -2,11 +2,13 @@ package files
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tathastu/connect/services/api/internal/worker"
 )
 
 type Repository interface {
@@ -241,11 +243,34 @@ func (p *PgxRepository) UpdateScanStatus(ctx context.Context, fileID string, sta
 }
 
 func (p *PgxRepository) DeleteFile(ctx context.Context, fileID string) error {
-	query := `
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin delete file transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var storageKey string
+	err = tx.QueryRow(ctx, `
 		UPDATE meeting_files
 		SET scan_status = 'deleted'
 		WHERE id = $1
-	`
-	_, err := p.pool.Exec(ctx, query, fileID)
-	return err
+		RETURNING storage_key
+	`, fileID).Scan(&storageKey)
+	if err != nil {
+		return fmt.Errorf("failed to mark file deleted: %w", err)
+	}
+
+	if storageKey != "" {
+		purgeKey := fmt.Sprintf("file-purge-%s-%d", fileID, time.Now().UnixNano())
+		purgePayload := worker.JobPayload{
+			Type:      worker.TypeFilePurge,
+			Data:      json.RawMessage(fmt.Sprintf(`{"fileKeys":["%s"]}`, storageKey)),
+			CreatedAt: time.Now().UTC(),
+		}
+		if _, err := worker.EnqueueJob(ctx, tx, worker.QueueDefault, purgeKey, purgePayload, nil); err != nil {
+			return fmt.Errorf("failed to enqueue file purge outbox job: %w", err)
+		}
+	}
+
+	return tx.Commit(ctx)
 }

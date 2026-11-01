@@ -7,11 +7,15 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrAlreadyRunning indicates that a runner instance is already actively executing.
+var ErrAlreadyRunning = errors.New("worker runner is already running")
 
 // RunnerConfig configures the background worker runtime engine.
 type RunnerConfig struct {
@@ -105,6 +109,7 @@ type Runner struct {
 	config   RunnerConfig
 	metrics  *Metrics
 
+	started    atomic.Bool
 	inFlightWG sync.WaitGroup
 	stopOnce   sync.Once
 	stopChan   chan struct{}
@@ -140,9 +145,19 @@ func (r *Runner) Metrics() *Metrics {
 	return r.metrics
 }
 
+// IsRunning returns true if the runner loop is actively running.
+func (r *Runner) IsRunning() bool {
+	return r.started.Load()
+}
+
 // Run starts the worker loops, listens to the context, and blocks until the context is cancelled
 // or Stop() is called, performing a clean, graceful shutdown of all in-flight jobs.
 func (r *Runner) Run(ctx context.Context) error {
+	if !r.started.CompareAndSwap(false, true) {
+		return ErrAlreadyRunning
+	}
+	defer r.started.Store(false)
+
 	r.logger.Info("worker_runner_starting",
 		slog.Int("concurrency", r.config.Concurrency),
 		slog.Int("batch_size", r.config.BatchSize),

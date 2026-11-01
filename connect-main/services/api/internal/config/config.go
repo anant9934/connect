@@ -60,6 +60,13 @@ type Config struct {
 	P2PPilotEnabled       bool
 	P2PDirectMediaEnabled bool
 	ICEServers            []string
+
+	// In-Process Background Worker Configuration (Free-Tier Zero Cost Mode)
+	WorkerEnabled      bool
+	WorkerConcurrency  int
+	WorkerBatchSize    int
+	WorkerPollInterval time.Duration
+	WorkerLeaseTTL     time.Duration
 }
 
 // Load reads and validates configuration from environment variables.
@@ -186,6 +193,32 @@ func Load() (*Config, error) {
 		P2PPilotEnabled:        getEnv("P2P_PILOT_ENABLED", "false") == "true",
 		P2PDirectMediaEnabled:  getEnv("P2P_DIRECT_MEDIA_ENABLED", "false") == "true",
 		ICEServers:             strings.Split(getEnv("WEBRTC_ICE_SERVERS", "stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302"), ","),
+		WorkerEnabled:          getEnv("WORKER_ENABLED", "false") == "true",
+		WorkerConcurrency:      1,
+		WorkerBatchSize:        1,
+		WorkerPollInterval:     5 * time.Second,
+		WorkerLeaseTTL:         30 * time.Second,
+	}
+
+	if cStr := getEnv("WORKER_CONCURRENCY", "1"); cStr != "" {
+		if c, err := strconv.Atoi(cStr); err == nil && c > 0 {
+			cfg.WorkerConcurrency = c
+		}
+	}
+	if bStr := getEnv("WORKER_BATCH_SIZE", "1"); bStr != "" {
+		if b, err := strconv.Atoi(bStr); err == nil && b > 0 {
+			cfg.WorkerBatchSize = b
+		}
+	}
+	if pStr := getEnv("WORKER_POLL_INTERVAL", "5s"); pStr != "" {
+		if d, err := time.ParseDuration(pStr); err == nil && d > 0 {
+			cfg.WorkerPollInterval = d
+		}
+	}
+	if lStr := getEnv("WORKER_LEASE_TTL", "30s"); lStr != "" {
+		if d, err := time.ParseDuration(lStr); err == nil && d > 0 {
+			cfg.WorkerLeaseTTL = d
+		}
 	}
 
 	// Strict Production Security Gates: Fail closed if production missing critical secrets
@@ -228,7 +261,7 @@ func getEnv(key, defaultVal string) string {
 }
 
 func loadDotEnv() {
-	paths := []string{".env", "../../../.env", "../../.env", "../.env"}
+	paths := []string{".env", "../../../../../.env", "../../../../.env", "../../../.env", "../../.env", "../.env"}
 	for _, p := range paths {
 		cleaned := filepath.Clean(p)
 		// #nosec G304 -- local config paths are fixed internal constants
