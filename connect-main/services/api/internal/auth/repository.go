@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tathastu/connect/services/api/internal/database"
 )
 
 var (
@@ -110,8 +111,7 @@ func (r *PgxRepository) GetUserByEmail(ctx context.Context, emailNormalized stri
 		       COALESCE(avatar_id, ''), COALESCE(avatar_url, ''), google_id,
 		       COALESCE(auth_provider, 'password'), COALESCE(preferences, '{}'::jsonb),
 		       COALESCE(email_verified, false), created_at, updated_at
-		FROM users
-		WHERE email_normalized = $1
+		FROM connect_auth.auth_user_by_email($1)
 	`
 	row := r.pool.QueryRow(ctx, query, emailNormalized)
 	var u User
@@ -138,8 +138,7 @@ func (r *PgxRepository) GetUserByID(ctx context.Context, id string) (*User, erro
 		       COALESCE(avatar_id, ''), COALESCE(avatar_url, ''), google_id,
 		       COALESCE(auth_provider, 'password'), COALESCE(preferences, '{}'::jsonb),
 		       COALESCE(email_verified, false), created_at, updated_at
-		FROM users
-		WHERE id = $1
+		FROM connect_auth.auth_user_by_id($1::UUID)
 	`
 	row := r.pool.QueryRow(ctx, query, id)
 	var u User
@@ -166,8 +165,7 @@ func (r *PgxRepository) GetUserByGoogleID(ctx context.Context, googleID string) 
 		       COALESCE(avatar_id, ''), COALESCE(avatar_url, ''), google_id,
 		       COALESCE(auth_provider, 'password'), COALESCE(preferences, '{}'::jsonb),
 		       COALESCE(email_verified, false), created_at, updated_at
-		FROM users
-		WHERE google_id = $1
+		FROM connect_auth.auth_user_by_google($1)
 	`
 	row := r.pool.QueryRow(ctx, query, googleID)
 	var u User
@@ -188,6 +186,35 @@ func (r *PgxRepository) GetUserByGoogleID(ctx context.Context, googleID string) 
 	return &u, nil
 }
 
+// asSession runs fn in the caller's RLS context. Account changes always follow RequireAuth, so a
+// missing session fails closed for the runtime role, which then sees no row to change.
+func (r *PgxRepository) asSession(ctx context.Context, fn func(pgx.Tx) error) error {
+	if tokenHash := database.SessionTokenHash(ctx); tokenHash != "" {
+		return database.WithAuthContext(ctx, r.pool, tokenHash, nil, func(tx pgx.Tx, _ *database.AuthContext) error {
+			return fn(tx)
+		})
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (r *PgxRepository) execAsSession(ctx context.Context, query string, args ...any) (int64, error) {
+	var affected int64
+	err := r.asSession(ctx, func(tx pgx.Tx) error {
+		tag, execErr := tx.Exec(ctx, query, args...)
+		affected = tag.RowsAffected()
+		return execErr
+	})
+	return affected, err
+}
+
 func (r *PgxRepository) UpdateProfile(ctx context.Context, userID, displayName, avatarID, avatarURL string) (*User, error) {
 	now := time.Now().UTC()
 	query := `
@@ -199,12 +226,13 @@ func (r *PgxRepository) UpdateProfile(ctx context.Context, userID, displayName, 
 		          COALESCE(auth_provider, 'password'), COALESCE(preferences, '{}'::jsonb),
 		          COALESCE(email_verified, false), created_at, updated_at
 	`
-	row := r.pool.QueryRow(ctx, query, displayName, avatarID, avatarURL, now, userID)
 	var u User
 	var prefBytes []byte
-	err := row.Scan(&u.ID, &u.EmailNormalized, &u.DisplayName, &u.PasswordHash, &u.Status,
-		&u.AvatarID, &u.AvatarURL, &u.GoogleID, &u.AuthProvider, &prefBytes,
-		&u.EmailVerified, &u.CreatedAt, &u.UpdatedAt)
+	err := r.asSession(ctx, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, query, displayName, avatarID, avatarURL, now, userID).Scan(&u.ID, &u.EmailNormalized, &u.DisplayName, &u.PasswordHash, &u.Status,
+			&u.AvatarID, &u.AvatarURL, &u.GoogleID, &u.AuthProvider, &prefBytes,
+			&u.EmailVerified, &u.CreatedAt, &u.UpdatedAt)
+	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrUserNotFound
@@ -225,11 +253,11 @@ func (r *PgxRepository) UpdatePassword(ctx context.Context, userID, newPasswordH
 		SET password_hash = $1, updated_at = $2
 		WHERE id = $3
 	`
-	tag, err := r.pool.Exec(ctx, query, newPasswordHash, now, userID)
+	affected, err := r.execAsSession(ctx, query, newPasswordHash, now, userID)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if affected == 0 {
 		return ErrUserNotFound
 	}
 	return nil
@@ -242,11 +270,11 @@ func (r *PgxRepository) LinkGoogleAccount(ctx context.Context, userID, googleID 
 		SET google_id = $1, updated_at = $2
 		WHERE id = $3
 	`
-	tag, err := r.pool.Exec(ctx, query, googleID, now, userID)
+	affected, err := r.execAsSession(ctx, query, googleID, now, userID)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if affected == 0 {
 		return ErrUserNotFound
 	}
 	return nil
@@ -263,11 +291,11 @@ func (r *PgxRepository) UpdatePreferences(ctx context.Context, userID string, pr
 		SET preferences = $1, updated_at = $2
 		WHERE id = $3
 	`
-	tag, err := r.pool.Exec(ctx, query, prefBytes, now, userID)
+	affected, err := r.execAsSession(ctx, query, prefBytes, now, userID)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if affected == 0 {
 		return ErrUserNotFound
 	}
 	return nil
@@ -288,8 +316,7 @@ func (r *PgxRepository) CreateSession(ctx context.Context, s *Session) error {
 func (r *PgxRepository) GetSessionByTokenHash(ctx context.Context, tokenHash string) (*Session, error) {
 	query := `
 		SELECT id, user_id, token_hash, created_at, last_seen_at, expires_at, revoked_at
-		FROM sessions
-		WHERE token_hash = $1
+		FROM connect_auth.auth_session_by_hash($1)
 	`
 	row := r.pool.QueryRow(ctx, query, tokenHash)
 	var s Session
@@ -304,34 +331,17 @@ func (r *PgxRepository) GetSessionByTokenHash(ctx context.Context, tokenHash str
 }
 
 func (r *PgxRepository) UpdateSessionLastSeen(ctx context.Context, sessionID string, now time.Time) error {
-	query := `
-		UPDATE sessions
-		SET last_seen_at = $1
-		WHERE id = $2 AND revoked_at IS NULL
-	`
-	_, err := r.pool.Exec(ctx, query, now, sessionID)
+	_, err := r.pool.Exec(ctx, `SELECT connect_auth.auth_touch_session($1::UUID, $2)`, sessionID, now)
 	return err
 }
 
 func (r *PgxRepository) RevokeSession(ctx context.Context, sessionID string) error {
-	now := time.Now().UTC()
-	query := `
-		UPDATE sessions
-		SET revoked_at = $1
-		WHERE id = $2
-	`
-	_, err := r.pool.Exec(ctx, query, now, sessionID)
+	_, err := r.pool.Exec(ctx, `SELECT connect_auth.auth_revoke_session($1::UUID, $2)`, sessionID, time.Now().UTC())
 	return err
 }
 
 func (r *PgxRepository) RevokeAllUserSessions(ctx context.Context, userID string) error {
-	now := time.Now().UTC()
-	query := `
-		UPDATE sessions
-		SET revoked_at = $1
-		WHERE user_id = $2 AND revoked_at IS NULL
-	`
-	_, err := r.pool.Exec(ctx, query, now, userID)
+	_, err := r.pool.Exec(ctx, `SELECT connect_auth.auth_revoke_user_sessions($1::UUID, $2)`, userID, time.Now().UTC())
 	return err
 }
 

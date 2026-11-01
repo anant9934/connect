@@ -96,7 +96,14 @@ func (s *Service) Record(ctx context.Context, params AuditParams) {
 	if s.pool != nil {
 		// #nosec G118 -- detached audit persistence must outlive client HTTP connection
 		go func() {
-			metaBytes, _ := json.Marshal(params.Metadata)
+			metadata := make(map[string]any, len(params.Metadata)+1)
+			for k, v := range params.Metadata {
+				metadata[k] = v
+			}
+			if params.RoomID != "" {
+				metadata["room_id"] = params.RoomID
+			}
+			metaBytes, _ := json.Marshal(metadata)
 			if metaBytes == nil {
 				metaBytes = []byte("{}")
 			}
@@ -106,7 +113,9 @@ func (s *Service) Record(ctx context.Context, params AuditParams) {
 			`
 			insertCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 			defer cancel()
-			_, _ = s.pool.Exec(insertCtx, query, string(params.EventType), params.Severity, params.ActorID, ipHash, string(metaBytes))
+			if _, err := s.pool.Exec(insertCtx, query, string(params.EventType), params.Severity, params.ActorID, ipHash, string(metaBytes)); err != nil {
+				s.logger.Error("security_audit_persist_failed", slog.String("event_type", string(params.EventType)), slog.String("error", err.Error()))
+			}
 		}()
 	}
 }
