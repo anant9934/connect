@@ -34,6 +34,11 @@ func RequireJSONContentType(next http.Handler) http.Handler {
 					next.ServeHTTP(w, r)
 					return
 				}
+				// LiveKit webhooks use their own media type; the signature covers the body.
+				if strings.HasSuffix(r.URL.Path, "/livekit/webhook") && ct == "application/webhook+json" {
+					next.ServeHTTP(w, r)
+					return
+				}
 				if ct != "application/json" && !containsPrefix(ct, "application/json;") {
 					model.SendJSONError(w, r, http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE", "Content-Type must be application/json")
 					return

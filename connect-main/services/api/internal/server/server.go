@@ -39,6 +39,7 @@ func BuildRouter(
 	filesHandler *files.Handler,
 	authService *auth.Service,
 	p2pHandler *p2p.Handler,
+	livekitWebhook http.Handler,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -78,6 +79,11 @@ func BuildRouter(
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Get("/system/status", systemHandler.Status)
 		api.Post("/collab/validate-assertion", assertionHandler.ValidateAssertion)
+
+		// LiveKit webhooks authenticate by signature, not session or origin
+		if livekitWebhook != nil {
+			api.Method(http.MethodPost, "/livekit/webhook", livekitWebhook)
+		}
 
 		// Authentication Routes (state-changing protected by CSRF)
 		api.Route("/auth", func(authRouter chi.Router) {

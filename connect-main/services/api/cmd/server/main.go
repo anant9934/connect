@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tathastu/connect/services/api/internal/attendance"
 	"github.com/tathastu/connect/services/api/internal/audit"
 	"github.com/tathastu/connect/services/api/internal/auth"
 	"github.com/tathastu/connect/services/api/internal/config"
@@ -188,8 +190,13 @@ func main() {
 	systemHandler := handlers.NewSystemHandler(buildVersion)
 	assertionHandler := handlers.NewAssertionHandler(cfg)
 
+	var livekitWebhook http.Handler
+	if db != nil && db.Pool != nil {
+		livekitWebhook = attendance.NewWebhookHandler(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret, attendance.NewPgxSessionStore(db.Pool), logger)
+	}
+
 	// 6. Assemble Router and Hardened Server
-	router := server.BuildRouter(cfg, logger, limiter, healthHandler, systemHandler, assertionHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler)
+	router := server.BuildRouter(cfg, logger, limiter, healthHandler, systemHandler, assertionHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler, livekitWebhook)
 	srv := server.New(cfg, logger, router)
 
 	// 7. Initialize In-Process Background Worker (if enabled)
