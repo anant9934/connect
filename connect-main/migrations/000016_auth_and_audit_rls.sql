@@ -87,3 +87,17 @@ CREATE POLICY rls_audit_events_select ON security_audit_events
 CREATE POLICY rls_audit_events_insert ON security_audit_events
     FOR INSERT TO connect_app, connect_worker WITH CHECK (true);
 REVOKE UPDATE, DELETE ON security_audit_events FROM connect_app, connect_worker;
+
+-- connect_app may enqueue but not read the queue. ON CONFLICT applies the queue's SELECT policy
+-- to the new row, so idempotent enqueue runs here and can only create a pending job.
+CREATE OR REPLACE FUNCTION connect_auth.enqueue_job(p_queue TEXT, p_key TEXT, p_payload JSONB)
+RETURNS VOID
+SECURITY DEFINER SET search_path = pg_catalog, public, connect_auth
+LANGUAGE sql AS $$
+    INSERT INTO public.background_jobs (queue, idempotency_key, payload, status, scheduled_at)
+    VALUES (p_queue, p_key, p_payload, 'pending', pg_catalog.clock_timestamp())
+    ON CONFLICT (idempotency_key) DO NOTHING
+$$;
+
+REVOKE ALL ON FUNCTION connect_auth.enqueue_job(TEXT, TEXT, JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION connect_auth.enqueue_job(TEXT, TEXT, JSONB) TO connect_app;

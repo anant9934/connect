@@ -1,4 +1,5 @@
 -- Reverses migration 000016 on a disposable database during verification.
+DROP FUNCTION IF EXISTS connect_auth.enqueue_job(TEXT, TEXT, JSONB);
 GRANT UPDATE, DELETE ON security_audit_events TO connect_app, connect_worker;
 DROP POLICY IF EXISTS rls_audit_events_insert ON security_audit_events;
 DROP POLICY IF EXISTS rls_audit_events_select ON security_audit_events;

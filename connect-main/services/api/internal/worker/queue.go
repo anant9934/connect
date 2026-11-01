@@ -375,10 +375,6 @@ func EnqueueJobWriteOnly(ctx context.Context, tx pgx.Tx, queue, idempotencyKey s
 	if err != nil {
 		return fmt.Errorf("failed to marshal job payload: %w", err)
 	}
-	_, err = tx.Exec(ctx, `
-		INSERT INTO background_jobs (queue, idempotency_key, payload, status, scheduled_at)
-		VALUES ($1, $2, $3::jsonb, $4, $5)
-		ON CONFLICT (idempotency_key) DO NOTHING
-	`, queue, idempotencyKey, payloadBytes, StatusPending, time.Now())
+	_, err = tx.Exec(ctx, `SELECT connect_auth.enqueue_job($1, $2, $3::jsonb)`, queue, idempotencyKey, payloadBytes)
 	return err
 }
