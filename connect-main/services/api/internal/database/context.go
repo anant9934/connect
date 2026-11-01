@@ -91,3 +91,21 @@ func WithAuthContext(ctx context.Context, pool *pgxpool.Pool, tokenHash string, 
 	}
 	return tx.Commit(ctx)
 }
+
+// WithRoomGuestContext runs fn in one transaction limited to a single room for a guest whose
+// signed token the API has already verified. The database refuses non-participants.
+func WithRoomGuestContext(ctx context.Context, pool *pgxpool.Pool, roomID, identity string, fn func(pgx.Tx) error) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `SELECT connect_auth.authenticate_room_guest($1::UUID, $2)`, roomID, identity); err != nil {
+		return fmt.Errorf("failed to establish guest room context: %w", err)
+	}
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}

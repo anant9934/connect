@@ -173,7 +173,7 @@ func main() {
 	}
 
 	filesScanner := files.NewProductionScanner(cfg.ClamAVEnabled, cfg.ClamAVHost, cfg.ClamAVPort)
-	filesService := files.NewService(filesRepo, filesStorage, filesScanner, roomService, auditService)
+	filesService := files.NewService(filesRepo, filesStorage, filesScanner, notesRooms, auditService)
 	filesHandler := files.NewHandler(filesService)
 
 	// Hybrid WebRTC P2P Signaling (Phase 5.2A)

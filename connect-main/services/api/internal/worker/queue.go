@@ -361,3 +361,23 @@ func GetQueueStats(ctx context.Context, pool *pgxpool.Pool, queue string) (*Queu
 
 	return &stats, nil
 }
+
+// EnqueueJobWriteOnly enqueues in tx without reading the row back, for roles such as
+// connect_app that may insert jobs but must not read the queue.
+func EnqueueJobWriteOnly(ctx context.Context, tx pgx.Tx, queue, idempotencyKey string, payload any) error {
+	if idempotencyKey == "" {
+		return fmt.Errorf("idempotency key is required for transactional job enqueue")
+	}
+	if queue == "" {
+		queue = DefaultQueue
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal job payload: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO background_jobs (queue, idempotency_key, payload, status, scheduled_at)
+		VALUES ($1, $2, $3::jsonb, $4, $5)
+	`, queue, idempotencyKey, payloadBytes, StatusPending, time.Now())
+	return err
+}

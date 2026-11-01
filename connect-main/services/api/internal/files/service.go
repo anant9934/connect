@@ -40,6 +40,8 @@ func (s *Service) UploadFile(ctx context.Context, roomCode, callerIdentity, orig
 		return nil, ErrUnauthorized
 	}
 
+	actor := Actor{RoomID: roomID, Identity: callerIdentity}
+
 	// 1. Validate file size
 	sizeBytes := int64(len(data))
 	if sizeBytes == 0 || sizeBytes > MaxFileSizeBytes {
@@ -90,13 +92,13 @@ func (s *Service) UploadFile(ctx context.Context, roomCode, callerIdentity, orig
 	}
 
 	// 7. Persist file record in quarantine state
-	if err := s.repo.CreateFile(ctx, meetingFile); err != nil {
+	if err := s.repo.CreateFile(ctx, actor, meetingFile); err != nil {
 		_ = s.storage.Delete(ctx, storageKey)
 		return nil, err
 	}
 
 	// 8. Mandatory scanning workflow: Explicit state transition QUARANTINED -> SCANNING
-	_ = s.repo.UpdateScanStatus(ctx, fileID, ScanStatusScanning, "Security scan in progress")
+	_ = s.repo.UpdateScanStatus(ctx, actor, fileID, ScanStatusScanning, "Security scan in progress")
 	meetingFile.ScanStatus = ScanStatusScanning
 
 	scanStatus, scanResult, scanErr := s.scanner.Scan(ctx, meetingFile, data)
@@ -106,7 +108,7 @@ func (s *Service) UploadFile(ctx context.Context, roomCode, callerIdentity, orig
 		if errors.Is(scanErr, ErrScannerUnavailable) {
 			finalStatus = ScanStatusQuarantined
 		}
-		_ = s.repo.UpdateScanStatus(ctx, fileID, finalStatus, scanResult)
+		_ = s.repo.UpdateScanStatus(ctx, actor, fileID, finalStatus, scanResult)
 		meetingFile.ScanStatus = finalStatus
 		meetingFile.ScanResult = scanResult
 		if finalStatus == ScanStatusQuarantined {
@@ -118,7 +120,7 @@ func (s *Service) UploadFile(ctx context.Context, roomCode, callerIdentity, orig
 	// Update SCANNING -> AVAILABLE
 	meetingFile.ScanStatus = ScanStatusAvailable
 	meetingFile.ScanResult = scanResult
-	if err := s.repo.UpdateScanStatus(ctx, fileID, ScanStatusAvailable, scanResult); err != nil {
+	if err := s.repo.UpdateScanStatus(ctx, actor, fileID, ScanStatusAvailable, scanResult); err != nil {
 		return nil, err
 	}
 
@@ -147,7 +149,7 @@ func (s *Service) ListFiles(ctx context.Context, roomCode, callerIdentity string
 		return nil, ErrUnauthorized
 	}
 
-	files, err := s.repo.GetFilesByRoomID(ctx, roomID)
+	files, err := s.repo.GetFilesByRoomID(ctx, Actor{RoomID: roomID, Identity: callerIdentity})
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +170,7 @@ func (s *Service) DownloadFile(ctx context.Context, roomCode, fileID, callerIden
 		return nil, nil, ErrUnauthorized
 	}
 
-	file, err := s.repo.GetFileByID(ctx, fileID)
+	file, err := s.repo.GetFileByID(ctx, Actor{RoomID: roomID, Identity: callerIdentity}, fileID)
 	if err != nil {
 		return nil, nil, ErrFileNotFound
 	}
@@ -216,7 +218,7 @@ func (s *Service) DeleteFile(ctx context.Context, roomCode, fileID, callerIdenti
 		return ErrUnauthorized
 	}
 
-	file, err := s.repo.GetFileByID(ctx, fileID)
+	file, err := s.repo.GetFileByID(ctx, Actor{RoomID: roomID, Identity: callerIdentity}, fileID)
 	if err != nil {
 		return ErrFileNotFound
 	}
@@ -234,5 +236,5 @@ func (s *Service) DeleteFile(ctx context.Context, roomCode, fileID, callerIdenti
 		// Log but proceed to mark deleted in database
 	}
 
-	return s.repo.DeleteFile(ctx, fileID)
+	return s.repo.DeleteFile(ctx, Actor{RoomID: roomID, Identity: callerIdentity}, fileID)
 }
