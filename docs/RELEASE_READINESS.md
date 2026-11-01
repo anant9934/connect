@@ -24,7 +24,7 @@ meeting backend's infrastructure only. It did not cover classroom, lab or AI fea
 | Mobile `node --test` | Pass, 145 tests |
 | Live `GET /health/ready` on Render | `{"status":"ok"}` |
 | `govulncheck` before upgrade | 31 reachable standard-library vulnerabilities |
-| `govulncheck` after Go 1.26.10 | 0 reachable. See the unreachable advisories below |
+| `govulncheck` after Go 1.26.10 | 0 reachable. GO-2026-5932 in `x/crypto` remains: not called by our code, no fix published |
 
 ## Blockers to the RLS gate
 
@@ -39,8 +39,8 @@ RLS. If so, tenant isolation is not enforced at runtime for those queries.
 
 ## Go test accounting
 
-The Go suite ends with 10 skipped tests, which are **not passes**: 5 PostgreSQL lock tests, 3 Redis
-tests, 1 R2 test and 1 worker lifecycle test, all needing live services.
+The Go suite ends with 171 passed and 11 skipped. Skips are **not passes**: 5 PostgreSQL lock tests,
+the new RLS test, 3 Redis tests, 1 R2 test and 1 worker lifecycle test, all needing live services.
 
 ## Not verified
 
