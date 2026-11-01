@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - 'remediation/**'
+      - 'feat/**'
   pull_request:
     branches:
       - main
@@ -76,19 +77,16 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Run Web Tests & Checks
-        if: hashFiles('connect-main/apps/web/package.json') != ''
+      - name: Run Web And Mobile Tests, Typecheck And Build
+        if: hashFiles('connect-main/package-lock.json') != ''
         run: |
-          cd connect-main/apps/web
-          npm ci || npm install
-          if npm run | grep -q 'test'; then npm test; fi
-
-      - name: Run Mobile Tests & Checks
-        if: hashFiles('connect-main/apps/mobile/package.json') != ''
-        run: |
-          cd connect-main/apps/mobile
-          npm ci || npm install
-          if npm run | grep -q 'test'; then npm test; fi
+          cd connect-main
+          npm ci
+          npm run typecheck:web
+          npm run typecheck:mobile
+          npm run test:web
+          npm test --workspace=apps/mobile
+          npm run build:web
 
       - name: Validate SQL Migrations Syntax
         run: |
@@ -153,3 +151,26 @@ jobs:
           cd connect-main/services/api
           go test -v -race -run 'TestPostgres_.*' ./internal/room/...
 
+      - name: Verify Migration 000010 Rollback And Reapply
+        env:
+          ADMIN_URL: "postgres://connect_admin:connect_disposable_ci_password_456@localhost:5432/connect_test_ci_runner?sslmode=disable"
+        run: |
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000010.sql
+          psql "$ADMIN_URL" -tAc "SELECT to_regclass('participant_media_sessions') IS NULL" | grep -qx t
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000010_trusted_sessions_and_attendance_policies.sql
+
+      - name: Verify RLS Under Restricted Runtime Roles
+        env:
+          ADMIN_URL: "postgres://connect_admin:connect_disposable_ci_password_456@localhost:5432/connect_test_ci_runner?sslmode=disable"
+        run: |
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -c "ALTER ROLE connect_app PASSWORD 'disposable'; ALTER ROLE connect_worker PASSWORD 'disposable';"
+          cd connect-main/services/api
+          status=0
+          for role in connect_app connect_worker; do
+            echo "::group::RLS as $role"
+            TEST_DATABASE_URL="$ADMIN_URL" \
+            TEST_APP_DATABASE_URL="postgres://$role:disposable@localhost:5432/connect_test_ci_runner?sslmode=disable" \
+              go test -count=1 -v -run 'TestRLS_' ./internal/attendance ./internal/worker || status=1
+            echo "::endgroup::"
+          done
+          exit $status
