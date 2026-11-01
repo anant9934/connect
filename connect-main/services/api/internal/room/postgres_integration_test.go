@@ -24,15 +24,13 @@ import (
 
 func setupRealPostgresPools(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool) {
 	t.Helper()
+	// Deliberately no DATABASE_URL fallback: it may point at production.
 	dbURL := os.Getenv("TEST_DATABASE_URL")
 	if dbURL == "" {
-		dbURL = os.Getenv("DATABASE_URL")
-	}
-	if dbURL == "" {
 		if os.Getenv("REQUIRE_TEST_DATABASE") == "true" {
-			t.Fatal("TEST_DATABASE_URL or DATABASE_URL must be explicitly configured in CI; no fallback credentials permitted")
+			t.Fatal("TEST_DATABASE_URL must be explicitly configured in CI; no fallback credentials permitted")
 		}
-		t.Skip("Skipping PostgreSQL integration test: TEST_DATABASE_URL or DATABASE_URL is not set")
+		t.Skip("Skipping PostgreSQL integration test: TEST_DATABASE_URL is not set")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
