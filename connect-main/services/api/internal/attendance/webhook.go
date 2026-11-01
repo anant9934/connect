@@ -128,6 +128,17 @@ func (s *PgxSessionStore) Apply(ctx context.Context, ev SessionEvent) error {
 	var roomID string
 	err = tx.QueryRow(ctx, `SELECT id::text FROM rooms WHERE public_code = $1`, ev.RoomName).Scan(&roomID)
 	if errors.Is(err, pgx.ErrNoRows) {
+		// Keep a durable trace: row-level security can make a real room look unknown.
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO livekit_webhook_events (event_id, event_type, room_name, outcome)
+			VALUES ($1, $2, $3, 'unknown_room')
+			ON CONFLICT (event_id) DO NOTHING
+		`, ev.EventID, ev.EventType, ev.RoomName); err != nil {
+			return err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return err
+		}
 		return ErrUnknownRoom
 	}
 	if err != nil {

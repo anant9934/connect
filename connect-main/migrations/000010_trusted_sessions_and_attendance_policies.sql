@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS livekit_webhook_events (
     event_id VARCHAR(128) PRIMARY KEY,
     event_type VARCHAR(64) NOT NULL,
     room_name VARCHAR(128) NOT NULL,
+    outcome VARCHAR(32) NOT NULL DEFAULT 'applied',
     received_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
 

@@ -221,13 +221,16 @@ func NewAttendanceReconcileHandler(pool *pgxpool.Pool, logger *slog.Logger) Hand
 		var actualStart, actualEnd, schedStart, schedEnd *time.Time
 
 		if classSessionID == "" {
-			// Check if room has class_session_id in rooms table
+			// Check if room has class_session_id in rooms table. A missing row is an error:
+			// row-level security can hide it, and that must not read as "not a class".
 			var csUUID *string
-			_ = pool.QueryRow(ctx, `
+			if err := pool.QueryRow(ctx, `
 				SELECT class_session_id::text
 				FROM rooms
 				WHERE id = $1
-			`, targetRoomID).Scan(&csUUID)
+			`, targetRoomID).Scan(&csUUID); err != nil {
+				return fmt.Errorf("failed to load room %s: %w", targetRoomID, err)
+			}
 			if csUUID != nil {
 				classSessionID = *csUUID
 			}
@@ -235,14 +238,16 @@ func NewAttendanceReconcileHandler(pool *pgxpool.Pool, logger *slog.Logger) Hand
 
 		if classSessionID != "" {
 			// Fetch class session metadata
-			err := pool.QueryRow(ctx, `
+			if err := pool.QueryRow(ctx, `
 				SELECT organization_id::text, batch_id::text,
 				       actual_start, actual_end, scheduled_start, scheduled_end
 				FROM class_sessions
 				WHERE id = $1
-			`, classSessionID).Scan(&orgIDStr, &batchIDStr, &actualStart, &actualEnd, &schedStart, &schedEnd)
+			`, classSessionID).Scan(&orgIDStr, &batchIDStr, &actualStart, &actualEnd, &schedStart, &schedEnd); err != nil {
+				return fmt.Errorf("failed to load class session %s: %w", classSessionID, err)
+			}
 
-			if err == nil && orgIDStr != "" && batchIDStr != "" {
+			{
 				// Determine effective session boundaries
 				sessionStart := cutoff.Add(-1 * time.Hour)
 				if actualStart != nil && !actualStart.IsZero() {
