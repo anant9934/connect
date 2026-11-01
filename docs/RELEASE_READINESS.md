@@ -41,8 +41,11 @@ catalog query, FORCE RLS has no effect and tenant isolation rests on application
 `connect_worker` (bypassrls=false) failed the webhook and attendance job tests: real rooms are invisible
 without an auth context. Migrations 000001-000010, the SQL security suites and `000010` rollback passed.
 
-**After `000011` (run 41338955770):** those tests pass for webhook and worker paths. The class-session
-attendance path and API-level tenant isolation remain untested.
+**After `000011` (run 41338955770):** those tests pass for webhook and worker paths. API-level tenant
+isolation remains untested.
+
+**Run 41343853509 (`82f9242`):** full class-session attendance workflow and transaction-scoped auth
+context pass under restricted roles. No API route uses that context yet.
 
 **Plan:** Render is confirmed Free. `render.yaml` differs from the live service in name and region
 (`singapore` vs `ohio`), so do not sync the Blueprint from it.

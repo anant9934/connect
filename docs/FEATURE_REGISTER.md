@@ -8,16 +8,17 @@ Search-based entries show whether code exists, not that it works.
 | Severity | Finding | Status |
 | :--- | :--- | :--- |
 | Decision | Mobile stays Expo/React Native, not Kotlin/Compose. | Approved by owner |
-| High | Attendance had no trusted server-side source: no LiveKit webhook, so a crashed client never left. | Fixed on branch, SQL unverified |
-| High | Enrolled students who never joined got no record, so they were never marked absent. | Fixed on branch, SQL unverified |
-| High | Attendance thresholds were hardcoded (0.75 / 0.40) and `late` was never produced. | Fixed on branch, SQL unverified |
-| High | Failed attendance upserts were logged and the job still completed, losing records with no retry. Upserts for non-enrolled participants failed this way every time. | Fixed on branch, SQL unverified |
+| High | Attendance had no trusted server-side source: no LiveKit webhook, so a crashed client never left. | Fixed on branch, verified in CI run 41343853509 |
+| High | Enrolled students who never joined got no record, so they were never marked absent. | Fixed on branch, verified in CI run 41343853509 |
+| High | Attendance thresholds were hardcoded (0.75 / 0.40) and `late` was never produced. | Fixed on branch, verified in CI run 41343853509 |
+| High | Failed attendance upserts were logged and the job still completed, losing records with no retry. Upserts for non-enrolled participants failed this way every time. | Fixed on branch, verified in CI run 41343853509 |
 | High | `academic` and `attendance` have tables and logic but no HTTP routes. | Open |
 | High | No password recovery; no email verification flow. | Open |
 | High | 31 reachable Go standard-library vulnerabilities from pinning Go 1.26.0. | Fixed on branch: 0 reachable on Go 1.26.10 |
 | High | Health check skipped nested Go tests yet printed PASSED. | Fixed on branch |
-| High | Reconciler silently skipped a class when its room or session lookup failed. | Fixed on branch: job now errors and retries, SQL unverified |
-| High | Runtime role and RLS enforcement unverified; bypass suspected. | BLOCKED: needs disposable database |
+| High | Reconciler silently skipped a class when its room or session lookup failed. | Fixed on branch: job now errors and retries, verified in CI |
+| High | API runs as `neondb_owner` with no request context; RLS likely bypassed in production. | Open: helper verified, API not converted |
+| High | RLS recursion between `faculty_allocations` and `course_enrollments` broke non-admin class reads. | Fixed by `000012`, verified in CI |
 | Medium | RLS may silently hide rows from the shared pool (see `RELEASE_READINESS.md`). | Unverified |
 | Medium | Readiness matrix overstates scope and marks a missed latency target as PASS. | Superseded by `RELEASE_READINESS.md` |
 | Medium | Backend routes are open to anyone who has a room code: `GET /rooms/{code}/participants`. Authorization not yet reviewed. | Open |
@@ -51,8 +52,8 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | P2-06 | 2 | Institutions, courses, enrollment | schema, logic, no API | no | no | IN_PROGRESS | |
 | P2-07 | 2 | Notifications | no | no | no | NOT_STARTED | |
 | P2-08 | 2 | Admin dashboard | audit service only | no | no | NOT_STARTED | |
-| P3-01 | 3 | Trusted session tracking | signed webhook, `000010` | n/a | n/a | IN_PROGRESS | Unexecuted SQL; webhook unregistered |
-| P3-02 | 3 | Duration attendance and reconciliation | worker | n/a | n/a | IN_PROGRESS | Unexecuted SQL; RLS question |
+| P3-01 | 3 | Trusted session tracking | signed webhook, `000010` | n/a | n/a | TESTING | CI run 41343853509 passes; webhook not registered in LiveKit, migrations not in production |
+| P3-02 | 3 | Duration attendance and reconciliation | worker | n/a | n/a | TESTING | CI run 41343853509 passes; not yet exercised through the job queue |
 | P3-03 | 3 | Versioned attendance rules | table, evaluator | no | no | IN_PROGRESS | No API |
 | P3-04 | 3 | Attendance correction with audit | domain logic, table | no | no | IN_PROGRESS | No API |
 | P3-05 | 3 | Dashboards and exports | no | no | no | NOT_STARTED | |
