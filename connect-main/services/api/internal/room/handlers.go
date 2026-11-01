@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/tathastu/connect/services/api/internal/database"
 	"github.com/tathastu/connect/services/api/internal/livekit"
 	"github.com/tathastu/connect/services/api/internal/middleware"
 	"github.com/tathastu/connect/services/api/internal/model"
@@ -162,6 +163,38 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// verifiedGuestIdentity returns the identity proven by the caller's signed guest token.
+// A bare identity in a body or query string proves nothing and is never used.
+func verifiedGuestIdentity(r *http.Request, normCode string) string {
+	token := strings.TrimSpace(r.Header.Get("X-Guest-Token"))
+	if token == "" {
+		if c, err := r.Cookie("tc_guest_" + normCode); err == nil {
+			token = strings.TrimSpace(c.Value)
+		}
+	}
+	if token == "" {
+		return ""
+	}
+	identity, err := VerifyGuestToken(normCode, token)
+	if err != nil {
+		return ""
+	}
+	return identity
+}
+
+// callerIdentity resolves the caller from their session or signed guest token only, and
+// records a guest on the returned request so database access runs in that guest's context.
+func callerIdentity(r *http.Request, normCode string) (string, *http.Request) {
+	if user, ok := middleware.UserFromContext(r.Context()); ok && user != nil {
+		return "user:" + user.ID, r
+	}
+	identity := verifiedGuestIdentity(r, normCode)
+	if identity == "" {
+		return "", r
+	}
+	return identity, r.WithContext(database.WithGuestIdentity(r.Context(), identity))
+}
+
 // Get handles GET /api/v1/rooms/{code}
 func (h *Handlers) Get(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
@@ -228,9 +261,17 @@ func (h *Handlers) Join(w http.ResponseWriter, r *http.Request) {
 		_ = decoder.Decode(&req)
 	}
 
-	result, err := h.service.JoinRoomWithIdentity(r.Context(), code, user, req.Identity, req.DisplayName, clientIP, reqID)
+	// A guest keeps an identity only by proving it; any identity in the body is ignored.
+	var guestIdentity string
+	if user == nil {
+		guestIdentity = verifiedGuestIdentity(r, NormalizeCode(code))
+	}
+
+	result, err := h.service.JoinRoomWithIdentity(r.Context(), code, user, guestIdentity, req.DisplayName, clientIP, reqID)
 	if err != nil {
 		switch {
+		case errors.Is(err, ErrUnauthorizedRoomAction):
+			model.SendJSONError(w, r, http.StatusForbidden, "FORBIDDEN", "You are not permitted to join this meeting.")
 		case errors.Is(err, ErrRoomNotFound):
 			model.SendJSONError(w, r, http.StatusNotFound, "ROOM_NOT_FOUND", "This meeting is unavailable.")
 		case errors.Is(err, ErrRoomEnded):
@@ -271,22 +312,15 @@ func (h *Handlers) Join(w http.ResponseWriter, r *http.Request) {
 // Leave handles POST /api/v1/rooms/{code}/leave
 func (h *Handlers) Leave(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
-	ClearGuestCookie(w, code, h.isProduction())
 	clientIP := extractIP(r)
 	reqID := getRequestID(r)
 
-	var req LeaveRoomRequest
-	if r.ContentLength > 0 {
-		_ = json.NewDecoder(r.Body).Decode(&req)
+	// The departing identity comes from the caller's credentials; the body cannot name someone else.
+	identity, r := callerIdentity(r, NormalizeCode(code))
+	ClearGuestCookie(w, code, h.isProduction())
+	if identity != "" {
+		_ = h.service.LeaveRoom(r.Context(), code, identity, clientIP, reqID)
 	}
-
-	user, _ := middleware.UserFromContext(r.Context())
-	identity := req.Identity
-	if user != nil && identity == "" {
-		identity = "user:" + user.ID
-	}
-
-	_ = h.service.LeaveRoom(r.Context(), code, identity, clientIP, reqID)
 
 	model.SendJSON(w, http.StatusOK, map[string]any{
 		"success": true,
@@ -377,8 +411,17 @@ func (h *Handlers) End(w http.ResponseWriter, r *http.Request) {
 // Participants handles GET /api/v1/rooms/{code}/participants
 func (h *Handlers) Participants(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
-	participants, err := h.service.GetParticipants(r.Context(), code)
+	identity, r := callerIdentity(r, NormalizeCode(code))
+	if identity == "" {
+		model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Valid participant identity required.")
+		return
+	}
+	participants, err := h.service.ListParticipantsFor(r.Context(), code, identity)
 	if err != nil {
+		if errors.Is(err, ErrUnauthorizedRoomAction) {
+			model.SendJSONError(w, r, http.StatusForbidden, "FORBIDDEN", "You are not a participant in this meeting.")
+			return
+		}
 		model.SendJSONError(w, r, http.StatusNotFound, "ROOM_NOT_FOUND", "This meeting is unavailable.")
 		return
 	}
@@ -434,36 +477,21 @@ func (h *Handlers) Token(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			guestIdentity = verifiedIdent
-		} else if guestIdentity != "" {
-			// A raw guest:<uuid> header/body without token is rejected unless admitted in waiting room
-			rm, err := h.service.GetRoom(r.Context(), normCode)
-			if err != nil || rm == nil {
-				model.SendJSONError(w, r, http.StatusNotFound, "ROOM_NOT_FOUND", "This meeting is unavailable.")
-				return
-			}
-			if rm.WaitingRoomEnabled {
-				admitReq, err := h.service.GetAdmissionStatus(r.Context(), normCode, guestIdentity)
-				if err != nil || admitReq == nil || admitReq.Status != "admitted" {
-					model.SendJSONError(w, r, http.StatusForbidden, "ADMISSION_REQUIRED", "Verified guest credential required.")
-					return
-				}
-				newToken, err := GenerateGuestToken(normCode, guestIdentity, 12*time.Hour)
-				if err == nil {
-					SetGuestCookie(w, normCode, newToken, h.isProduction(), 12*time.Hour)
-				}
-			} else {
-				model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Valid room-scoped guest credential required.")
-				return
-			}
 		} else {
 			model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Participant identity required for media token.")
 			return
 		}
 	}
 
-	token, err := h.service.GenerateToken(r.Context(), code, user, guestIdentity, req.GuestDisplayName, clientIP, reqID)
+	ctx := r.Context()
+	if user == nil {
+		ctx = database.WithGuestIdentity(ctx, guestIdentity)
+	}
+	token, err := h.service.GenerateToken(ctx, code, user, guestIdentity, req.GuestDisplayName, clientIP, reqID)
 	if err != nil {
 		switch {
+		case errors.Is(err, ErrUnauthorizedRoomAction):
+			model.SendJSONError(w, r, http.StatusForbidden, "FORBIDDEN", "You are not permitted to join this meeting.")
 		case errors.Is(err, ErrRoomNotFound):
 			model.SendJSONError(w, r, http.StatusNotFound, "ROOM_NOT_FOUND", "This meeting is unavailable.")
 		case errors.Is(err, ErrRoomEnded):
@@ -502,9 +530,14 @@ func (h *Handlers) RequestAdmission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req, err := h.service.RequestAdmission(r.Context(), code, payload.Identity, payload.DisplayName, clientIP, reqID)
+	// Empty for a first-time guest, who then receives a new identity and its token.
+	identity, _ := callerIdentity(r, NormalizeCode(code))
+
+	req, err := h.service.RequestAdmission(r.Context(), code, identity, payload.DisplayName, clientIP, reqID)
 	if err != nil {
 		switch {
+		case errors.Is(err, ErrUnauthorizedRoomAction):
+			model.SendJSONError(w, r, http.StatusForbidden, "FORBIDDEN", "You are not permitted to join this meeting.")
 		case errors.Is(err, ErrRoomNotFound):
 			model.SendJSONError(w, r, http.StatusNotFound, "ROOM_NOT_FOUND", "This meeting is unavailable.")
 		case errors.Is(err, ErrRoomEnded):
@@ -539,9 +572,9 @@ func (h *Handlers) RequestAdmission(w http.ResponseWriter, r *http.Request) {
 // GetAdmissionStatus handles GET /api/v1/rooms/{code}/admission/status?identity={identity}
 func (h *Handlers) GetAdmissionStatus(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
-	identity := r.URL.Query().Get("identity")
+	identity, _ := callerIdentity(r, NormalizeCode(code))
 	if identity == "" {
-		model.SendJSONError(w, r, http.StatusBadRequest, "INVALID_IDENTITY", "Identity query parameter required")
+		model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Valid participant identity required.")
 		return
 	}
 

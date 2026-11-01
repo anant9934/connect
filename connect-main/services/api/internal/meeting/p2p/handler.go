@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/tathastu/connect/services/api/internal/auth"
 	"github.com/tathastu/connect/services/api/internal/config"
+	"github.com/tathastu/connect/services/api/internal/database"
 	"github.com/tathastu/connect/services/api/internal/middleware"
 	"github.com/tathastu/connect/services/api/internal/model"
 	"github.com/tathastu/connect/services/api/internal/room"
@@ -283,12 +284,14 @@ func (h *Handler) authenticateRequest(r *http.Request, normCode string) (PeerInf
 	}
 
 	if user != nil {
-		// User is authenticated; check if host of the room
-		isHost := false
-		if rm, err := h.roomService.GetRoom(r.Context(), normCode); err == nil && rm != nil {
-			if rm.HostUserID == user.ID {
-				isHost = true
-			}
+		// A session alone is not enough: signaling exposes peers, so the caller must have room access.
+		accessCtx := r.Context()
+		if token := auth.ExtractSessionToken(r); token != "" {
+			accessCtx = database.WithSessionTokenHash(accessCtx, auth.HashSessionToken(token))
+		}
+		_, isHost, err := h.roomService.ValidateRoomAccess(accessCtx, normCode, "user:"+user.ID)
+		if err != nil {
+			return PeerInfo{}, errors.New("no access to this room")
 		}
 		return PeerInfo{
 			Identity:    "user:" + user.ID,
@@ -314,10 +317,14 @@ func (h *Handler) authenticateRequest(r *http.Request, normCode string) (PeerInf
 		if err != nil {
 			return PeerInfo{}, errors.New("invalid or expired guest credential")
 		}
+		guestCtx := database.WithGuestIdentity(r.Context(), verifiedIdent)
+		if _, _, err := h.roomService.ValidateRoomAccess(guestCtx, normCode, verifiedIdent); err != nil {
+			return PeerInfo{}, errors.New("no access to this room")
+		}
 
 		displayName := strings.TrimSpace(r.URL.Query().Get("display_name"))
 		if displayName == "" {
-			if participants, err := h.roomService.GetParticipants(r.Context(), normCode); err == nil {
+			if participants, err := h.roomService.GetParticipants(guestCtx, normCode); err == nil {
 				for _, p := range participants {
 					if p.Identity == verifiedIdent && p.DisplayName != "" {
 						displayName = p.DisplayName

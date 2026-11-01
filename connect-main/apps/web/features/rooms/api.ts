@@ -86,14 +86,13 @@ export async function getRoomToken(
 
 export async function requestAdmission(
   code: string,
-  displayName: string,
-  identity?: string
+  displayName: string
 ): Promise<{ request: { id: string; status: string } }> {
   return apiFetch<{ request: { id: string; status: string } }>(
     `/api/v1/rooms/${encodeURIComponent(code)}/admission/request`,
     {
       method: 'POST',
-      body: JSON.stringify({ displayName, identity }),
+      body: JSON.stringify({ displayName }),
     }
   );
 }

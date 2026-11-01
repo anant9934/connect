@@ -72,6 +72,19 @@ func SessionTokenHash(ctx context.Context) string {
 	return hash
 }
 
+type guestIdentityKey struct{}
+
+// WithGuestIdentity records a guest identity whose signed token the API already verified.
+func WithGuestIdentity(ctx context.Context, identity string) context.Context {
+	return context.WithValue(ctx, guestIdentityKey{}, identity)
+}
+
+// GuestIdentity returns the identity recorded by WithGuestIdentity, or "" when there is none.
+func GuestIdentity(ctx context.Context) string {
+	identity, _ := ctx.Value(guestIdentityKey{}).(string)
+	return identity
+}
+
 // WithAuthContext runs fn in one transaction carrying the verified, transaction-local
 // identity of tokenHash. The context ends with the transaction, so pooled connections
 // cannot leak it. Any error, including a denied organization, rolls everything back.

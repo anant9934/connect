@@ -144,9 +144,12 @@ func BuildRouter(
 					// Waiting room admission flow
 					roomDetail.With(
 						appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+						appmw.OptionalAuth(authService),
 					).Post("/admission/request", roomHandler.RequestAdmission)
 
-					roomDetail.Get("/admission/status", roomHandler.GetAdmissionStatus)
+					roomDetail.With(
+						appmw.OptionalAuth(authService),
+					).Get("/admission/status", roomHandler.GetAdmissionStatus)
 
 					roomDetail.With(
 						appmw.RequireAuth(authService),
@@ -195,7 +198,9 @@ func BuildRouter(
 					).Post("/end", roomHandler.End)
 
 					// Participants list
-					roomDetail.Get("/participants", roomHandler.Participants)
+					roomDetail.With(
+						appmw.OptionalAuth(authService),
+					).Get("/participants", roomHandler.Participants)
 
 					// LiveKit token issue (Optional auth: authenticated user or room-scoped guest)
 					roomDetail.With(

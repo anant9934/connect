@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tathastu/connect/services/api/internal/database"
 	"github.com/tathastu/connect/services/api/internal/worker"
 )
 
@@ -90,6 +91,7 @@ type Repository interface {
 	CreateRoom(ctx context.Context, r *Room) error
 	GetRoomByCode(ctx context.Context, code string) (*Room, error)
 	GetRoomByID(ctx context.Context, id string) (*Room, error)
+	CanEnterRoom(ctx context.Context, roomID, identity string) (bool, error)
 	SetRoomLocked(ctx context.Context, roomID string, locked bool, lockedAt *time.Time) error
 	EndRoom(ctx context.Context, roomID string, endedAt time.Time) error
 	UpsertParticipant(ctx context.Context, p *Participant) error
@@ -123,6 +125,43 @@ func NewPgxRepository(pool *pgxpool.Pool) *PgxRepository {
 	return &PgxRepository{pool: pool}
 }
 
+// inTx runs fn in the caller's database context: a verified session, or a guest limited to
+// roomID. Without either it runs with no context, where RLS shows the runtime role nothing.
+func (r *PgxRepository) inTx(ctx context.Context, roomID string, fn func(pgx.Tx) error) error {
+	if tokenHash := database.SessionTokenHash(ctx); tokenHash != "" {
+		return database.WithAuthContext(ctx, r.pool, tokenHash, nil, func(tx pgx.Tx, _ *database.AuthContext) error {
+			return fn(tx)
+		})
+	}
+	if identity := database.GuestIdentity(ctx); identity != "" && roomID != "" {
+		return database.WithRoomGuestContext(ctx, r.pool, roomID, identity, fn)
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func isAccessDenied(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42501"
+}
+
+func (r *PgxRepository) exec(ctx context.Context, roomID, query string, args ...any) (pgconn.CommandTag, error) {
+	var tag pgconn.CommandTag
+	err := r.inTx(ctx, roomID, func(tx pgx.Tx) error {
+		var execErr error
+		tag, execErr = tx.Exec(ctx, query, args...)
+		return execErr
+	})
+	return tag, err
+}
+
 func (r *PgxRepository) CreateRoom(ctx context.Context, rm *Room) error {
 	if rm.ID == "" {
 		rm.ID = uuid.NewString()
@@ -138,22 +177,18 @@ func (r *PgxRepository) CreateRoom(ctx context.Context, rm *Room) error {
 	}
 
 	query := `
-		INSERT INTO rooms (id, public_code, host_user_id, status, is_locked, max_participants, created_at, started_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO rooms (id, public_code, host_user_id, status, is_locked, waiting_room_enabled, max_participants, created_at, started_at, workspace_type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'personal_commons')
 	`
-	_, err := r.pool.Exec(ctx, query, rm.ID, rm.PublicCode, rm.HostUserID, rm.Status, rm.IsLocked, rm.MaxParticipants, rm.CreatedAt, rm.StartedAt)
+	_, err := r.exec(ctx, "", query, rm.ID, rm.PublicCode, rm.HostUserID, rm.Status, rm.IsLocked, rm.WaitingRoomEnabled, rm.MaxParticipants, rm.CreatedAt, rm.StartedAt)
 	return err
 }
 
-func (r *PgxRepository) GetRoomByCode(ctx context.Context, code string) (*Room, error) {
-	query := `
-		SELECT id, public_code, host_user_id, status, is_locked, max_participants, created_at, started_at, ended_at, locked_at
-		FROM rooms
-		WHERE public_code = $1
-	`
-	row := r.pool.QueryRow(ctx, query, code)
+const roomColumns = `id, public_code, host_user_id, status, is_locked, waiting_room_enabled, max_participants, created_at, started_at, ended_at, locked_at`
+
+func scanRoom(row pgx.Row) (*Room, error) {
 	var rm Room
-	err := row.Scan(&rm.ID, &rm.PublicCode, &rm.HostUserID, &rm.Status, &rm.IsLocked, &rm.MaxParticipants, &rm.CreatedAt, &rm.StartedAt, &rm.EndedAt, &rm.LockedAt)
+	err := row.Scan(&rm.ID, &rm.PublicCode, &rm.HostUserID, &rm.Status, &rm.IsLocked, &rm.WaitingRoomEnabled, &rm.MaxParticipants, &rm.CreatedAt, &rm.StartedAt, &rm.EndedAt, &rm.LockedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrRoomNotFound
@@ -163,22 +198,25 @@ func (r *PgxRepository) GetRoomByCode(ctx context.Context, code string) (*Room, 
 	return &rm, nil
 }
 
+// GetRoomByCode uses a narrow function because a code must resolve before any membership exists.
+func (r *PgxRepository) GetRoomByCode(ctx context.Context, code string) (*Room, error) {
+	return scanRoom(r.pool.QueryRow(ctx, `SELECT `+roomColumns+` FROM connect_auth.room_by_code($1)`, code))
+}
+
 func (r *PgxRepository) GetRoomByID(ctx context.Context, id string) (*Room, error) {
-	query := `
-		SELECT id, public_code, host_user_id, status, is_locked, max_participants, created_at, started_at, ended_at, locked_at
-		FROM rooms
-		WHERE id = $1
-	`
-	row := r.pool.QueryRow(ctx, query, id)
-	var rm Room
-	err := row.Scan(&rm.ID, &rm.PublicCode, &rm.HostUserID, &rm.Status, &rm.IsLocked, &rm.MaxParticipants, &rm.CreatedAt, &rm.StartedAt, &rm.EndedAt, &rm.LockedAt)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrRoomNotFound
-		}
-		return nil, err
-	}
-	return &rm, nil
+	var rm *Room
+	err := r.inTx(ctx, id, func(tx pgx.Tx) error {
+		var qErr error
+		rm, qErr = scanRoom(tx.QueryRow(ctx, `SELECT `+roomColumns+` FROM rooms WHERE id = $1`, id))
+		return qErr
+	})
+	return rm, err
+}
+
+func (r *PgxRepository) CanEnterRoom(ctx context.Context, roomID, identity string) (bool, error) {
+	var allowed bool
+	err := r.pool.QueryRow(ctx, `SELECT connect_auth.can_enter_room($1::UUID, $2)`, roomID, identity).Scan(&allowed)
+	return allowed, err
 }
 
 func (r *PgxRepository) SetRoomLocked(ctx context.Context, roomID string, locked bool, lockedAt *time.Time) error {
@@ -187,75 +225,70 @@ func (r *PgxRepository) SetRoomLocked(ctx context.Context, roomID string, locked
 		SET is_locked = $1, locked_at = $2
 		WHERE id = $3
 	`
-	_, err := r.pool.Exec(ctx, query, locked, lockedAt, roomID)
+	_, err := r.exec(ctx, roomID, query, locked, lockedAt, roomID)
 	return err
 }
 
 func (r *PgxRepository) EndRoom(ctx context.Context, roomID string, endedAt time.Time) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin end room transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	var orgID, classSessionID *string
-	query := `
-		UPDATE rooms
-		SET status = 'ended', ended_at = $1
-		WHERE id = $2
-		RETURNING organization_id::text, class_session_id::text
-	`
-	err = tx.QueryRow(ctx, query, endedAt, roomID).Scan(&orgID, &classSessionID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrRoomNotFound
+	return r.inTx(ctx, roomID, func(tx pgx.Tx) error {
+		var orgID, classSessionID *string
+		query := `
+			UPDATE rooms
+			SET status = 'ended', ended_at = $1
+			WHERE id = $2
+			RETURNING organization_id::text, class_session_id::text
+		`
+		err := tx.QueryRow(ctx, query, endedAt, roomID).Scan(&orgID, &classSessionID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrRoomNotFound
+			}
+			return fmt.Errorf("failed to update room status: %w", err)
 		}
-		return fmt.Errorf("failed to update room status: %w", err)
-	}
 
-	var orgIDStr, classSessionIDStr string
-	if orgID != nil {
-		orgIDStr = *orgID
-	}
-	if classSessionID != nil {
-		classSessionIDStr = *classSessionID
-	}
+		var orgIDStr, classSessionIDStr string
+		if orgID != nil {
+			orgIDStr = *orgID
+		}
+		if classSessionID != nil {
+			classSessionIDStr = *classSessionID
+		}
 
-	// Transactional outbox 1: Room cleanup job
-	cleanupKey := fmt.Sprintf("room-cleanup-%s-%d", roomID, endedAt.Unix())
-	cleanupData, _ := json.Marshal(map[string]any{
-		"roomId":      roomID,
-		"tenantId":    orgIDStr,
-		"maxAgeHours": 24,
+		// Transactional outbox 1: Room cleanup job
+		cleanupKey := fmt.Sprintf("room-cleanup-%s-%d", roomID, endedAt.Unix())
+		cleanupData, _ := json.Marshal(map[string]any{
+			"roomId":      roomID,
+			"tenantId":    orgIDStr,
+			"maxAgeHours": 24,
+		})
+		cleanupPayload := worker.JobPayload{
+			Type:      worker.TypeRoomCleanup,
+			Data:      cleanupData,
+			CreatedAt: endedAt,
+		}
+		if err := worker.EnqueueJobWriteOnly(ctx, tx, worker.QueueDefault, cleanupKey, cleanupPayload); err != nil {
+			return fmt.Errorf("failed to enqueue room cleanup job: %w", err)
+		}
+
+		// Transactional outbox 2: Attendance reconcile job
+		reconcileKey := fmt.Sprintf("attendance-reconcile-%s-%d", roomID, endedAt.Unix())
+		reconcileData, _ := json.Marshal(map[string]any{
+			"roomId":         roomID,
+			"sessionId":      roomID,
+			"tenantId":       orgIDStr,
+			"classSessionId": classSessionIDStr,
+			"before":         endedAt.Format(time.RFC3339),
+		})
+		reconcilePayload := worker.JobPayload{
+			Type:      worker.TypeAttendanceReconcile,
+			Data:      reconcileData,
+			CreatedAt: endedAt,
+		}
+		if err := worker.EnqueueJobWriteOnly(ctx, tx, worker.QueueAttendanceCritical, reconcileKey, reconcilePayload); err != nil {
+			return fmt.Errorf("failed to enqueue attendance reconcile job: %w", err)
+		}
+		return nil
 	})
-	cleanupPayload := worker.JobPayload{
-		Type:      worker.TypeRoomCleanup,
-		Data:      cleanupData,
-		CreatedAt: endedAt,
-	}
-	if _, err := worker.EnqueueJob(ctx, tx, worker.QueueDefault, cleanupKey, cleanupPayload, nil); err != nil {
-		return fmt.Errorf("failed to enqueue room cleanup job: %w", err)
-	}
-
-	// Transactional outbox 2: Attendance reconcile job
-	reconcileKey := fmt.Sprintf("attendance-reconcile-%s-%d", roomID, endedAt.Unix())
-	reconcileData, _ := json.Marshal(map[string]any{
-		"roomId":         roomID,
-		"sessionId":      roomID,
-		"tenantId":       orgIDStr,
-		"classSessionId": classSessionIDStr,
-		"before":         endedAt.Format(time.RFC3339),
-	})
-	reconcilePayload := worker.JobPayload{
-		Type:      worker.TypeAttendanceReconcile,
-		Data:      reconcileData,
-		CreatedAt: endedAt,
-	}
-	if _, err := worker.EnqueueJob(ctx, tx, worker.QueueAttendanceCritical, reconcileKey, reconcilePayload, nil); err != nil {
-		return fmt.Errorf("failed to enqueue attendance reconcile job: %w", err)
-	}
-
-	return tx.Commit(ctx)
 }
 
 func (r *PgxRepository) UpsertParticipant(ctx context.Context, p *Participant) error {
@@ -268,76 +301,104 @@ func (r *PgxRepository) UpsertParticipant(ctx context.Context, p *Participant) e
 		p.TransitionState = "idle"
 	}
 
-	query := `
-		INSERT INTO room_participants (id, room_id, user_id, identity, display_name, role, is_guest, joined_at, left_at, fencing_token, transition_state, transition_op_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, $11)
-	`
-	_, err := r.pool.Exec(ctx, query, p.ID, p.RoomID, p.UserID, p.Identity, p.DisplayName, p.Role, p.IsGuest, p.JoinedAt, p.FencingToken, p.TransitionState, p.TransitionOpID)
+	var err error
+	if p.IsGuest {
+		_, err = r.pool.Exec(ctx, `SELECT connect_auth.guest_join_room($1::UUID, $2::UUID, $3, $4, $5)`, p.ID, p.RoomID, p.Identity, p.DisplayName, p.JoinedAt)
+	} else {
+		query := `
+			INSERT INTO room_participants (id, room_id, user_id, identity, display_name, role, is_guest, joined_at, left_at, fencing_token, transition_state, transition_op_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, $11)
+		`
+		_, err = r.exec(ctx, "", query, p.ID, p.RoomID, p.UserID, p.Identity, p.DisplayName, p.Role, p.IsGuest, p.JoinedAt, p.FencingToken, p.TransitionState, p.TransitionOpID)
+	}
+	if isAccessDenied(err) {
+		return ErrUnauthorizedRoomAction
+	}
 	return err
 }
 
-func (r *PgxRepository) GetParticipant(ctx context.Context, roomID, identity string) (*Participant, error) {
-	query := `
-		SELECT id, room_id, user_id, identity, display_name, role, is_guest, joined_at, left_at, fencing_token, transition_state, transition_op_id
-		FROM room_participants
-		WHERE room_id = $1 AND identity = $2 AND left_at IS NULL
-		ORDER BY joined_at DESC
-		LIMIT 1
-	`
-	row := r.pool.QueryRow(ctx, query, roomID, identity)
+const participantColumns = `id, room_id, user_id, identity, display_name, role, is_guest, joined_at, left_at, fencing_token, transition_state, transition_op_id`
+
+func scanParticipant(row pgx.Row) (*Participant, error) {
 	var p Participant
 	err := row.Scan(&p.ID, &p.RoomID, &p.UserID, &p.Identity, &p.DisplayName, &p.Role, &p.IsGuest, &p.JoinedAt, &p.LeftAt, &p.FencingToken, &p.TransitionState, &p.TransitionOpID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	return &p, nil
 }
 
+func (r *PgxRepository) GetParticipant(ctx context.Context, roomID, identity string) (*Participant, error) {
+	query := `
+		SELECT ` + participantColumns + `
+		FROM room_participants
+		WHERE room_id = $1 AND identity = $2 AND left_at IS NULL
+		ORDER BY joined_at DESC
+		LIMIT 1
+	`
+	var p *Participant
+	err := r.inTx(ctx, roomID, func(tx pgx.Tx) error {
+		var qErr error
+		p, qErr = scanParticipant(tx.QueryRow(ctx, query, roomID, identity))
+		return qErr
+	})
+	if errors.Is(err, pgx.ErrNoRows) || isAccessDenied(err) {
+		// A guest without room access has no participant record to read.
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
 func (r *PgxRepository) GetActiveParticipants(ctx context.Context, roomID string) ([]*Participant, error) {
 	query := `
-		SELECT id, room_id, user_id, identity, display_name, role, is_guest, joined_at, left_at, fencing_token, transition_state, transition_op_id
+		SELECT ` + participantColumns + `
 		FROM room_participants
 		WHERE room_id = $1 AND left_at IS NULL
 		ORDER BY joined_at ASC
 	`
-	rows, err := r.pool.Query(ctx, query, roomID)
+	var result []*Participant
+	err := r.inTx(ctx, roomID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, roomID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			p, err := scanParticipant(rows)
+			if err != nil {
+				return err
+			}
+			result = append(result, p)
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var result []*Participant
-	for rows.Next() {
-		var p Participant
-		if err := rows.Scan(&p.ID, &p.RoomID, &p.UserID, &p.Identity, &p.DisplayName, &p.Role, &p.IsGuest, &p.JoinedAt, &p.LeftAt, &p.FencingToken, &p.TransitionState, &p.TransitionOpID); err != nil {
-			return nil, err
-		}
-		result = append(result, &p)
-	}
-	return result, rows.Err()
+	return result, nil
 }
 
+// GetActiveParticipantCount enforces capacity for callers who cannot read the participants yet.
 func (r *PgxRepository) GetActiveParticipantCount(ctx context.Context, roomID string) (int, error) {
-	query := `
-		SELECT COUNT(*)
-		FROM room_participants
-		WHERE room_id = $1 AND left_at IS NULL
-	`
 	var count int
-	err := r.pool.QueryRow(ctx, query, roomID).Scan(&count)
+	err := r.pool.QueryRow(ctx, `SELECT connect_auth.room_active_count($1::UUID)`, roomID).Scan(&count)
 	return count, err
 }
 
 func (r *PgxRepository) MarkParticipantLeft(ctx context.Context, roomID, identity string, leftAt time.Time) error {
+	if strings.HasPrefix(identity, "guest:") {
+		_, err := r.pool.Exec(ctx, `SELECT connect_auth.guest_leave_room($1::UUID, $2, $3)`, roomID, identity, leftAt)
+		return err
+	}
 	query := `
 		UPDATE room_participants
 		SET left_at = $1
 		WHERE room_id = $2 AND identity = $3 AND left_at IS NULL
 	`
-	_, err := r.pool.Exec(ctx, query, leftAt, roomID, identity)
+	_, err := r.exec(ctx, roomID, query, leftAt, roomID, identity)
 	return err
 }
 
@@ -347,7 +408,7 @@ func (r *PgxRepository) UpdateParticipantRole(ctx context.Context, roomID, ident
 		SET role = $1
 		WHERE room_id = $2 AND identity = $3 AND left_at IS NULL
 	`
-	_, err := r.pool.Exec(ctx, query, role, roomID, identity)
+	_, err := r.exec(ctx, roomID, query, role, roomID, identity)
 	return err
 }
 
@@ -357,7 +418,7 @@ func (r *PgxRepository) UpdateParticipantRoleCAS(ctx context.Context, roomID, id
 		SET role = $1, transition_state = 'idle', transition_op_id = ''
 		WHERE room_id = $2 AND identity = $3 AND left_at IS NULL AND role = $4
 	`
-	cmdTag, err := r.pool.Exec(ctx, query, newRole, roomID, identity, expectedRole)
+	cmdTag, err := r.exec(ctx, roomID, query, newRole, roomID, identity, expectedRole)
 	if err != nil {
 		return err
 	}
@@ -380,7 +441,7 @@ func (r *PgxRepository) BeginParticipantRoleTransition(ctx context.Context, room
 		  AND role = $7
 		  AND fencing_token < $4
 	`
-	cmdTag, err := r.pool.Exec(ctx, query, targetRole, transitionState, opID, generation, roomID, identity, expectedRole)
+	cmdTag, err := r.exec(ctx, roomID, query, targetRole, transitionState, opID, generation, roomID, identity, expectedRole)
 	if err != nil {
 		return err
 	}
@@ -402,7 +463,7 @@ func (r *PgxRepository) CommitParticipantTransition(ctx context.Context, roomID,
 		  AND fencing_token <= $3
 		  AND (transition_op_id = $4 OR transition_state != 'idle')
 	`
-	_, err := r.pool.Exec(ctx, query, roomID, identity, generation, opID)
+	_, err := r.exec(ctx, roomID, query, roomID, identity, generation, opID)
 	return err
 }
 
@@ -416,7 +477,7 @@ func (r *PgxRepository) SetParticipantTransitionUnknown(ctx context.Context, roo
 		  AND fencing_token = $3
 		  AND transition_op_id = $4
 	`
-	_, err := r.pool.Exec(ctx, query, roomID, identity, generation, opID)
+	_, err := r.exec(ctx, roomID, query, roomID, identity, generation, opID)
 	return err
 }
 
@@ -432,7 +493,7 @@ func (r *PgxRepository) RollbackParticipantRole(ctx context.Context, roomID, ide
 		  AND fencing_token = $4
 		  AND transition_op_id = $5
 	`
-	cmdTag, err := r.pool.Exec(ctx, query, originalRole, roomID, identity, generation, opID)
+	cmdTag, err := r.exec(ctx, roomID, query, originalRole, roomID, identity, generation, opID)
 	if err != nil {
 		return err
 	}
@@ -466,20 +527,28 @@ func (r *PgxRepository) AcquireParticipantLock(ctx context.Context, roomID, iden
 		RETURNING generation;
 	`
 
+	// Release runs after the request may have finished, so it keeps the identity, not the request.
+	tokenHash := database.SessionTokenHash(ctx)
+
 	for {
 		now := time.Now().UTC()
 		expiresAt := now.Add(ttl)
 		leaseToken := uuid.NewString()
 
 		var gen int64
-		err := r.pool.QueryRow(ctx, query, lockKey, ownerID, leaseToken, roomID, identity, now, expiresAt).Scan(&gen)
+		err := r.inTx(ctx, roomID, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, query, lockKey, ownerID, leaseToken, roomID, identity, now, expiresAt).Scan(&gen)
+		})
 		if err == nil {
 			var releaseOnce sync.Once
 			release := func() {
 				releaseOnce.Do(func() {
 					relCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 					defer cancel()
-					tag, relErr := r.pool.Exec(relCtx,
+					if tokenHash != "" {
+						relCtx = database.WithSessionTokenHash(relCtx, tokenHash)
+					}
+					tag, relErr := r.exec(relCtx, roomID,
 						"UPDATE participant_locks SET expires_at = $4 WHERE lock_key = $1 AND lease_token = $2 AND generation = $3",
 						lockKey, leaseToken, gen, time.Now().UTC())
 					if relErr != nil {
@@ -535,56 +604,89 @@ func (r *PgxRepository) CreateAdmissionRequest(ctx context.Context, req *Admissi
 	if req.Status == "" {
 		req.Status = "pending"
 	}
-	query := `
-		INSERT INTO room_admissions (id, room_id, identity, display_name, status, requested_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`
-	_, err := r.pool.Exec(ctx, query, req.ID, req.RoomID, req.Identity, req.DisplayName, req.Status, req.RequestedAt)
+	var err error
+	if strings.HasPrefix(req.Identity, "guest:") {
+		_, err = r.pool.Exec(ctx, `SELECT connect_auth.guest_request_admission($1::UUID, $2::UUID, $3, $4, $5, $6)`,
+			req.ID, req.RoomID, req.Identity, req.DisplayName, req.Status, req.RequestedAt)
+	} else {
+		query := `
+			INSERT INTO room_admissions (id, room_id, identity, display_name, status, requested_at)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`
+		_, err = r.exec(ctx, "", query, req.ID, req.RoomID, req.Identity, req.DisplayName, req.Status, req.RequestedAt)
+	}
+	if isAccessDenied(err) {
+		return ErrUnauthorizedRoomAction
+	}
 	return err
 }
 
-func (r *PgxRepository) GetAdmissionRequest(ctx context.Context, roomID, identity string) (*AdmissionRequest, error) {
-	query := `
-		SELECT id, room_id, identity, display_name, status, requested_at, decided_at
-		FROM room_admissions
-		WHERE room_id = $1 AND identity = $2
-		ORDER BY requested_at DESC
-		LIMIT 1
-	`
-	row := r.pool.QueryRow(ctx, query, roomID, identity)
+func scanAdmission(row pgx.Row) (*AdmissionRequest, error) {
 	var ar AdmissionRequest
-	err := row.Scan(&ar.ID, &ar.RoomID, &ar.Identity, &ar.DisplayName, &ar.Status, &ar.RequestedAt, &ar.DecidedAt)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
+	if err := row.Scan(&ar.ID, &ar.RoomID, &ar.Identity, &ar.DisplayName, &ar.Status, &ar.RequestedAt, &ar.DecidedAt); err != nil {
 		return nil, err
 	}
 	return &ar, nil
 }
 
+const admissionColumns = `id, room_id, identity, display_name, status, requested_at, decided_at`
+
+func (r *PgxRepository) GetAdmissionRequest(ctx context.Context, roomID, identity string) (*AdmissionRequest, error) {
+	var ar *AdmissionRequest
+	var err error
+	if strings.HasPrefix(identity, "guest:") {
+		// A waiting guest has no room context yet.
+		ar, err = scanAdmission(r.pool.QueryRow(ctx, `SELECT `+admissionColumns+` FROM connect_auth.guest_admission($1::UUID, $2)`, roomID, identity))
+	} else {
+		query := `
+			SELECT ` + admissionColumns + `
+			FROM room_admissions
+			WHERE room_id = $1 AND identity = $2
+			ORDER BY requested_at DESC
+			LIMIT 1
+		`
+		err = r.inTx(ctx, "", func(tx pgx.Tx) error {
+			var qErr error
+			ar, qErr = scanAdmission(tx.QueryRow(ctx, query, roomID, identity))
+			return qErr
+		})
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return ar, nil
+}
+
 func (r *PgxRepository) GetPendingAdmissionRequests(ctx context.Context, roomID string) ([]*AdmissionRequest, error) {
 	query := `
-		SELECT id, room_id, identity, display_name, status, requested_at, decided_at
+		SELECT ` + admissionColumns + `
 		FROM room_admissions
 		WHERE room_id = $1 AND status = 'pending'
 		ORDER BY requested_at ASC
 	`
-	rows, err := r.pool.Query(ctx, query, roomID)
+	var result []*AdmissionRequest
+	err := r.inTx(ctx, roomID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, roomID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			ar, err := scanAdmission(rows)
+			if err != nil {
+				return err
+			}
+			result = append(result, ar)
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var result []*AdmissionRequest
-	for rows.Next() {
-		var ar AdmissionRequest
-		if err := rows.Scan(&ar.ID, &ar.RoomID, &ar.Identity, &ar.DisplayName, &ar.Status, &ar.RequestedAt, &ar.DecidedAt); err != nil {
-			return nil, err
-		}
-		result = append(result, &ar)
-	}
-	return result, rows.Err()
+	return result, nil
 }
 
 func (r *PgxRepository) UpdateAdmissionRequestStatus(ctx context.Context, roomID, requestID, status string, decidedAt time.Time) error {
@@ -593,7 +695,7 @@ func (r *PgxRepository) UpdateAdmissionRequestStatus(ctx context.Context, roomID
 		SET status = $1, decided_at = $2
 		WHERE id = $3 AND room_id = $4
 	`
-	_, err := r.pool.Exec(ctx, query, status, decidedAt, requestID, roomID)
+	_, err := r.exec(ctx, roomID, query, status, decidedAt, requestID, roomID)
 	return err
 }
 
@@ -603,64 +705,57 @@ func (r *PgxRepository) SetParticipantRemoved(ctx context.Context, roomID, ident
 		SET is_removed = true, left_at = $1
 		WHERE room_id = $2 AND identity = $3
 	`
-	_, err := r.pool.Exec(ctx, query, time.Now().UTC(), roomID, identity)
+	_, err := r.exec(ctx, roomID, query, time.Now().UTC(), roomID, identity)
 	return err
 }
 
+// IsParticipantRemoved uses a narrow function: a removed caller can no longer read the row.
 func (r *PgxRepository) IsParticipantRemoved(ctx context.Context, roomID, identity string) (bool, error) {
-	query := `
-		SELECT is_removed
-		FROM room_participants
-		WHERE room_id = $1 AND identity = $2
-		ORDER BY joined_at DESC
-		LIMIT 1
-	`
 	var isRemoved bool
-	err := r.pool.QueryRow(ctx, query, roomID, identity).Scan(&isRemoved)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
-		}
-		return false, err
-	}
-	return isRemoved, nil
+	err := r.pool.QueryRow(ctx, `SELECT connect_auth.participant_removed($1::UUID, $2)`, roomID, identity).Scan(&isRemoved)
+	return isRemoved, err
 }
 
 func (r *PgxRepository) GetMeetingHistory(ctx context.Context, userID string, limit, offset int) ([]*MeetingHistoryItem, int, error) {
-	countQuery := `SELECT COUNT(*) FROM rooms WHERE host_user_id = $1`
 	var total int
-	if err := r.pool.QueryRow(ctx, countQuery, userID).Scan(&total); err != nil {
-		return nil, 0, err
-	}
+	var items []*MeetingHistoryItem
+	err := r.inTx(ctx, "", func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM rooms WHERE host_user_id = $1`, userID).Scan(&total); err != nil {
+			return err
+		}
 
-	query := `
-		SELECT r.id, r.public_code, r.host_user_id, r.status, r.created_at, r.ended_at, r.is_locked,
-		       COALESCE(COUNT(p.id), 0) AS participant_count
-		FROM rooms r
-		LEFT JOIN room_participants p ON r.id = p.room_id
-		WHERE r.host_user_id = $1
-		GROUP BY r.id, r.public_code, r.host_user_id, r.status, r.created_at, r.ended_at, r.is_locked
-		ORDER BY r.created_at DESC
-		LIMIT $2 OFFSET $3
-	`
-	rows, err := r.pool.Query(ctx, query, userID, limit, offset)
+		query := `
+			SELECT r.id, r.public_code, r.host_user_id, r.status, r.created_at, r.ended_at, r.is_locked,
+			       COALESCE(COUNT(p.id), 0) AS participant_count
+			FROM rooms r
+			LEFT JOIN room_participants p ON r.id = p.room_id
+			WHERE r.host_user_id = $1
+			GROUP BY r.id, r.public_code, r.host_user_id, r.status, r.created_at, r.ended_at, r.is_locked
+			ORDER BY r.created_at DESC
+			LIMIT $2 OFFSET $3
+		`
+		rows, err := tx.Query(ctx, query, userID, limit, offset)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var item MeetingHistoryItem
+			if err := rows.Scan(&item.ID, &item.PublicCode, &item.HostUserID, &item.Status, &item.CreatedAt, &item.EndedAt, &item.IsLocked, &item.ParticipantCount); err != nil {
+				return err
+			}
+			if item.EndedAt != nil {
+				item.DurationSeconds = int64(item.EndedAt.Sub(item.CreatedAt).Seconds())
+			}
+			items = append(items, &item)
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
-
-	var items []*MeetingHistoryItem
-	for rows.Next() {
-		var item MeetingHistoryItem
-		if err := rows.Scan(&item.ID, &item.PublicCode, &item.HostUserID, &item.Status, &item.CreatedAt, &item.EndedAt, &item.IsLocked, &item.ParticipantCount); err != nil {
-			return nil, 0, err
-		}
-		if item.EndedAt != nil {
-			item.DurationSeconds = int64(item.EndedAt.Sub(item.CreatedAt).Seconds())
-		}
-		items = append(items, &item)
-	}
-	return items, total, rows.Err()
+	return items, total, nil
 }
 
 type memParticipantLock struct {
@@ -680,6 +775,11 @@ type MemoryRepository struct {
 	participants      map[string][]*Participant      // key: roomID
 	admissions        map[string][]*AdmissionRequest // key: roomID
 	removedIdentities map[string]map[string]bool     // key: roomID -> identity -> bool
+}
+
+// CanEnterRoom always allows: memory mode has no institutional rooms.
+func (m *MemoryRepository) CanEnterRoom(context.Context, string, string) (bool, error) {
+	return true, nil
 }
 
 // NewMemoryRepository constructs an in-memory repository instance.

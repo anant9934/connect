@@ -145,6 +145,18 @@ func (s *Service) GetRoom(ctx context.Context, code string) (*Room, error) {
 	return rm, nil
 }
 
+// checkEntry applies the institutional rule, failing closed if it cannot be evaluated.
+func (s *Service) checkEntry(ctx context.Context, roomID, identity string) error {
+	allowed, err := s.repo.CanEnterRoom(ctx, roomID, identity)
+	if err != nil {
+		return fmt.Errorf("failed to evaluate room entry: %w", err)
+	}
+	if !allowed {
+		return ErrUnauthorizedRoomAction
+	}
+	return nil
+}
+
 // JoinRoom admits an authenticated user or guest into the meeting room.
 func (s *Service) JoinRoom(ctx context.Context, code string, user *auth.User, guestDisplayName, clientIP, reqID string) (*JoinResult, error) {
 	return s.JoinRoomWithIdentity(ctx, code, user, "", guestDisplayName, clientIP, reqID)
@@ -184,6 +196,9 @@ func (s *Service) JoinRoomWithIdentity(ctx context.Context, code string, user *a
 	var isHost bool
 
 	if user != nil {
+		if err := s.checkEntry(ctx, rm.ID, "user:"+user.ID); err != nil {
+			return nil, err
+		}
 		isHost = s.policy.IsHost(user, rm)
 		role := "participant"
 		if isHost {
@@ -214,6 +229,9 @@ func (s *Service) JoinRoomWithIdentity(ctx context.Context, code string, user *a
 			identity = "guest:" + uuid.NewString()
 		}
 
+		if err := s.checkEntry(ctx, rm.ID, identity); err != nil {
+			return nil, err
+		}
 		if removed, _ := s.repo.IsParticipantRemoved(ctx, rm.ID, identity); removed {
 			return nil, ErrParticipantRemoved
 		}
@@ -415,6 +433,14 @@ func (s *Service) GetParticipants(ctx context.Context, code string) ([]*Particip
 	return s.repo.GetActiveParticipants(ctx, rm.ID)
 }
 
+// ListParticipantsFor returns the active participants to a caller who has access to the room.
+func (s *Service) ListParticipantsFor(ctx context.Context, code, callerIdentity string) ([]*Participant, error) {
+	if _, _, err := s.ValidateRoomAccess(ctx, code, callerIdentity); err != nil {
+		return nil, err
+	}
+	return s.GetParticipants(ctx, code)
+}
+
 // GenerateToken generates a short-lived signed LiveKit token with server-validated grants.
 func (s *Service) GenerateToken(ctx context.Context, code string, user *auth.User, guestIdentity, guestDisplayName string, clientIP, reqID string) (string, error) {
 	normCode := NormalizeCode(code)
@@ -447,6 +473,9 @@ func (s *Service) GenerateToken(ctx context.Context, code string, user *auth.Use
 		isHost = false
 	}
 
+	if err := s.checkEntry(ctx, rm.ID, identity); err != nil {
+		return "", err
+	}
 	if removed, _ := s.repo.IsParticipantRemoved(ctx, rm.ID, identity); removed {
 		return "", ErrParticipantRemoved
 	}
@@ -522,10 +551,13 @@ func (s *Service) RequestAdmission(ctx context.Context, code, identity, displayN
 		return nil, ErrInvalidDisplayName
 	}
 
-	if identity == "" || !strings.HasPrefix(identity, "guest:") {
+	if !strings.HasPrefix(identity, "guest:") && !strings.HasPrefix(identity, "user:") {
 		identity = "guest:" + uuid.NewString()
 	}
 
+	if err := s.checkEntry(ctx, rm.ID, identity); err != nil {
+		return nil, err
+	}
 	if removed, _ := s.repo.IsParticipantRemoved(ctx, rm.ID, identity); removed {
 		return nil, ErrParticipantRemoved
 	}
@@ -535,7 +567,10 @@ func (s *Service) RequestAdmission(ctx context.Context, code, identity, displayN
 		return existing, nil
 	}
 
-	guestToken, _ := GenerateGuestToken(rm.PublicCode, identity, 12*time.Hour)
+	var guestToken string
+	if strings.HasPrefix(identity, "guest:") {
+		guestToken, _ = GenerateGuestToken(rm.PublicCode, identity, 12*time.Hour)
+	}
 
 	req := &AdmissionRequest{
 		ID:          uuid.NewString(),
@@ -1115,6 +1150,9 @@ func (s *Service) ValidateRoomAccess(ctx context.Context, publicCode, callerIden
 	if callerIdentity == "" {
 		return "", false, ErrUnauthorizedRoomAction
 	}
+	if err := s.checkEntry(ctx, rm.ID, callerIdentity); err != nil {
+		return "", false, ErrUnauthorizedRoomAction
+	}
 
 	// Check if participant was explicitly removed by host
 	removed, err := s.repo.IsParticipantRemoved(ctx, rm.ID, callerIdentity)
@@ -1126,6 +1164,14 @@ func (s *Service) ValidateRoomAccess(ctx context.Context, publicCode, callerIden
 	if strings.HasPrefix(callerIdentity, "user:") {
 		if rm.HostUserID == callerIdentity || ("user:"+rm.HostUserID) == callerIdentity {
 			return rm.ID, true, nil
+		}
+	}
+
+	// Joining registers a participant before the host decides, so registration alone is not access.
+	if rm.WaitingRoomEnabled {
+		admission, err := s.repo.GetAdmissionRequest(ctx, rm.ID, callerIdentity)
+		if err != nil || admission == nil || admission.Status != "admitted" {
+			return "", false, ErrUnauthorizedRoomAction
 		}
 	}
 

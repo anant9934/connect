@@ -378,6 +378,7 @@ func EnqueueJobWriteOnly(ctx context.Context, tx pgx.Tx, queue, idempotencyKey s
 	_, err = tx.Exec(ctx, `
 		INSERT INTO background_jobs (queue, idempotency_key, payload, status, scheduled_at)
 		VALUES ($1, $2, $3::jsonb, $4, $5)
+		ON CONFLICT (idempotency_key) DO NOTHING
 	`, queue, idempotencyKey, payloadBytes, StatusPending, time.Now())
 	return err
 }
