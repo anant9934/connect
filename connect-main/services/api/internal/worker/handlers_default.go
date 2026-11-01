@@ -3,10 +3,12 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tathastu/connect/services/api/internal/attendance"
 )
@@ -256,71 +258,12 @@ func NewAttendanceReconcileHandler(pool *pgxpool.Pool, logger *slog.Logger) Hand
 					sessionEnd = *schedEnd
 				}
 
-				sessionDurationSeconds := int(sessionEnd.Sub(sessionStart).Seconds())
-				if sessionDurationSeconds <= 0 {
-					sessionDurationSeconds = 3600 // 1 hour fallback
+				if !sessionEnd.After(sessionStart) {
+					return MarkPermanent(fmt.Errorf("class session %s has no positive duration", classSessionID))
 				}
 
-				// Fetch all participants with user_id who joined this room
-				pRows, pErr := pool.Query(ctx, `
-					SELECT user_id::text, joined_at, left_at
-					FROM room_participants
-					WHERE room_id = $1 AND user_id IS NOT NULL
-					ORDER BY joined_at ASC
-				`, targetRoomID)
-
-				if pErr == nil {
-					userIntervals := make(map[string][]attendance.Interval)
-					for pRows.Next() {
-						var uid string
-						var jAt, lAt time.Time
-						if err := pRows.Scan(&uid, &jAt, &lAt); err == nil {
-							if lAt.IsZero() {
-								lAt = cutoff
-							}
-							userIntervals[uid] = append(userIntervals[uid], attendance.Interval{
-								Start: jAt,
-								End:   lAt,
-							})
-						}
-					}
-					pRows.Close()
-
-					// Compute attendance record for each student
-					for uid, ivs := range userIntervals {
-						netSeconds := attendance.ReconcileIntervalUnion(ivs, sessionStart, sessionEnd)
-						status := attendance.CalculateAttendanceStatus(netSeconds, sessionDurationSeconds, 0.75, 0.40)
-
-						// Upsert into attendance_records without overwriting faculty overrules
-						upsertQuery := `
-							INSERT INTO attendance_records (
-								organization_id, batch_id, class_session_id, student_user_id,
-								total_connected_seconds, attendance_status, is_overruled,
-								evaluated_at, updated_at
-							) VALUES (
-								$1, $2, $3, $4,
-								$5, $6, false,
-								NOW(), NOW()
-							)
-							ON CONFLICT (organization_id, class_session_id, student_user_id)
-							DO UPDATE SET
-								total_connected_seconds = EXCLUDED.total_connected_seconds,
-								attendance_status = EXCLUDED.attendance_status,
-								evaluated_at = EXCLUDED.evaluated_at,
-								updated_at = EXCLUDED.updated_at
-							WHERE NOT attendance_records.is_overruled;
-						`
-						_, upErr := pool.Exec(ctx, upsertQuery,
-							orgIDStr, batchIDStr, classSessionID, uid,
-							netSeconds, status,
-						)
-						if upErr != nil {
-							logger.Warn("attendance_record_upsert_failed",
-								slog.String("student_user_id", uid),
-								slog.String("error", upErr.Error()),
-							)
-						}
-					}
+				if err := reconcileClassSession(ctx, pool, targetRoomID, classSessionID, orgIDStr, batchIDStr, sessionStart, sessionEnd); err != nil {
+					return fmt.Errorf("failed to reconcile class session %s: %w", classSessionID, err)
 				}
 			}
 		}
@@ -333,6 +276,122 @@ func NewAttendanceReconcileHandler(pool *pgxpool.Pool, logger *slog.Logger) Hand
 		)
 		return nil
 	}
+}
+
+// reconcileClassSession evaluates every enrolled student atomically, so a failure
+// retries the whole session and faculty overrules are never overwritten.
+func reconcileClassSession(ctx context.Context, pool *pgxpool.Pool, roomID, classSessionID, orgID, batchID string, sessionStart, sessionEnd time.Time) error {
+	policy, err := loadAttendancePolicy(ctx, pool, orgID)
+	if err != nil {
+		return err
+	}
+	intervals, err := loadConnectionIntervals(ctx, pool, roomID, sessionEnd)
+	if err != nil {
+		return err
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT student_user_id::text
+		FROM course_enrollments
+		WHERE organization_id = $1 AND batch_id = $2 AND $3::timestamptz <@ valid_during
+	`, orgID, batchID, sessionStart)
+	if err != nil {
+		return err
+	}
+	enrolled, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+
+	var policyVersion *int
+	if policy.Version > 0 {
+		policyVersion = &policy.Version
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	for _, r := range attendance.EvaluateEnrollment(enrolled, intervals, policy, sessionStart, sessionEnd) {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO attendance_records (
+				organization_id, batch_id, class_session_id, student_user_id,
+				total_connected_seconds, attendance_status, is_overruled, policy_version,
+				evaluated_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, false, $7, NOW(), NOW())
+			ON CONFLICT (organization_id, class_session_id, student_user_id)
+			DO UPDATE SET
+				total_connected_seconds = EXCLUDED.total_connected_seconds,
+				attendance_status = EXCLUDED.attendance_status,
+				policy_version = EXCLUDED.policy_version,
+				evaluated_at = EXCLUDED.evaluated_at,
+				updated_at = EXCLUDED.updated_at
+			WHERE NOT attendance_records.is_overruled
+		`, orgID, batchID, classSessionID, r.StudentUserID, r.ConnectedSeconds, r.Status, policyVersion); err != nil {
+			return fmt.Errorf("student %s: %w", r.StudentUserID, err)
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// loadAttendancePolicy returns the organization's latest policy version or the platform default.
+func loadAttendancePolicy(ctx context.Context, pool *pgxpool.Pool, orgID string) (attendance.Policy, error) {
+	var p attendance.Policy
+	err := pool.QueryRow(ctx, `
+		SELECT version, min_present_ratio::float8, min_partial_ratio::float8, late_grace_seconds
+		FROM attendance_policies
+		WHERE organization_id = $1
+		ORDER BY version DESC
+		LIMIT 1
+	`, orgID).Scan(&p.Version, &p.MinPresentRatio, &p.MinPartialRatio, &p.LateGraceSeconds)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return attendance.PlatformDefaultPolicy, nil
+	}
+	return p, err
+}
+
+// loadConnectionIntervals prefers webhook-sourced sessions and falls back to API-recorded
+// participants for rooms with no webhook data. Open sessions are clipped to the session end.
+func loadConnectionIntervals(ctx context.Context, pool *pgxpool.Pool, roomID string, sessionEnd time.Time) (map[string][]attendance.Interval, error) {
+	collect := func(query string) (map[string][]attendance.Interval, error) {
+		rows, err := pool.Query(ctx, query, roomID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		intervals := make(map[string][]attendance.Interval)
+		for rows.Next() {
+			var uid string
+			var joinedAt time.Time
+			var leftAt *time.Time
+			if err := rows.Scan(&uid, &joinedAt, &leftAt); err != nil {
+				return nil, err
+			}
+			end := sessionEnd
+			if leftAt != nil {
+				end = *leftAt
+			}
+			intervals[uid] = append(intervals[uid], attendance.Interval{Start: joinedAt, End: end})
+		}
+		return intervals, rows.Err()
+	}
+
+	intervals, err := collect(`
+		SELECT user_id::text, joined_at, left_at
+		FROM participant_media_sessions
+		WHERE room_id = $1 AND user_id IS NOT NULL
+	`)
+	if err != nil || len(intervals) > 0 {
+		return intervals, err
+	}
+	return collect(`
+		SELECT user_id::text, joined_at, left_at
+		FROM room_participants
+		WHERE room_id = $1 AND user_id IS NOT NULL
+	`)
 }
 
 // NewFilePurgeHandler returns a handler for TypeFilePurge that purges storage objects.
