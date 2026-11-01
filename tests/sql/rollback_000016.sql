@@ -1,4 +1,8 @@
 -- Reverses migration 000016 on a disposable database during verification.
+ALTER TABLE migration_checkpoints NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE migration_checkpoints DISABLE ROW LEVEL SECURITY;
+ALTER TABLE collaboration_nodes NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE collaboration_nodes DISABLE ROW LEVEL SECURITY;
 DROP FUNCTION IF EXISTS connect_auth.enqueue_job(TEXT, TEXT, JSONB);
 GRANT UPDATE, DELETE ON security_audit_events TO connect_app, connect_worker;
 DROP POLICY IF EXISTS rls_audit_events_insert ON security_audit_events;

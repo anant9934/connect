@@ -101,3 +101,9 @@ $$;
 
 REVOKE ALL ON FUNCTION connect_auth.enqueue_job(TEXT, TEXT, JSONB) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION connect_auth.enqueue_job(TEXT, TEXT, JSONB) TO connect_app;
+
+-- Not used by the API or worker, so no policy: closed to the runtime roles.
+ALTER TABLE collaboration_nodes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE collaboration_nodes FORCE ROW LEVEL SECURITY;
+ALTER TABLE migration_checkpoints ENABLE ROW LEVEL SECURITY;
+ALTER TABLE migration_checkpoints FORCE ROW LEVEL SECURITY;
