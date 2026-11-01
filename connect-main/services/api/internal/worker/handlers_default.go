@@ -132,7 +132,7 @@ func NewRoomCleanupHandler(pool *pgxpool.Pool, logger *slog.Logger) HandlerFunc 
 			UPDATE rooms
 			SET status = 'ended',
 			    ended_at = COALESCE(ended_at, clock_timestamp())
-			WHERE status != 'ended'
+			WHERE status IN ('active', 'created')
 			  AND created_at < clock_timestamp() - ($1 || ' hours')::interval
 			RETURNING id;
 		`

@@ -32,6 +32,11 @@ type Room struct {
 	StartedAt          time.Time
 	EndedAt            *time.Time
 	LockedAt           *time.Time
+	Title              string
+	ScheduledStart     *time.Time
+	ScheduledEnd       *time.Time
+	TimeZone           string
+	PasscodeHash       string // Never serialized to clients
 }
 
 // Participant represents a connected user or guest in a room.
@@ -113,6 +118,10 @@ type Repository interface {
 	SetParticipantRemoved(ctx context.Context, roomID, identity string) error
 	IsParticipantRemoved(ctx context.Context, roomID, identity string) (bool, error)
 	GetMeetingHistory(ctx context.Context, userID string, limit, offset int) ([]*MeetingHistoryItem, int, error)
+	SetRoomStatus(ctx context.Context, roomID, status string) error
+	UpdateRoomSchedule(ctx context.Context, roomID, title string, start, end time.Time, timeZone string) error
+	GetUpcomingRooms(ctx context.Context, hostUserID string, limit int) ([]*Room, error)
+	HasScheduleConflict(ctx context.Context, hostUserID, excludeRoomID string, start, end time.Time) (bool, error)
 }
 
 // PgxRepository implements room.Repository via PostgreSQL pool.
@@ -177,18 +186,22 @@ func (r *PgxRepository) CreateRoom(ctx context.Context, rm *Room) error {
 	}
 
 	query := `
-		INSERT INTO rooms (id, public_code, host_user_id, status, is_locked, waiting_room_enabled, max_participants, created_at, started_at, workspace_type)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'personal_commons')
+		INSERT INTO rooms (id, public_code, host_user_id, status, is_locked, waiting_room_enabled, max_participants, created_at, started_at, workspace_type,
+		                   title, scheduled_start, scheduled_end, time_zone, passcode_hash)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'personal_commons', NULLIF($10, ''), $11, $12, NULLIF($13, ''), NULLIF($14, ''))
 	`
-	_, err := r.exec(ctx, "", query, rm.ID, rm.PublicCode, rm.HostUserID, rm.Status, rm.IsLocked, rm.WaitingRoomEnabled, rm.MaxParticipants, rm.CreatedAt, rm.StartedAt)
+	_, err := r.exec(ctx, "", query, rm.ID, rm.PublicCode, rm.HostUserID, rm.Status, rm.IsLocked, rm.WaitingRoomEnabled, rm.MaxParticipants, rm.CreatedAt, rm.StartedAt,
+		rm.Title, rm.ScheduledStart, rm.ScheduledEnd, rm.TimeZone, rm.PasscodeHash)
 	return err
 }
 
-const roomColumns = `id, public_code, host_user_id, status, is_locked, waiting_room_enabled, max_participants, created_at, started_at, ended_at, locked_at`
+const roomColumns = `id, public_code, host_user_id, status, is_locked, waiting_room_enabled, max_participants, created_at, started_at, ended_at, locked_at,
+	COALESCE(title, ''), scheduled_start, scheduled_end, COALESCE(time_zone, ''), COALESCE(passcode_hash, '')`
 
 func scanRoom(row pgx.Row) (*Room, error) {
 	var rm Room
-	err := row.Scan(&rm.ID, &rm.PublicCode, &rm.HostUserID, &rm.Status, &rm.IsLocked, &rm.WaitingRoomEnabled, &rm.MaxParticipants, &rm.CreatedAt, &rm.StartedAt, &rm.EndedAt, &rm.LockedAt)
+	err := row.Scan(&rm.ID, &rm.PublicCode, &rm.HostUserID, &rm.Status, &rm.IsLocked, &rm.WaitingRoomEnabled, &rm.MaxParticipants, &rm.CreatedAt, &rm.StartedAt, &rm.EndedAt, &rm.LockedAt,
+		&rm.Title, &rm.ScheduledStart, &rm.ScheduledEnd, &rm.TimeZone, &rm.PasscodeHash)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrRoomNotFound
@@ -211,6 +224,63 @@ func (r *PgxRepository) GetRoomByID(ctx context.Context, id string) (*Room, erro
 		return qErr
 	})
 	return rm, err
+}
+
+// SetRoomStatus moves a room between scheduled, active and cancelled. Hosts only, through RLS.
+func (r *PgxRepository) SetRoomStatus(ctx context.Context, roomID, status string) error {
+	_, err := r.exec(ctx, roomID, `UPDATE rooms SET status = $1, started_at = CASE WHEN $1 = 'active' THEN clock_timestamp() ELSE started_at END WHERE id = $2`, status, roomID)
+	return err
+}
+
+func (r *PgxRepository) UpdateRoomSchedule(ctx context.Context, roomID, title string, start, end time.Time, timeZone string) error {
+	_, err := r.exec(ctx, roomID, `
+		UPDATE rooms SET title = NULLIF($1, ''), scheduled_start = $2, scheduled_end = $3, time_zone = $4
+		WHERE id = $5 AND status = 'scheduled'
+	`, title, start, end, timeZone, roomID)
+	return err
+}
+
+func (r *PgxRepository) GetUpcomingRooms(ctx context.Context, hostUserID string, limit int) ([]*Room, error) {
+	var result []*Room
+	err := r.inTx(ctx, "", func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT `+roomColumns+` FROM rooms
+			WHERE host_user_id = $1 AND status = 'scheduled'
+			ORDER BY scheduled_start ASC
+			LIMIT $2
+		`, hostUserID, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			rm, err := scanRoom(rows)
+			if err != nil {
+				return err
+			}
+			result = append(result, rm)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (r *PgxRepository) HasScheduleConflict(ctx context.Context, hostUserID, excludeRoomID string, start, end time.Time) (bool, error) {
+	var conflict bool
+	err := r.inTx(ctx, "", func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM rooms
+				WHERE host_user_id = $1 AND status = 'scheduled'
+				  AND id::text <> $2
+				  AND scheduled_start < $4 AND scheduled_end > $3
+			)
+		`, hostUserID, excludeRoomID, start, end).Scan(&conflict)
+	})
+	return conflict, err
 }
 
 func (r *PgxRepository) CanEnterRoom(ctx context.Context, roomID, identity string) (bool, error) {
@@ -775,6 +845,57 @@ type MemoryRepository struct {
 	participants      map[string][]*Participant      // key: roomID
 	admissions        map[string][]*AdmissionRequest // key: roomID
 	removedIdentities map[string]map[string]bool     // key: roomID -> identity -> bool
+}
+
+func (m *MemoryRepository) SetRoomStatus(_ context.Context, roomID, status string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rm, ok := m.roomsByID[roomID]
+	if !ok {
+		return ErrRoomNotFound
+	}
+	rm.Status = status
+	return nil
+}
+
+func (m *MemoryRepository) UpdateRoomSchedule(_ context.Context, roomID, title string, start, end time.Time, timeZone string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rm, ok := m.roomsByID[roomID]
+	if !ok {
+		return ErrRoomNotFound
+	}
+	rm.Title, rm.ScheduledStart, rm.ScheduledEnd, rm.TimeZone = title, &start, &end, timeZone
+	return nil
+}
+
+func (m *MemoryRepository) GetUpcomingRooms(_ context.Context, hostUserID string, limit int) ([]*Room, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*Room
+	for _, rm := range m.roomsByID {
+		if rm.HostUserID == hostUserID && rm.Status == "scheduled" {
+			copied := *rm
+			result = append(result, &copied)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ScheduledStart.Before(*result[j].ScheduledStart) })
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+func (m *MemoryRepository) HasScheduleConflict(_ context.Context, hostUserID, excludeRoomID string, start, end time.Time) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, rm := range m.roomsByID {
+		if rm.HostUserID == hostUserID && rm.Status == "scheduled" && rm.ID != excludeRoomID &&
+			rm.ScheduledStart.Before(end) && rm.ScheduledEnd.After(start) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // CanEnterRoom always allows: memory mode has no institutional rooms.

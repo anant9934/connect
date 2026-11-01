@@ -67,8 +67,17 @@ func (s *Service) CreateRoom(ctx context.Context, hostUser *auth.User, maxPartic
 
 // CreateRoomWithOptions provisions a new secure room with custom options (such as waiting room).
 func (s *Service) CreateRoomWithOptions(ctx context.Context, hostUser *auth.User, maxParticipants int, waitingRoomEnabled bool, clientIP, reqID string) (*Room, error) {
+	return s.CreateRoomWithPasscode(ctx, hostUser, maxParticipants, waitingRoomEnabled, "", clientIP, reqID)
+}
+
+// CreateRoomWithPasscode provisions an instant room, optionally protected by a passcode.
+func (s *Service) CreateRoomWithPasscode(ctx context.Context, hostUser *auth.User, maxParticipants int, waitingRoomEnabled bool, passcode, clientIP, reqID string) (*Room, error) {
 	if hostUser == nil {
 		return nil, auth.ErrInvalidCredentials
+	}
+	passcodeHash, err := hashPasscode(passcode)
+	if err != nil {
+		return nil, err
 	}
 
 	if maxParticipants <= 0 || maxParticipants > 100 {
@@ -101,6 +110,7 @@ func (s *Service) CreateRoomWithOptions(ctx context.Context, hostUser *auth.User
 		IsLocked:           false,
 		WaitingRoomEnabled: waitingRoomEnabled,
 		MaxParticipants:    maxParticipants,
+		PasscodeHash:       passcodeHash,
 	}
 
 	if err := s.repo.CreateRoom(ctx, room); err != nil {
@@ -132,6 +142,165 @@ func (s *Service) CreateRoomWithOptions(ctx context.Context, hostUser *auth.User
 	return room, nil
 }
 
+// ScheduleParams describes a meeting booked for later. Instants are stored in UTC;
+// the IANA time zone is kept so clients can show the host's local time.
+type ScheduleParams struct {
+	Title              string
+	StartsAt           time.Time
+	EndsAt             time.Time
+	TimeZone           string
+	Passcode           string
+	WaitingRoomEnabled bool
+	MaxParticipants    int
+}
+
+const (
+	maxMeetingLength = 24 * time.Hour
+	maxTitleLength   = 200
+	minPasscode      = 4
+	maxPasscode      = 32
+)
+
+func validateSchedule(title string, start, end time.Time, timeZone string) error {
+	if strings.TrimSpace(title) == "" || len(title) > maxTitleLength || controlCharRegex.MatchString(title) {
+		return fmt.Errorf("%w: a title of up to %d characters is required", ErrInvalidSchedule, maxTitleLength)
+	}
+	if !start.After(time.Now()) {
+		return fmt.Errorf("%w: the start time must be in the future", ErrInvalidSchedule)
+	}
+	if !end.After(start) || end.Sub(start) > maxMeetingLength {
+		return fmt.Errorf("%w: the meeting must end after it starts and last at most 24 hours", ErrInvalidSchedule)
+	}
+	if _, err := time.LoadLocation(timeZone); err != nil || timeZone == "" {
+		return fmt.Errorf("%w: unknown time zone", ErrInvalidSchedule)
+	}
+	return nil
+}
+
+func hashPasscode(passcode string) (string, error) {
+	if passcode == "" {
+		return "", nil
+	}
+	if len(passcode) < minPasscode || len(passcode) > maxPasscode {
+		return "", fmt.Errorf("%w: a passcode must have %d to %d characters", ErrInvalidSchedule, minPasscode, maxPasscode)
+	}
+	return auth.HashPassword(passcode)
+}
+
+// ScheduleRoom books a meeting for later. It stays closed to others until the host starts it.
+func (s *Service) ScheduleRoom(ctx context.Context, host *auth.User, params ScheduleParams, clientIP, reqID string) (*Room, error) {
+	if host == nil {
+		return nil, auth.ErrInvalidCredentials
+	}
+	params.Title = strings.TrimSpace(params.Title)
+	if err := validateSchedule(params.Title, params.StartsAt, params.EndsAt, params.TimeZone); err != nil {
+		return nil, err
+	}
+	passcodeHash, err := hashPasscode(params.Passcode)
+	if err != nil {
+		return nil, err
+	}
+	conflict, err := s.repo.HasScheduleConflict(ctx, host.ID, "", params.StartsAt, params.EndsAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check schedule conflicts: %w", err)
+	}
+	if conflict {
+		return nil, ErrScheduleConflict
+	}
+	code, err := GeneratePublicCode()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate public room code: %w", err)
+	}
+	maxParticipants := params.MaxParticipants
+	if maxParticipants <= 0 || maxParticipants > 100 {
+		maxParticipants = 50
+	}
+	start, end := params.StartsAt.UTC(), params.EndsAt.UTC()
+	rm := &Room{
+		PublicCode:         code,
+		HostUserID:         host.ID,
+		Status:             "scheduled",
+		WaitingRoomEnabled: params.WaitingRoomEnabled,
+		MaxParticipants:    maxParticipants,
+		Title:              params.Title,
+		ScheduledStart:     &start,
+		ScheduledEnd:       &end,
+		TimeZone:           params.TimeZone,
+		PasscodeHash:       passcodeHash,
+	}
+	if err := s.repo.CreateRoom(ctx, rm); err != nil {
+		return nil, fmt.Errorf("failed to persist scheduled room: %w", err)
+	}
+	if s.auditService != nil {
+		s.auditService.Record(ctx, audit.AuditParams{EventType: "room.scheduled", Severity: "INFO", ActorID: host.ID, RoomID: rm.ID, ClientIP: clientIP, RequestID: reqID})
+	}
+	return rm, nil
+}
+
+// RescheduleRoom changes a meeting that has not started. The host only.
+func (s *Service) RescheduleRoom(ctx context.Context, code string, user *auth.User, title string, start, end time.Time, timeZone, clientIP, reqID string) (*Room, error) {
+	rm, err := s.repo.GetRoomByCode(ctx, NormalizeCode(code))
+	if err != nil {
+		return nil, ErrRoomNotFound
+	}
+	if !s.policy.IsHost(user, rm) {
+		return nil, ErrUnauthorizedRoomAction
+	}
+	if rm.Status != "scheduled" {
+		return nil, fmt.Errorf("%w: only a meeting that has not started can be changed", ErrInvalidSchedule)
+	}
+	title = strings.TrimSpace(title)
+	if err := validateSchedule(title, start, end, timeZone); err != nil {
+		return nil, err
+	}
+	conflict, err := s.repo.HasScheduleConflict(ctx, user.ID, rm.ID, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check schedule conflicts: %w", err)
+	}
+	if conflict {
+		return nil, ErrScheduleConflict
+	}
+	if err := s.repo.UpdateRoomSchedule(ctx, rm.ID, title, start.UTC(), end.UTC(), timeZone); err != nil {
+		return nil, err
+	}
+	if s.auditService != nil {
+		s.auditService.Record(ctx, audit.AuditParams{EventType: "room.rescheduled", Severity: "INFO", ActorID: user.ID, RoomID: rm.ID, ClientIP: clientIP, RequestID: reqID})
+	}
+	return s.repo.GetRoomByCode(ctx, rm.PublicCode)
+}
+
+// CancelRoom cancels a meeting that has not started. The host only.
+func (s *Service) CancelRoom(ctx context.Context, code string, user *auth.User, clientIP, reqID string) error {
+	rm, err := s.repo.GetRoomByCode(ctx, NormalizeCode(code))
+	if err != nil {
+		return ErrRoomNotFound
+	}
+	if !s.policy.IsHost(user, rm) {
+		return ErrUnauthorizedRoomAction
+	}
+	if rm.Status != "scheduled" {
+		return fmt.Errorf("%w: only a meeting that has not started can be cancelled", ErrInvalidSchedule)
+	}
+	if err := s.repo.SetRoomStatus(ctx, rm.ID, "cancelled"); err != nil {
+		return err
+	}
+	if s.auditService != nil {
+		s.auditService.Record(ctx, audit.AuditParams{EventType: "room.cancelled", Severity: "INFO", ActorID: user.ID, RoomID: rm.ID, ClientIP: clientIP, RequestID: reqID})
+	}
+	return nil
+}
+
+// GetUpcomingRooms lists the meetings the user has scheduled.
+func (s *Service) GetUpcomingRooms(ctx context.Context, user *auth.User, limit int) ([]*Room, error) {
+	if user == nil {
+		return nil, ErrUnauthorizedRoomAction
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	return s.repo.GetUpcomingRooms(ctx, user.ID, limit)
+}
+
 // GetRoom retrieves a room by its normalized public code.
 func (s *Service) GetRoom(ctx context.Context, code string) (*Room, error) {
 	normCode := NormalizeCode(code)
@@ -141,6 +310,9 @@ func (s *Service) GetRoom(ctx context.Context, code string) (*Room, error) {
 	}
 	if rm.Status == "ended" {
 		return nil, ErrRoomEnded
+	}
+	if rm.Status == "cancelled" {
+		return nil, ErrRoomCancelled
 	}
 	return rm, nil
 }
@@ -164,6 +336,32 @@ func (s *Service) JoinRoom(ctx context.Context, code string, user *auth.User, gu
 
 // JoinRoomWithIdentity admits an authenticated user or guest with an optional pre-established identity.
 func (s *Service) JoinRoomWithIdentity(ctx context.Context, code string, user *auth.User, guestIdentity, guestDisplayName, clientIP, reqID string) (*JoinResult, error) {
+	return s.JoinRoomWithPasscode(ctx, code, user, guestIdentity, guestDisplayName, "", clientIP, reqID)
+}
+
+// checkMeetingOpen applies scheduling and the passcode to a caller who is not the host.
+func checkMeetingOpen(rm *Room, passcode string) error {
+	if rm.Status == "cancelled" {
+		return ErrRoomCancelled
+	}
+	if rm.Status == "scheduled" {
+		return ErrMeetingNotStarted
+	}
+	if rm.PasscodeHash == "" {
+		return nil
+	}
+	if passcode == "" {
+		return ErrPasscodeRequired
+	}
+	if ok, err := auth.VerifyPassword(passcode, rm.PasscodeHash); err != nil || !ok {
+		return ErrInvalidPasscode
+	}
+	return nil
+}
+
+// JoinRoomWithPasscode admits a caller who supplied the passcode, if the room has one.
+// The host needs no passcode, and joining is what starts their scheduled meeting.
+func (s *Service) JoinRoomWithPasscode(ctx context.Context, code string, user *auth.User, guestIdentity, guestDisplayName, passcode, clientIP, reqID string) (*JoinResult, error) {
 	normCode := NormalizeCode(code)
 	rm, err := s.repo.GetRoomByCode(ctx, normCode)
 	if err != nil {
@@ -176,6 +374,25 @@ func (s *Service) JoinRoomWithIdentity(ctx context.Context, code string, user *a
 			})
 		}
 		return nil, ErrRoomNotFound
+	}
+
+	if s.policy.IsHost(user, rm) {
+		if rm.Status == "cancelled" {
+			return nil, ErrRoomCancelled
+		}
+		if rm.Status == "scheduled" {
+			if err := s.repo.SetRoomStatus(ctx, rm.ID, "active"); err != nil {
+				return nil, fmt.Errorf("failed to start scheduled meeting: %w", err)
+			}
+			rm.Status = "active"
+		}
+	} else if rm.Status != "ended" {
+		if err := checkMeetingOpen(rm, passcode); err != nil {
+			if s.auditService != nil && errors.Is(err, ErrInvalidPasscode) {
+				s.auditService.Record(ctx, audit.AuditParams{EventType: audit.EventRoomJoinDenied, Severity: "WARN", RoomID: rm.ID, ClientIP: clientIP, RequestID: reqID})
+			}
+			return nil, err
+		}
 	}
 
 	activeCount, _ := s.repo.GetActiveParticipantCount(ctx, rm.ID)
@@ -451,6 +668,12 @@ func (s *Service) GenerateToken(ctx context.Context, code string, user *auth.Use
 	if rm.Status == "ended" {
 		return "", ErrRoomEnded
 	}
+	if rm.Status == "cancelled" {
+		return "", ErrRoomCancelled
+	}
+	if rm.Status == "scheduled" {
+		return "", ErrMeetingNotStarted
+	}
 
 	var identity string
 	var displayName string
@@ -503,6 +726,10 @@ func (s *Service) GenerateToken(ctx context.Context, code string, user *auth.Use
 			role = p.Role
 		} else {
 			role = livekit.RoleParticipant
+		}
+		// Only /join checks the passcode, so a media grant requires having been through it.
+		if rm.PasscodeHash != "" && (err != nil || p == nil) {
+			return "", ErrPasscodeRequired
 		}
 	}
 

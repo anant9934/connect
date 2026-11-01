@@ -125,9 +125,24 @@ func BuildRouter(
 					appmw.RequireAuth(authService),
 				).Get("/history", roomHandler.History)
 
+				roomsRouter.With(
+					appmw.RequireAuth(authService),
+				).Get("/upcoming", roomHandler.Upcoming)
+
 				roomsRouter.Route("/{code}", func(roomDetail chi.Router) {
 					// Room status lookup
 					roomDetail.Get("/", roomHandler.Get)
+
+					// Change or cancel a scheduled meeting (Host only)
+					roomDetail.With(
+						appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+						appmw.RequireAuth(authService),
+					).Patch("/", roomHandler.Reschedule)
+
+					roomDetail.With(
+						appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+						appmw.RequireAuth(authService),
+					).Post("/cancel", roomHandler.Cancel)
 
 					// Join room (Optional auth, guests permitted with display name)
 					roomDetail.With(

@@ -39,13 +39,19 @@ func (h *Handlers) isProduction() bool {
 }
 
 type CreateRoomRequest struct {
-	MaxParticipants    int  `json:"maxParticipants,omitempty"`
-	WaitingRoomEnabled bool `json:"waitingRoomEnabled,omitempty"`
+	MaxParticipants    int        `json:"maxParticipants,omitempty"`
+	WaitingRoomEnabled bool       `json:"waitingRoomEnabled,omitempty"`
+	Passcode           string     `json:"passcode,omitempty"`
+	Title              string     `json:"title,omitempty"`
+	ScheduledStart     *time.Time `json:"scheduledStart,omitempty"`
+	ScheduledEnd       *time.Time `json:"scheduledEnd,omitempty"`
+	TimeZone           string     `json:"timeZone,omitempty"`
 }
 
 type JoinRoomRequest struct {
 	Identity    string `json:"identity,omitempty"`
 	DisplayName string `json:"displayName,omitempty"`
+	Passcode    string `json:"passcode,omitempty"`
 }
 
 type LeaveRoomRequest struct {
@@ -66,6 +72,11 @@ type RoomDTO struct {
 	WaitingRoomEnabled bool   `json:"waitingRoomEnabled"`
 	MaxParticipants    int    `json:"maxParticipants"`
 	CreatedAt          string `json:"createdAt"`
+	Title              string `json:"title,omitempty"`
+	ScheduledStart     string `json:"scheduledStart,omitempty"`
+	ScheduledEnd       string `json:"scheduledEnd,omitempty"`
+	TimeZone           string `json:"timeZone,omitempty"`
+	HasPasscode        bool   `json:"hasPasscode"`
 }
 
 type ParticipantDTO struct {
@@ -99,7 +110,7 @@ type MuteParticipantPayload struct {
 }
 
 func toRoomDTO(r *Room) RoomDTO {
-	return RoomDTO{
+	dto := RoomDTO{
 		ID:                 r.ID,
 		PublicCode:         r.PublicCode,
 		Status:             r.Status,
@@ -107,7 +118,91 @@ func toRoomDTO(r *Room) RoomDTO {
 		WaitingRoomEnabled: r.WaitingRoomEnabled,
 		MaxParticipants:    r.MaxParticipants,
 		CreatedAt:          r.CreatedAt.Format(time.RFC3339),
+		Title:              r.Title,
+		TimeZone:           r.TimeZone,
+		HasPasscode:        r.PasscodeHash != "",
 	}
+	if r.ScheduledStart != nil {
+		dto.ScheduledStart = r.ScheduledStart.UTC().Format(time.RFC3339)
+	}
+	if r.ScheduledEnd != nil {
+		dto.ScheduledEnd = r.ScheduledEnd.UTC().Format(time.RFC3339)
+	}
+	return dto
+}
+
+// sendScheduleError reports a scheduling failure, returning false when err is unrecognized.
+func sendScheduleError(w http.ResponseWriter, r *http.Request, err error) bool {
+	switch {
+	case errors.Is(err, ErrUnauthorizedRoomAction):
+		model.SendJSONError(w, r, http.StatusForbidden, "FORBIDDEN", "Only the host can change this meeting.")
+	case errors.Is(err, ErrRoomNotFound):
+		model.SendJSONError(w, r, http.StatusNotFound, "ROOM_NOT_FOUND", "This meeting is unavailable.")
+	case errors.Is(err, ErrScheduleConflict):
+		model.SendJSONError(w, r, http.StatusConflict, "SCHEDULE_CONFLICT", err.Error())
+	case errors.Is(err, ErrInvalidSchedule):
+		model.SendJSONError(w, r, http.StatusBadRequest, "INVALID_SCHEDULE", err.Error())
+	default:
+		return false
+	}
+	return true
+}
+
+// Upcoming handles GET /api/v1/rooms/upcoming
+func (h *Handlers) Upcoming(w http.ResponseWriter, r *http.Request) {
+	user, ok := middleware.UserFromContext(r.Context())
+	if !ok || user == nil {
+		model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication required")
+		return
+	}
+	rooms, err := h.service.GetUpcomingRooms(r.Context(), user, 50)
+	if err != nil {
+		model.SendJSONError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to load upcoming meetings")
+		return
+	}
+	list := make([]RoomDTO, 0, len(rooms))
+	for _, rm := range rooms {
+		list = append(list, toRoomDTO(rm))
+	}
+	model.SendJSON(w, http.StatusOK, map[string]any{"rooms": list})
+}
+
+// Reschedule handles PATCH /api/v1/rooms/{code}
+func (h *Handlers) Reschedule(w http.ResponseWriter, r *http.Request) {
+	user, ok := middleware.UserFromContext(r.Context())
+	if !ok || user == nil {
+		model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication required")
+		return
+	}
+	var req CreateRoomRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ScheduledStart == nil || req.ScheduledEnd == nil {
+		model.SendJSONError(w, r, http.StatusBadRequest, "INVALID_SCHEDULE", "A title, start, end and time zone are required.")
+		return
+	}
+	rm, err := h.service.RescheduleRoom(r.Context(), chi.URLParam(r, "code"), user, req.Title, *req.ScheduledStart, *req.ScheduledEnd, req.TimeZone, extractIP(r), getRequestID(r))
+	if err != nil {
+		if !sendScheduleError(w, r, err) {
+			model.SendJSONError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to change the meeting")
+		}
+		return
+	}
+	model.SendJSON(w, http.StatusOK, map[string]any{"room": toRoomDTO(rm)})
+}
+
+// Cancel handles POST /api/v1/rooms/{code}/cancel
+func (h *Handlers) Cancel(w http.ResponseWriter, r *http.Request) {
+	user, ok := middleware.UserFromContext(r.Context())
+	if !ok || user == nil {
+		model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication required")
+		return
+	}
+	if err := h.service.CancelRoom(r.Context(), chi.URLParam(r, "code"), user, extractIP(r), getRequestID(r)); err != nil {
+		if !sendScheduleError(w, r, err) {
+			model.SendJSONError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to cancel the meeting")
+		}
+		return
+	}
+	model.SendJSON(w, http.StatusOK, map[string]any{"success": true, "status": "cancelled"})
 }
 
 func toParticipantDTO(p *Participant) ParticipantDTO {
@@ -146,12 +241,31 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	if r.ContentLength > 0 {
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
-		_ = decoder.Decode(&req)
+		// A malformed schedule must not silently become an instant meeting.
+		if err := decoder.Decode(&req); err != nil {
+			model.SendJSONError(w, r, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid request body.")
+			return
+		}
 	}
 
-	createdRoom, err := h.service.CreateRoomWithOptions(r.Context(), user, req.MaxParticipants, req.WaitingRoomEnabled, clientIP, reqID)
+	var createdRoom *Room
+	var err error
+	if req.ScheduledStart != nil || req.ScheduledEnd != nil {
+		if req.ScheduledStart == nil || req.ScheduledEnd == nil {
+			model.SendJSONError(w, r, http.StatusBadRequest, "INVALID_SCHEDULE", "Both a start and an end are required.")
+			return
+		}
+		createdRoom, err = h.service.ScheduleRoom(r.Context(), user, ScheduleParams{
+			Title: req.Title, StartsAt: *req.ScheduledStart, EndsAt: *req.ScheduledEnd, TimeZone: req.TimeZone,
+			Passcode: req.Passcode, WaitingRoomEnabled: req.WaitingRoomEnabled, MaxParticipants: req.MaxParticipants,
+		}, clientIP, reqID)
+	} else {
+		createdRoom, err = h.service.CreateRoomWithPasscode(r.Context(), user, req.MaxParticipants, req.WaitingRoomEnabled, req.Passcode, clientIP, reqID)
+	}
 	if err != nil {
-		model.SendJSONError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create room")
+		if !sendScheduleError(w, r, err) {
+			model.SendJSONError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create room")
+		}
 		return
 	}
 
@@ -221,6 +335,10 @@ func (h *Handlers) Get(w http.ResponseWriter, r *http.Request) {
 			model.SendJSONError(w, r, http.StatusGone, "ROOM_ENDED", "This meeting has ended.")
 			return
 		}
+		if errors.Is(err, ErrRoomCancelled) {
+			model.SendJSONError(w, r, http.StatusGone, "ROOM_CANCELLED", "This meeting was cancelled.")
+			return
+		}
 		model.SendJSONError(w, r, http.StatusNotFound, "ROOM_NOT_FOUND", "This meeting is unavailable.")
 		return
 	}
@@ -267,11 +385,30 @@ func (h *Handlers) Join(w http.ResponseWriter, r *http.Request) {
 		guestIdentity = verifiedGuestIdentity(r, NormalizeCode(code))
 	}
 
-	result, err := h.service.JoinRoomWithIdentity(r.Context(), code, user, guestIdentity, req.DisplayName, clientIP, reqID)
+	// Passcodes are short, so guessing is limited more tightly than joining.
+	if h.limiter != nil && req.Passcode != "" {
+		rateKey := fmt.Sprintf("room_passcode:%s:%s", clientIP, NormalizeCode(code))
+		allowed, err := h.limiter.Allow(r.Context(), rateKey, 10, 10*time.Minute)
+		if err != nil || !allowed {
+			w.Header().Set("Retry-After", "600")
+			model.SendJSONError(w, r, http.StatusTooManyRequests, "TOO_MANY_REQUESTS", "Too many passcode attempts. Please retry later.")
+			return
+		}
+	}
+
+	result, err := h.service.JoinRoomWithPasscode(r.Context(), code, user, guestIdentity, req.DisplayName, req.Passcode, clientIP, reqID)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrUnauthorizedRoomAction):
 			model.SendJSONError(w, r, http.StatusForbidden, "FORBIDDEN", "You are not permitted to join this meeting.")
+		case errors.Is(err, ErrMeetingNotStarted):
+			model.SendJSONError(w, r, http.StatusConflict, "MEETING_NOT_STARTED", "This meeting has not started yet.")
+		case errors.Is(err, ErrRoomCancelled):
+			model.SendJSONError(w, r, http.StatusGone, "ROOM_CANCELLED", "This meeting was cancelled.")
+		case errors.Is(err, ErrPasscodeRequired):
+			model.SendJSONError(w, r, http.StatusForbidden, "PASSCODE_REQUIRED", "This meeting requires a passcode.")
+		case errors.Is(err, ErrInvalidPasscode):
+			model.SendJSONError(w, r, http.StatusForbidden, "INVALID_PASSCODE", "The passcode is incorrect.")
 		case errors.Is(err, ErrRoomNotFound):
 			model.SendJSONError(w, r, http.StatusNotFound, "ROOM_NOT_FOUND", "This meeting is unavailable.")
 		case errors.Is(err, ErrRoomEnded):
@@ -492,6 +629,14 @@ func (h *Handlers) Token(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrUnauthorizedRoomAction):
 			model.SendJSONError(w, r, http.StatusForbidden, "FORBIDDEN", "You are not permitted to join this meeting.")
+		case errors.Is(err, ErrMeetingNotStarted):
+			model.SendJSONError(w, r, http.StatusConflict, "MEETING_NOT_STARTED", "This meeting has not started yet.")
+		case errors.Is(err, ErrRoomCancelled):
+			model.SendJSONError(w, r, http.StatusGone, "ROOM_CANCELLED", "This meeting was cancelled.")
+		case errors.Is(err, ErrPasscodeRequired):
+			model.SendJSONError(w, r, http.StatusForbidden, "PASSCODE_REQUIRED", "This meeting requires a passcode.")
+		case errors.Is(err, ErrInvalidPasscode):
+			model.SendJSONError(w, r, http.StatusForbidden, "INVALID_PASSCODE", "The passcode is incorrect.")
 		case errors.Is(err, ErrRoomNotFound):
 			model.SendJSONError(w, r, http.StatusNotFound, "ROOM_NOT_FOUND", "This meeting is unavailable.")
 		case errors.Is(err, ErrRoomEnded):

@@ -163,10 +163,7 @@ func TestWorkflowDB_APITenantIsolation(t *testing.T) {
 		res := api.want("create room", http.StatusCreated, http.MethodPost, "/api/v1/rooms/", caller{token: token},
 			map[string]any{"maxParticipants": 10, "waitingRoomEnabled": waiting})
 		rm, _ := res["room"].(map[string]any)
-		code, _ := rm["code"].(string)
-		if code == "" {
-			code, _ = rm["publicCode"].(string)
-		}
+		code, _ := rm["publicCode"].(string)
 		if code == "" {
 			t.Fatalf("no room code in %v", res)
 		}
@@ -293,6 +290,75 @@ func TestWorkflowDB_APITenantIsolation(t *testing.T) {
 		api.want("notes after admission", http.StatusOK, http.MethodGet, roomPath(code)+"/notes", guest, nil)
 		api.want("token after admission", http.StatusOK, http.MethodPost, roomPath(code)+"/token", guest, map[string]any{"guestDisplayName": "Waiting"})
 		api.want("user token after admission", http.StatusOK, http.MethodPost, roomPath(code)+"/token", user, nil)
+	})
+
+	t.Run("scheduled meeting and passcode", func(t *testing.T) {
+		_, hostToken := api.signup()
+		_, userToken := api.signup()
+		host, user := caller{token: hostToken}, caller{token: userToken}
+		start := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+		body := func(from time.Time) map[string]any {
+			return map[string]any{
+				"title": "Algebra", "timeZone": "Asia/Kolkata", "passcode": "open-sesame",
+				"scheduledStart": from.Format(time.RFC3339), "scheduledEnd": from.Add(time.Hour).Format(time.RFC3339),
+			}
+		}
+		res := api.want("schedule", http.StatusCreated, http.MethodPost, "/api/v1/rooms/", host, body(start))
+		rm, _ := res["room"].(map[string]any)
+		code, _ := rm["publicCode"].(string)
+		if rm["status"] != "scheduled" || rm["hasPasscode"] != true || rm["passcodeHash"] != nil {
+			t.Errorf("unexpected scheduled room: %v", rm)
+		}
+
+		api.want("overlap conflicts", http.StatusConflict, http.MethodPost, "/api/v1/rooms/", host, body(start.Add(30*time.Minute)))
+		bad := body(start.Add(100 * time.Hour))
+		bad["timeZone"] = "Mars/Olympus"
+		api.want("bad time zone", http.StatusBadRequest, http.MethodPost, "/api/v1/rooms/", host, bad)
+		past := body(time.Now().Add(-time.Hour))
+		api.want("start in the past", http.StatusBadRequest, http.MethodPost, "/api/v1/rooms/", host, past)
+
+		res = api.want("upcoming", http.StatusOK, http.MethodGet, "/api/v1/rooms/upcoming", host, nil)
+		if list, _ := res["rooms"].([]any); len(list) != 1 {
+			t.Errorf("host upcoming: %v", res)
+		}
+		res = api.want("other user upcoming", http.StatusOK, http.MethodGet, "/api/v1/rooms/upcoming", user, nil)
+		if list, _ := res["rooms"].([]any); len(list) != 0 {
+			t.Errorf("another user's meetings leaked: %v", res)
+		}
+
+		api.want("join before start", http.StatusConflict, http.MethodPost, roomPath(code)+"/join", user, map[string]any{"passcode": "open-sesame"})
+		api.want("token before start", http.StatusConflict, http.MethodPost, roomPath(code)+"/token", user, nil)
+		api.want("stranger reschedule", http.StatusForbidden, http.MethodPatch, roomPath(code), user, body(start.Add(5*time.Hour)))
+		api.want("stranger cancel", http.StatusForbidden, http.MethodPost, roomPath(code)+"/cancel", user, nil)
+		res = api.want("host reschedule", http.StatusOK, http.MethodPatch, roomPath(code), host, body(start.Add(5*time.Hour)))
+		moved, _ := res["room"].(map[string]any)
+		if moved["scheduledStart"] != start.Add(5*time.Hour).Format(time.RFC3339) {
+			t.Errorf("reschedule not saved: %v", moved)
+		}
+
+		res = api.want("host starts by joining", http.StatusOK, http.MethodPost, roomPath(code)+"/join", host, map[string]any{})
+		started, _ := res["room"].(map[string]any)
+		if started["status"] != "active" {
+			t.Errorf("host join did not start the meeting: %v", started)
+		}
+		api.want("cancel after start", http.StatusBadRequest, http.MethodPost, roomPath(code)+"/cancel", host, nil)
+
+		api.want("no passcode", http.StatusForbidden, http.MethodPost, roomPath(code)+"/join", user, map[string]any{})
+		api.want("wrong passcode", http.StatusForbidden, http.MethodPost, roomPath(code)+"/join", user, map[string]any{"passcode": "wrong-code"})
+		api.want("guest wrong passcode", http.StatusForbidden, http.MethodPost, roomPath(code)+"/join", caller{}, map[string]any{"displayName": "Guest", "passcode": "wrong-code"})
+		api.want("token skipping join", http.StatusForbidden, http.MethodPost, roomPath(code)+"/token", user, nil)
+		api.want("right passcode", http.StatusOK, http.MethodPost, roomPath(code)+"/join", user, map[string]any{"passcode": "open-sesame"})
+		api.want("token after join", http.StatusOK, http.MethodPost, roomPath(code)+"/token", user, nil)
+		res = api.want("guest right passcode", http.StatusOK, http.MethodPost, roomPath(code)+"/join", caller{}, map[string]any{"displayName": "Guest", "passcode": "open-sesame"})
+		guestToken, _ := res["guestToken"].(string)
+		api.want("guest token after join", http.StatusOK, http.MethodPost, roomPath(code)+"/token", caller{guest: guestToken}, map[string]any{"guestDisplayName": "Guest"})
+
+		res = api.want("second meeting", http.StatusCreated, http.MethodPost, "/api/v1/rooms/", host, body(start.Add(10*time.Hour)))
+		second, _ := res["room"].(map[string]any)
+		secondCode, _ := second["publicCode"].(string)
+		api.want("host cancels", http.StatusOK, http.MethodPost, roomPath(secondCode)+"/cancel", host, nil)
+		api.want("join cancelled", http.StatusGone, http.MethodPost, roomPath(secondCode)+"/join", user, map[string]any{})
+		api.want("lookup cancelled", http.StatusGone, http.MethodGet, roomPath(secondCode), user, nil)
 	})
 
 	t.Run("institutional room is limited to its organization", func(t *testing.T) {
