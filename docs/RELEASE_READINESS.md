@@ -11,7 +11,7 @@ meeting backend's infrastructure only. It did not cover classroom, lab or AI fea
 - Phase 1 is partial. Phases 2 to 5 are almost entirely unbuilt (see `FEATURE_REGISTER.md`).
 - The academic and attendance schema has no HTTP API, so no user can reach it.
 - No end-to-end workflow (A to F) has an automated test.
-- The Go toolchain pin (1.26.0) leaves 31 reachable standard-library vulnerabilities.
+- RLS behaviour under the runtime role is unverified, and no disposable database exists yet.
 - The latest recorded latency (`/health/live` p95 1.67 s) misses the 300 ms read target,
   although the matrix marks it PASS. It measures an intercontinental path and has no load model.
 
@@ -23,7 +23,24 @@ meeting backend's infrastructure only. It did not cover classroom, lab or AI fea
 | Web typecheck and `node --test` | Pass, 57 tests |
 | Mobile `node --test` | Pass, 145 tests |
 | Live `GET /health/ready` on Render | `{"status":"ok"}` |
-| `govulncheck` | 31 reachable standard-library vulnerabilities, fixed by newer Go releases |
+| `govulncheck` before upgrade | 31 reachable standard-library vulnerabilities |
+| `govulncheck` after Go 1.26.10 | 0 reachable. See the unreachable advisories below |
+
+## Blockers to the RLS gate
+
+No disposable PostgreSQL exists: Docker is not installed and no Neon API key is available. Running
+downloaded Postgres binaries and reading production catalogs were both blocked by this session's
+permission policy and were not retried another way. Render has no API key here, so its plan is
+unverified too. `TestRLS_WebhookStoreUnderRuntimeRole` is written but has **never run**.
+
+**Inference to test, not a finding:** `rooms` policies require an auth context the API pool does not
+set, yet the recorded live smoke test created rooms. Production probably uses a role that bypasses
+RLS. If so, tenant isolation is not enforced at runtime for those queries.
+
+## Go test accounting
+
+The Go suite ends with 10 skipped tests, which are **not passes**: 5 PostgreSQL lock tests, 3 Redis
+tests, 1 R2 test and 1 worker lifecycle test, all needing live services.
 
 ## Not verified
 

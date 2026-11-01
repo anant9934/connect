@@ -7,14 +7,17 @@ Search-based entries show whether code exists, not that it works.
 
 | Severity | Finding | Status |
 | :--- | :--- | :--- |
-| Decision | Mobile is Expo/React Native, not Kotlin/Compose as the brief states. It is native rendering, not a WebView, so it is kept: rewriting it would discard working LiveKit integration and 145 tests. | Needs owner confirmation |
+| Decision | Mobile stays Expo/React Native, not Kotlin/Compose. | Approved by owner |
 | High | Attendance had no trusted server-side source: no LiveKit webhook, so a crashed client never left. | Fixed on branch, SQL unverified |
 | High | Enrolled students who never joined got no record, so they were never marked absent. | Fixed on branch, SQL unverified |
 | High | Attendance thresholds were hardcoded (0.75 / 0.40) and `late` was never produced. | Fixed on branch, SQL unverified |
 | High | Failed attendance upserts were logged and the job still completed, losing records with no retry. Upserts for non-enrolled participants failed this way every time. | Fixed on branch, SQL unverified |
 | High | `academic` and `attendance` have tables and logic but no HTTP routes. | Open |
 | High | No password recovery; no email verification flow. | Open |
-| High | 31 reachable Go standard-library vulnerabilities from pinning Go 1.26.0. | Open |
+| High | 31 reachable Go standard-library vulnerabilities from pinning Go 1.26.0. | Fixed on branch: 0 reachable on Go 1.26.10 |
+| High | Health check skipped nested Go tests yet printed PASSED. | Fixed on branch |
+| High | Reconciler silently skipped a class when its room or session lookup failed. | Fixed on branch: job now errors and retries, SQL unverified |
+| High | Runtime role and RLS enforcement unverified; bypass suspected. | BLOCKED: needs disposable database |
 | Medium | RLS may silently hide rows from the shared pool (see `RELEASE_READINESS.md`). | Unverified |
 | Medium | Readiness matrix overstates scope and marks a missed latency target as PASS. | Superseded by `RELEASE_READINESS.md` |
 | Medium | Backend routes are open to anyone who has a room code: `GET /rooms/{code}/participants`. Authorization not yet reviewed. | Open |
@@ -37,10 +40,10 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | P1-07 | 1 | Co-host role, host transfer | no | no | no | NOT_STARTED | |
 | P1-08 | 1 | Chat, hands, reactions | no server persistence | yes | partial | IN_PROGRESS | Client-side data channel; unaudited authorization |
 | P1-09 | 1 | Signup, login, logout, sessions, Google | `auth` | yes | yes | TESTING | |
-| P1-10 | 1 | Password recovery, email verification | no | no | no | NOT_STARTED | Needs an email provider |
+| P1-10 | 1 | Password recovery, email verification | no | no | no | BLOCKED | Needs email provider choice and disposable database |
 | P1-11 | 1 | Profile and avatar | `auth` | yes | yes | TESTING | |
 | P1-12 | 1 | Notes and file sharing (R2) | `notes`, `files` | yes | unconfirmed | TESTING | ClamAV disabled in `render.yaml` |
-| P2-01 | 2 | Recording and playback | token grant only | no | no | BLOCKED | LiveKit egress plan and cost unconfirmed |
+| P2-01 | 2 | Recording and playback | token grant only | no | no | BLOCKED | Design ready in `PLATFORM_INTEGRATION_DESIGNS.md`; awaiting paid-plan approval |
 | P2-02 | 2 | Meeting history | `/rooms/history` | basic | no | IN_PROGRESS | No search, attendance or recording links |
 | P2-03 | 2 | Recurring scheduling, reminders | no | no | no | NOT_STARTED | |
 | P2-04 | 2 | Presentation tools | no | no | no | NOT_STARTED | |
@@ -58,11 +61,11 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | P3-08 | 3 | Whiteboard, breakout rooms | no | no | no | NOT_STARTED | |
 | P4-01 | 4 | Course workspaces and exercises | no | no | no | NOT_STARTED | |
 | P4-02 | 4 | Multi-language editor | no | no | no | NOT_STARTED | |
-| P4-03 | 4 | Isolated code execution | no | no | no | BLOCKED | Render cannot safely host it; needs a separate sandbox host |
+| P4-03 | 4 | Isolated code execution | no | no | no | BLOCKED | Design ready; awaiting host and cost approval |
 | P4-04 | 4 | Assignments and auto-evaluation | no | no | no | NOT_STARTED | Evaluation depends on P4-03 |
 | P4-05 | 4 | Live preview, SQL lab, visualizers | no | no | no | NOT_STARTED | |
 | P4-06 | 4 | Progress dashboard | no | no | no | NOT_STARTED | |
 | P5-01 | 5 | Transcription, captions | no | no | no | BLOCKED | Needs P2-01 and a speech provider with credentials |
 | P5-02 | 5 | Summaries and study materials | no | no | no | BLOCKED | Needs P5-01 and an LLM provider with credentials |
 | P5-03 | 5 | Faculty review and publishing | no | no | no | NOT_STARTED | |
-| P5-04 | 5 | Token and cost tracking | no | no | no | NOT_STARTED | |
+| P5-04 | 5 | Token and cost tracking | `aiproviders` cost calculation | no | no | IN_PROGRESS | No persistence; needs disposable database |
