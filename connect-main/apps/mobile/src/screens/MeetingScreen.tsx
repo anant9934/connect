@@ -109,6 +109,8 @@ export function MeetingScreen({
   >('connecting');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(false);
+  const [myPermissions, setMyPermissions] = useState<Record<string, boolean>>({});
+  const [myRole, setMyRole] = useState('participant');
   const [isRoomLocked, setIsRoomLocked] = useState(false);
 
   // Local Media State
@@ -476,9 +478,6 @@ export function MeetingScreen({
             });
 
             const localPart = room.localParticipant;
-            const hostCheck =
-              localPart.permissions?.canPublishData && localPart.permissions?.canUpdateMetadata;
-            setIsHost(!!hostCheck);
 
             // Publish Initial Camera with Retry Loop (Handles native Camera2 release delay)
             if (initialCamera) {
@@ -1073,6 +1072,28 @@ export function MeetingScreen({
       console.warn('Export diagnostics error:', err);
     }
   };
+
+  // Follow role changes from the server, including co-host grants and host transfers.
+  useEffect(() => {
+    let active = true;
+    const syncRole = async () => {
+      try {
+        const me = await defaultApiClient.getMyRole(roomCode);
+        if (!active) return;
+        setIsHost(me.isHost);
+        setMyRole(me.role);
+        setMyPermissions(me.permissions || {});
+      } catch (_) {
+        // Keeps the last known role; the server still enforces every action.
+      }
+    };
+    syncRole();
+    const timer = setInterval(syncRole, 5000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [roomCode]);
 
   // Host Participant Moderation
   const handleMuteParticipant = async (identity: string) => {
@@ -2242,7 +2263,7 @@ export function MeetingScreen({
                   <Text style={styles.participantNameText}>
                     {displayName} (You)
                   </Text>
-                  <Text style={styles.participantRoleText}>{isHost ? 'Host' : 'Participant'}</Text>
+                  <Text style={styles.participantRoleText}>{isHost ? 'Host' : myRole === 'co-host' ? 'Co-host' : 'Participant'}</Text>
                 </View>
                 <View style={styles.participantStatusIcons}>
                   {micMuted ? <MicOff size={16} color="#E53E3E" /> : <Mic size={16} color="#2DBE74" />}
@@ -2272,7 +2293,7 @@ export function MeetingScreen({
                     <View style={styles.participantStatusIcons}>
                       {isMuted ? <MicOff size={16} color="#E53E3E" /> : <Mic size={16} color="#2DBE74" />}
                       {isCamOff ? <VideoOff size={16} color="#E53E3E" /> : <Video size={16} color="#2DBE74" />}
-                      {isHost && (
+                      {myPermissions.mute && (
                         <TouchableOpacity
                           style={styles.hostActionBtn}
                           onPress={() => handleMuteParticipant(rp.identity)}
@@ -2280,7 +2301,7 @@ export function MeetingScreen({
                           <Text style={styles.hostActionText}>Mute</Text>
                         </TouchableOpacity>
                       )}
-                      {isHost && (
+                      {myPermissions.remove && (
                         <TouchableOpacity
                           style={[styles.hostActionBtn, styles.hostRemoveBtn]}
                           onPress={() => handleRemoveParticipant(rp.identity)}

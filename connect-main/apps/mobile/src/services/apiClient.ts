@@ -159,15 +159,19 @@ export class TathastuApiClient {
 
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+      let errorCode: string | undefined;
       try {
         const errorData = await response.json();
+        errorCode = errorData?.error?.code;
         if (errorData?.error?.message) {
           errorMessage = errorData.error.message;
         } else if (errorData?.message) {
           errorMessage = errorData.message;
         }
       } catch (_) {}
-      throw new Error(errorMessage);
+      const failure = new Error(errorMessage) as Error & { code?: string };
+      failure.code = errorCode;
+      throw failure;
     }
 
     return response.json() as Promise<T>;
@@ -301,6 +305,37 @@ export class TathastuApiClient {
     return res;
   }
 
+  private guestHeaders(norm: string): Record<string, string> {
+    const guestToken = this.guestTokens.get(norm);
+    return guestToken ? { 'X-Guest-Token': guestToken, Cookie: `tc_guest_${norm}=${guestToken}` } : {};
+  }
+
+  public async requestAdmission(code: string, displayName: string): Promise<void> {
+    const norm = normalizeRoomCode(code);
+    await this.request(`/api/v1/rooms/${encodeURIComponent(norm)}/admission/request`, {
+      method: 'POST',
+      headers: this.guestHeaders(norm),
+      body: JSON.stringify({ displayName }),
+    });
+  }
+
+  public async getAdmissionStatus(code: string): Promise<'pending' | 'admitted' | 'denied'> {
+    const norm = normalizeRoomCode(code);
+    const res = await this.request<{ request: { status: 'pending' | 'admitted' | 'denied' } }>(
+      `/api/v1/rooms/${encodeURIComponent(norm)}/admission/status`,
+      { method: 'GET', headers: this.guestHeaders(norm) }
+    );
+    return res.request.status;
+  }
+
+  public async getMyRole(code: string): Promise<{ role: string; isHost: boolean; permissions: Record<string, boolean> }> {
+    const norm = normalizeRoomCode(code);
+    return this.request(`/api/v1/rooms/${encodeURIComponent(norm)}/me`, {
+      method: 'GET',
+      headers: this.guestHeaders(norm),
+    });
+  }
+
   public async getRoomToken(
     code: string,
     guestIdentity?: string,
@@ -359,7 +394,7 @@ export class TathastuApiClient {
     const norm = normalizeRoomCode(code);
     return this.request<{ participants: MobileParticipant[] }>(
       `/api/v1/rooms/${encodeURIComponent(norm)}/participants`,
-      { method: 'GET' }
+      { method: 'GET', headers: this.guestHeaders(norm) }
     );
   }
 

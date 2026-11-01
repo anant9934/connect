@@ -52,6 +52,7 @@ export function PrejoinScreen({ roomCode, onJoinSuccess, onBack }: PrejoinScreen
   const [displayName, setDisplayName] = useState('');
   const [hasPasscode, setHasPasscode] = useState(false);
   const [passcode, setPasscode] = useState('');
+  const [isWaitingForHost, setIsWaitingForHost] = useState(false);
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('front');
@@ -195,12 +196,33 @@ export function PrejoinScreen({ roomCode, onJoinSuccess, onBack }: PrejoinScreen
 
       // Step 2: Request LiveKit access token with registered identity and guest token
       const participantIdentity = joinRes.participant?.identity;
-      const res = await defaultApiClient.getRoomToken(
-        roomCode,
-        participantIdentity,
-        name,
-        joinRes.guestToken
-      );
+      const requestToken = () =>
+        defaultApiClient.getRoomToken(roomCode, participantIdentity, name, joinRes.guestToken);
+      let res;
+      try {
+        res = await requestToken();
+      } catch (tokenErr: any) {
+        if (tokenErr?.code !== 'ADMISSION_REQUIRED' && tokenErr?.code !== 'ADMISSION_PENDING') {
+          throw tokenErr;
+        }
+        // Waiting room: ask once, then wait for the host's decision before requesting media.
+        if (tokenErr.code === 'ADMISSION_REQUIRED') {
+          await defaultApiClient.requestAdmission(roomCode, name);
+        }
+        setIsWaitingForHost(true);
+        for (;;) {
+          await new Promise((r) => setTimeout(r, 3000));
+          const status = await defaultApiClient.getAdmissionStatus(roomCode);
+          if (status === 'denied') {
+            throw new Error('The host declined your request to join.');
+          }
+          if (status === 'admitted') {
+            break;
+          }
+        }
+        setIsWaitingForHost(false);
+        res = await requestToken();
+      }
 
       if (!res.token) {
         throw new Error('Access token was not returned by server.');
@@ -222,6 +244,7 @@ export function PrejoinScreen({ roomCode, onJoinSuccess, onBack }: PrejoinScreen
       });
     } catch (err: any) {
       setIsTransitioning(false);
+      setIsWaitingForHost(false);
       setError(err?.message || 'Could not join room. Please check the code.');
       mediaDiagnostics.log('room', 'JoinRoomError', { error: err?.message || String(err) });
     } finally {
@@ -387,6 +410,12 @@ export function PrejoinScreen({ roomCode, onJoinSuccess, onBack }: PrejoinScreen
               {error ? (
                 <View style={styles.errorBox}>
                   <Text style={styles.errorText}>{error}</Text>
+                </View>
+              ) : null}
+
+              {isWaitingForHost ? (
+                <View accessibilityLiveRegion="polite" style={[styles.nameGroup, isCompact && styles.nameGroupCompact]}>
+                  <Text style={styles.inputLabel}>Waiting for the host to let you in…</Text>
                 </View>
               ) : null}
 
