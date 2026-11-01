@@ -7,7 +7,7 @@
 **Cache:** Upstash Redis with TLS
 **Media SFU:** LiveKit Cloud (`wss://tathastu-connect-htzr4167.livekit.cloud`)
 **Object Storage:** Cloudflare R2 (`connect` bucket)
-**Current HEAD Commit:** `49264bd8a11bd32edcc067f0487cc965f15f7d86`
+**Current HEAD Commit:** `7e93e86c0ca3c49e7caec17120dbbe06eb0b3e51`
 **Audit Date:** 2026-10-31 / 2026-11-01
 **Auditor:** Principal Software Architect, Senior Go Engineer, Application Security Engineer, Database Reliability Engineer, Performance Engineer, and Production SRE
 
