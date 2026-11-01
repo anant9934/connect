@@ -17,7 +17,7 @@ Search-based entries show whether code exists, not that it works.
 | High | 31 reachable Go standard-library vulnerabilities from pinning Go 1.26.0. | Fixed on branch: 0 reachable on Go 1.26.10 |
 | High | Health check skipped nested Go tests yet printed PASSED. | Fixed on branch |
 | High | Reconciler silently skipped a class when its room or session lookup failed. | Fixed on branch: job now errors and retries, verified in CI |
-| High | API runs as `neondb_owner` with no request context; RLS likely bypassed in production. | Open: helper verified, API not converted |
+| High | API runs as `neondb_owner` with no request context; RLS likely bypassed in production. | Open: `notes` and `files` converted and tested in CI; `room`, `auth`, `audit` not converted |
 | High | RLS recursion between `faculty_allocations` and `course_enrollments` broke non-admin class reads. | Fixed by `000012`, verified in CI |
 | Medium | RLS may silently hide rows from the shared pool (see `RELEASE_READINESS.md`). | Unverified |
 | Medium | Readiness matrix overstates scope and marks a missed latency target as PASS. | Superseded by `RELEASE_READINESS.md` |
@@ -43,7 +43,7 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | P1-09 | 1 | Signup, login, logout, sessions, Google | `auth` | yes | yes | TESTING | |
 | P1-10 | 1 | Password recovery, email verification | no | no | no | BLOCKED | Needs email provider choice and disposable database |
 | P1-11 | 1 | Profile and avatar | `auth` | yes | yes | TESTING | |
-| P1-12 | 1 | Notes and file sharing (R2) | `notes`, `files` | yes | unconfirmed | TESTING | ClamAV disabled in `render.yaml` |
+| P1-12 | 1 | Notes and file sharing (R2) | `notes`, `files` | yes | unconfirmed | TESTING | ClamAV disabled in `render.yaml`; request context and tenant tests pass in CI run 41358542181 |
 | P2-01 | 2 | Recording and playback | token grant only | no | no | BLOCKED | Free tier allows 60 shared minutes only; no paid plan authorized |
 | P2-02 | 2 | Meeting history | `/rooms/history` | basic | no | IN_PROGRESS | No search, attendance or recording links |
 | P2-03 | 2 | Recurring scheduling, reminders | no | no | no | NOT_STARTED | |
@@ -53,7 +53,7 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | P2-07 | 2 | Notifications | no | no | no | NOT_STARTED | |
 | P2-08 | 2 | Admin dashboard | audit service only | no | no | NOT_STARTED | |
 | P3-01 | 3 | Trusted session tracking | signed webhook, `000010` | n/a | n/a | TESTING | CI run 41343853509 passes; webhook not registered in LiveKit, migrations not in production |
-| P3-02 | 3 | Duration attendance and reconciliation | worker | n/a | n/a | TESTING | CI run 41343853509 passes; not yet exercised through the job queue |
+| P3-02 | 3 | Duration attendance and reconciliation | worker | n/a | n/a | TESTING | Queue lifecycle passes in CI run 41358542181; process restart mid-job untested |
 | P3-03 | 3 | Versioned attendance rules | table, evaluator | no | no | IN_PROGRESS | No API |
 | P3-04 | 3 | Attendance correction with audit | domain logic, table | no | no | IN_PROGRESS | No API |
 | P3-05 | 3 | Dashboards and exports | no | no | no | NOT_STARTED | |

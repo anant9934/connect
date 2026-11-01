@@ -6,8 +6,7 @@ connection calls. Production still runs as `neondb_owner` until the owner approv
 | File | Functions | Classification | Status | Test evidence |
 | :--- | :--- | :--- | :--- | :--- |
 | `internal/notes/repository.go` | `GetByRoomID`, `UpsertNote`, `ValidateRoomAccess` | Tenant-sensitive API | Converted: users via `WithAuthContext`, guests via narrow functions | `TestWorkflowDB_NotesHTTP` |
-| `internal/files/repository.go` (7) | `CreateFile`, `GetFileByID`, `GetFilesByRoomID`, `GetFileCountByRoomID`, `DeleteFile` | Tenant-sensitive API | **Not converted** | None under `connect_app` |
-| `internal/files/repository.go` | `UpdateScanStatus` | Worker-only | Not converted; needs a `connect_worker` policy check | None |
+| `internal/files/repository.go` | `CreateFile`, `GetFileByID`, `GetFilesByRoomID`, `UpdateScanStatus`, `DeleteFile` | Tenant-sensitive API | Converted: users via `WithAuthContext`, guests via `WithRoomGuestContext` | `TestWorkflowDB_FilesHTTP` |
 | `internal/room/repository.go` (26) | Room and participant lifecycle, history | Tenant-sensitive API | **Not converted** | None under `connect_app` |
 | `internal/auth/repository.go` (13) | Users and session lookup | Global: runs before any session exists | Needs narrow definer functions, not `WithAuthContext` | None under `connect_app` |
 | `internal/audit/service.go` (1) | `Record` | Global: append-only | Needs an insert-only grant check | None under `connect_app` |

@@ -12,33 +12,31 @@ Compact checkpoint. Resume from here. Budget: free tier only.
 | Runtime DB role | `neondb_owner` through the pooler, not `connect_app` |
 | Vercel | Project `connect`, root `connect-main/apps/web`, production branch `main` |
 
-## Verified on disposable Postgres 16 (CI run 41343853509, commit `82f9242`)
+## Verified on disposable Postgres 16 (CI run 41358542181, commit `5015de5`)
 
-- Migrations 000001-000012, SQL security suites, rollback and re-apply of 000010-000012.
-- `TestWorkflowDB_ClassSessionAttendance`: webhook as `connect_app`, reconcile as `connect_worker`, two
-  tenants, policy version, late/reconnect/absent, duplicates, atomic failure and retry, overrule kept,
-  student/faculty/other-tenant visibility.
-- `TestWorkflowDB_AuthContextIsolation`: `WithAuthContext` as `connect_app`: pool reuse, forged settings,
-  denied membership, rollback, 40 concurrent requests.
+- Migrations 000001-000014, SQL security suites, rollback and re-apply of 000010-000014.
+- `TestWorkflowDB_ClassSessionAttendance`, `TestWorkflowDB_AuthContextIsolation` (as before).
+- `TestWorkflowDB_NotesHTTP`, `TestWorkflowDB_FilesHTTP`: real routes as `connect_app`, two independent
+  hosts, participants, guests, removed/left users, forged context, pool reuse. Session validation still
+  uses the admin pool, and rooms are `personal_commons`; institutional rooms are not covered here.
+- `TestWorkflowDB_WebhookHTTPBoundary`: missing, garbage, wrong-secret, tampered, malformed, replay.
+- `TestWorkflowDB_AttendanceQueueLifecycle`: real `Runner` as `connect_worker`: duplicate enqueue, failure
+  and retry, duplicate delivery, dead letter. Not covered: process restart mid-job.
 
-Bugs found by these tests and fixed: invalid `participant_left` SQL, restrictive policy blocking the
-worker, infinite RLS recursion between `faculty_allocations` and `course_enrollments`.
+Limits: SECURITY DEFINER helpers depend on the function owner bypassing RLS, unconfirmed in production.
+Deploy order: migrations 000013 and 000014 must be applied before this code, or notes and files fail.
 
-Limits: the handler is called directly, not through the job queue. SECURITY DEFINER helpers depend on
-the function owner bypassing RLS, which is unconfirmed for production's owner role.
+## Current phase: API request context
 
-## Current phase: 2 of the directive (API request context)
-
-`WithAuthContext` exists but **no API path uses it**. About 49 database call sites in `auth`, `room`,
-`notes`, `files` and `audit` still use the raw pool.
+`notes` and `files` are converted. See `DB_CALL_SITE_REGISTER.md` for the rest.
 
 ## Next action
 
-Convert `notes` first (2 call sites) to `WithAuthContext`, with HTTP cross-tenant tests, then `files`,
-then `room`, including a narrow resolver for guest room access, which has no session.
+Convert `room`, using `WithRoomGuestContext` for guests and a narrow function for the pre-membership join
+lookup. Then `auth` and `audit` through narrow definer functions, because they run before a session exists.
+Only after that can the API role move to `connect_app` (needs owner approval).
 
 ## Not started or blocked
 
-- Tenant isolation matrix across HTTP routes; moving the API to `connect_app` (needs owner approval).
 - Most product scope: see `FEATURE_REGISTER.md`. Docker Desktop is still absent; CI is the disposable database.
 - Production role attributes, provider quotas, measured Redis latency: no read access yet.

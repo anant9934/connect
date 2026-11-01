@@ -85,3 +85,23 @@ the new RLS test, 3 Redis tests, 1 R2 test and 1 worker lifecycle test, all need
 - A webhook arriving after reconciliation updates sessions but does not trigger re-evaluation.
 - Render services can sleep or restart: webhooks sent during downtime depend on LiveKit's
   retries, and worker latency has no guarantee.
+
+## Production role verification (owner runs in the Neon SQL console; read-only)
+
+```sql
+SELECT rolname, rolsuper, rolbypassrls FROM pg_roles
+WHERE rolname IN (current_user, 'neondb_owner', 'connect_app', 'connect_worker');
+
+SELECT n.nspname, p.proname, pg_get_userbyid(p.proowner) AS owner, p.prosecdef
+FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'connect_auth' ORDER BY 2;
+
+SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity, pg_get_userbyid(c.relowner) AS owner
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY 1;
+
+SELECT version FROM schema_metadata ORDER BY 1;
+```
+
+`SECURITY DEFINER` helpers need their owner to have `rolsuper` or `rolbypassrls`. With `rolbypassrls` true for
+the API's login role, RLS does nothing for it today, whatever the policies say.
