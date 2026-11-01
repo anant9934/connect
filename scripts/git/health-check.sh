@@ -356,12 +356,26 @@ if [ "${SKIP_TESTS}" = false ]; then
   fi
 
   # Go Stack
-  if [ -f "go.mod" ]; then
+  GO_MODULES="$(find . -name go.mod -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path './.git/*')"
+  if [ -n "${GO_MODULES}" ]; then
     STACK_DETECTED=true
-    log_info "Go project detected."
     if command -v go &>/dev/null; then
-      go test ./... || { log_fail "go test failed"; FAILURES=$((FAILURES + 1)); }
+      while IFS= read -r gomod; do
+        moddir="$(dirname "${gomod}")"
+        log_info "Running go test ./... in ${moddir}"
+        (cd "${moddir}" && go test ./...) || { log_fail "go test failed in ${moddir}"; FAILURES=$((FAILURES + 1)); }
+      done <<< "${GO_MODULES}"
+    else
+      log_fail "Go modules found but go is not in PATH; tests did not run."
+      FAILURES=$((FAILURES + 1))
     fi
+  fi
+
+  # Nested Node.js projects are not run here; say so rather than implying coverage.
+  NESTED_NODE="$(find . -mindepth 2 -maxdepth 2 -name package.json -not -path '*/node_modules/*')"
+  if [ -n "${NESTED_NODE}" ]; then
+    log_warn "Node.js tests NOT RUN by this gate for: ${NESTED_NODE//$'\n'/ }"
+    WARNINGS=$((WARNINGS + 1))
   fi
 
   # Rust Stack
@@ -374,7 +388,8 @@ if [ "${SKIP_TESTS}" = false ]; then
   fi
 
   if [ "${STACK_DETECTED}" = false ]; then
-    log_info "No language-specific test harness detected. Skipped automated unit test suite."
+    log_warn "No test harness detected. Unit tests DID NOT RUN."
+    WARNINGS=$((WARNINGS + 1))
   fi
 fi
 
