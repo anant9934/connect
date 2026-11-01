@@ -1,0 +1,18 @@
+# Disposable PostgreSQL 16 for local verification only. Data lives in tmpfs and
+# disappears with the container. Bound to loopback; never used for production.
+services:
+  postgres:
+    image: postgres:16
+    container_name: connect-pg16-disposable
+    environment:
+      POSTGRES_PASSWORD: disposable
+      POSTGRES_DB: connect_test
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d connect_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
