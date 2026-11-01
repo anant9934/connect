@@ -123,12 +123,14 @@ func main() {
 
 	// Notes domain
 	var notesRepo notes.Repository
+	var notesRooms notes.RoomValidator = roomService
 	if db != nil {
 		notesRepo = notes.NewPgxRepository(db.Pool)
+		notesRooms = notes.NewPgxRoomValidator(db.Pool)
 	} else {
 		notesRepo = notes.NewMemoryRepository()
 	}
-	notesService := notes.NewService(notesRepo, roomService, auditService)
+	notesService := notes.NewService(notesRepo, notesRooms, auditService)
 	notesHandler := notes.NewHandler(notesService)
 
 	// Files domain

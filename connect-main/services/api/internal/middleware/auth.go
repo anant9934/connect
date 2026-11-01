@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/tathastu/connect/services/api/internal/auth"
+	"github.com/tathastu/connect/services/api/internal/database"
 	"github.com/tathastu/connect/services/api/internal/model"
 )
 
@@ -33,6 +34,7 @@ func RequireAuth(authService *auth.Service) func(http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(r.Context(), userContextKey, user)
+			ctx = database.WithSessionTokenHash(ctx, auth.HashSessionToken(token))
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -46,6 +48,7 @@ func OptionalAuth(authService *auth.Service) func(http.Handler) http.Handler {
 			if token != "" {
 				if user, _, err := authService.ValidateSession(r.Context(), token); err == nil && user != nil {
 					ctx := context.WithValue(r.Context(), userContextKey, user)
+					ctx = database.WithSessionTokenHash(ctx, auth.HashSessionToken(token))
 					r = r.WithContext(ctx)
 				}
 			}

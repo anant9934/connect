@@ -59,6 +59,19 @@ func AuthenticateAndSetContext(ctx context.Context, tx pgx.Tx, tokenHash string,
 	}, nil
 }
 
+type sessionTokenHashKey struct{}
+
+// WithSessionTokenHash records the hash of a session the auth middleware already validated.
+func WithSessionTokenHash(ctx context.Context, tokenHash string) context.Context {
+	return context.WithValue(ctx, sessionTokenHashKey{}, tokenHash)
+}
+
+// SessionTokenHash returns the hash recorded by WithSessionTokenHash, or "" when there is none.
+func SessionTokenHash(ctx context.Context) string {
+	hash, _ := ctx.Value(sessionTokenHashKey{}).(string)
+	return hash
+}
+
 // WithAuthContext runs fn in one transaction carrying the verified, transaction-local
 // identity of tokenHash. The context ends with the transaction, so pooled connections
 // cannot leak it. Any error, including a denied organization, rolls everything back.

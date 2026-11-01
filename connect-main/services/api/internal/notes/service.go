@@ -31,7 +31,7 @@ func (s *Service) GetNote(ctx context.Context, roomCode, callerIdentity string) 
 		return nil, ErrUnauthorized
 	}
 
-	return s.repo.GetByRoomID(ctx, roomID)
+	return s.repo.GetByRoomID(ctx, roomID, callerIdentity)
 }
 
 func (s *Service) UpdateNote(ctx context.Context, roomCode, callerIdentity, title, content string, expectedRevision int) (*MeetingNote, error) {
