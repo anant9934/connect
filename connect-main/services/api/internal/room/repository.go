@@ -198,24 +198,39 @@ func (r *PgxRepository) EndRoom(ctx context.Context, roomID string, endedAt time
 	}
 	defer tx.Rollback(ctx)
 
+	var orgID, classSessionID *string
 	query := `
 		UPDATE rooms
 		SET status = 'ended', ended_at = $1
 		WHERE id = $2
+		RETURNING organization_id::text, class_session_id::text
 	`
-	tag, err := tx.Exec(ctx, query, endedAt, roomID)
+	err = tx.QueryRow(ctx, query, endedAt, roomID).Scan(&orgID, &classSessionID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrRoomNotFound
+		}
 		return fmt.Errorf("failed to update room status: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrRoomNotFound
+
+	var orgIDStr, classSessionIDStr string
+	if orgID != nil {
+		orgIDStr = *orgID
+	}
+	if classSessionID != nil {
+		classSessionIDStr = *classSessionID
 	}
 
 	// Transactional outbox 1: Room cleanup job
 	cleanupKey := fmt.Sprintf("room-cleanup-%s-%d", roomID, endedAt.Unix())
+	cleanupData, _ := json.Marshal(map[string]any{
+		"roomId":      roomID,
+		"tenantId":    orgIDStr,
+		"maxAgeHours": 24,
+	})
 	cleanupPayload := worker.JobPayload{
 		Type:      worker.TypeRoomCleanup,
-		Data:      json.RawMessage(fmt.Sprintf(`{"roomId":"%s","maxAgeHours":24}`, roomID)),
+		Data:      cleanupData,
 		CreatedAt: endedAt,
 	}
 	if _, err := worker.EnqueueJob(ctx, tx, worker.QueueDefault, cleanupKey, cleanupPayload, nil); err != nil {
@@ -224,9 +239,16 @@ func (r *PgxRepository) EndRoom(ctx context.Context, roomID string, endedAt time
 
 	// Transactional outbox 2: Attendance reconcile job
 	reconcileKey := fmt.Sprintf("attendance-reconcile-%s-%d", roomID, endedAt.Unix())
+	reconcileData, _ := json.Marshal(map[string]any{
+		"roomId":         roomID,
+		"sessionId":      roomID,
+		"tenantId":       orgIDStr,
+		"classSessionId": classSessionIDStr,
+		"before":         endedAt.Format(time.RFC3339),
+	})
 	reconcilePayload := worker.JobPayload{
 		Type:      worker.TypeAttendanceReconcile,
-		Data:      json.RawMessage(fmt.Sprintf(`{"sessionId":"%s","before":"%s"}`, roomID, endedAt.Format(time.RFC3339))),
+		Data:      reconcileData,
 		CreatedAt: endedAt,
 	}
 	if _, err := worker.EnqueueJob(ctx, tx, worker.QueueAttendanceCritical, reconcileKey, reconcilePayload, nil); err != nil {

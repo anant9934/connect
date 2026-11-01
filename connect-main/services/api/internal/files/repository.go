@@ -250,21 +250,26 @@ func (p *PgxRepository) DeleteFile(ctx context.Context, fileID string) error {
 	defer tx.Rollback(ctx)
 
 	var storageKey string
+	var orgID *string
 	err = tx.QueryRow(ctx, `
 		UPDATE meeting_files
 		SET scan_status = 'deleted'
 		WHERE id = $1
-		RETURNING storage_key
-	`, fileID).Scan(&storageKey)
+		RETURNING storage_key, organization_id::text
+	`, fileID).Scan(&storageKey, &orgID)
 	if err != nil {
 		return fmt.Errorf("failed to mark file deleted: %w", err)
 	}
 
 	if storageKey != "" {
 		purgeKey := fmt.Sprintf("file-purge-%s-%d", fileID, time.Now().UnixNano())
+		var orgIDStr string
+		if orgID != nil {
+			orgIDStr = *orgID
+		}
 		purgePayload := worker.JobPayload{
 			Type:      worker.TypeFilePurge,
-			Data:      json.RawMessage(fmt.Sprintf(`{"fileKeys":["%s"]}`, storageKey)),
+			Data:      json.RawMessage(fmt.Sprintf(`{"fileKeys":["%s"],"tenantId":"%s"}`, storageKey, orgIDStr)),
 			CreatedAt: time.Now().UTC(),
 		}
 		if _, err := worker.EnqueueJob(ctx, tx, worker.QueueDefault, purgeKey, purgePayload, nil); err != nil {

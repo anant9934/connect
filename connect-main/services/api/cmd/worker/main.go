@@ -11,6 +11,7 @@ import (
 
 	"github.com/tathastu/connect/services/api/internal/config"
 	"github.com/tathastu/connect/services/api/internal/database"
+	"github.com/tathastu/connect/services/api/internal/files"
 	"github.com/tathastu/connect/services/api/internal/worker"
 )
 
@@ -51,9 +52,24 @@ func main() {
 	defer db.Close()
 	logger.Info("database_connected_successfully")
 
-	// 4. Initialize Registry & Register default handlers
+	// 4. Initialize Storage & Registry & Register default handlers
+	var filesStorage files.StorageProvider
+	if cfg.StorageProvider == "r2" && cfg.R2Endpoint != "" && cfg.R2Bucket != "" {
+		r2Prov, err := files.NewR2StorageProvider(ctx, files.R2StorageConfig{
+			Endpoint:        cfg.R2Endpoint,
+			Bucket:          cfg.R2Bucket,
+			AccessKeyID:     cfg.R2AccessKeyID,
+			SecretAccessKey: cfg.R2SecretAccessKey,
+			Region:          cfg.R2Region,
+		})
+		if err == nil {
+			filesStorage = r2Prov
+		} else {
+			logger.Warn("worker_r2_storage_init_warning", slog.String("error", err.Error()))
+		}
+	}
 	registry := worker.NewRegistry()
-	worker.RegisterDefaultHandlers(registry, db.Pool, logger)
+	worker.RegisterDefaultHandlers(registry, db.Pool, filesStorage, logger)
 
 	// 5. Configure Runner
 	runnerCfg := worker.DefaultRunnerConfig()

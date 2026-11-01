@@ -249,13 +249,27 @@ func TestDefaultHandlers_MalformedPayload(t *testing.T) {
 	}
 }
 
+type mockStorageDeleter struct {
+	deletedKeys []string
+	failKey     string
+}
+
+func (m *mockStorageDeleter) Delete(ctx context.Context, key string) error {
+	if m.failKey != "" && key == m.failKey {
+		return errors.New("simulated storage delete failure")
+	}
+	m.deletedKeys = append(m.deletedKeys, key)
+	return nil
+}
+
 func TestDefaultHandlers_FilePurge(t *testing.T) {
 	logger := slog.Default()
-	handler := worker.NewFilePurgeHandler(logger)
+	mockStorage := &mockStorageDeleter{}
+	handler := worker.NewFilePurgeHandler(mockStorage, logger)
 
 	purgePayload, _ := json.Marshal(worker.JobPayload{
 		Type: worker.TypeFilePurge,
-		Data: json.RawMessage(`{"fileKeys":["uploads/room-1/sample.pdf"]}`),
+		Data: json.RawMessage(`{"fileKeys":["uploads/room-1/sample.pdf"],"tenantId":"org-1"}`),
 	})
 
 	job := &worker.Job{
@@ -266,6 +280,18 @@ func TestDefaultHandlers_FilePurge(t *testing.T) {
 	err := handler.Handle(context.Background(), job)
 	if err != nil {
 		t.Fatalf("expected file purge handler to succeed, got: %v", err)
+	}
+
+	if len(mockStorage.deletedKeys) != 1 || mockStorage.deletedKeys[0] != "uploads/room-1/sample.pdf" {
+		t.Fatalf("expected storage to delete uploads/room-1/sample.pdf, got: %v", mockStorage.deletedKeys)
+	}
+
+	// Test storage failure propagation for worker retries
+	mockFailingStorage := &mockStorageDeleter{failKey: "uploads/room-1/sample.pdf"}
+	failingHandler := worker.NewFilePurgeHandler(mockFailingStorage, logger)
+	failErr := failingHandler.Handle(context.Background(), job)
+	if failErr == nil {
+		t.Fatal("expected file purge handler to fail when storage returns error")
 	}
 }
 

@@ -211,7 +211,7 @@ func main() {
 		runnerCfg.HeartbeatInterval = cfg.WorkerLeaseTTL / 3
 
 		workerRegistry := worker.NewRegistry()
-		worker.RegisterDefaultHandlers(workerRegistry, db.Pool, logger)
+		worker.RegisterDefaultHandlers(workerRegistry, db.Pool, filesStorage, logger)
 
 		var err error
 		workerRunner, err = worker.NewRunner(db.Pool, workerRegistry, logger, runnerCfg)

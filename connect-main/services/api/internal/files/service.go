@@ -179,6 +179,9 @@ func (s *Service) DownloadFile(ctx context.Context, roomCode, fileID, callerIden
 	}
 
 	// Verify file status
+	if file.ScanStatus == ScanStatusDeleted {
+		return nil, nil, ErrFileNotFound
+	}
 	if file.ScanStatus == ScanStatusRejected {
 		return nil, nil, ErrFileRejected
 	}
