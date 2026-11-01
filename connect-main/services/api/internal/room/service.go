@@ -104,13 +104,15 @@ func (s *Service) CreateRoomWithPasscode(ctx context.Context, hostUser *auth.Use
 	}
 
 	room := &Room{
-		PublicCode:         publicCode,
-		HostUserID:         hostUser.ID,
-		Status:             "active",
-		IsLocked:           false,
-		WaitingRoomEnabled: waitingRoomEnabled,
-		MaxParticipants:    maxParticipants,
-		PasscodeHash:       passcodeHash,
+		CoHostPermissions:      DefaultCoHostPermissions(),
+		ParticipantsCanPublish: true,
+		PublicCode:             publicCode,
+		HostUserID:             hostUser.ID,
+		Status:                 "active",
+		IsLocked:               false,
+		WaitingRoomEnabled:     waitingRoomEnabled,
+		MaxParticipants:        maxParticipants,
+		PasscodeHash:           passcodeHash,
 	}
 
 	if err := s.repo.CreateRoom(ctx, room); err != nil {
@@ -217,16 +219,18 @@ func (s *Service) ScheduleRoom(ctx context.Context, host *auth.User, params Sche
 	}
 	start, end := params.StartsAt.UTC(), params.EndsAt.UTC()
 	rm := &Room{
-		PublicCode:         code,
-		HostUserID:         host.ID,
-		Status:             "scheduled",
-		WaitingRoomEnabled: params.WaitingRoomEnabled,
-		MaxParticipants:    maxParticipants,
-		Title:              params.Title,
-		ScheduledStart:     &start,
-		ScheduledEnd:       &end,
-		TimeZone:           params.TimeZone,
-		PasscodeHash:       passcodeHash,
+		CoHostPermissions:      DefaultCoHostPermissions(),
+		ParticipantsCanPublish: true,
+		PublicCode:             code,
+		HostUserID:             host.ID,
+		Status:                 "scheduled",
+		WaitingRoomEnabled:     params.WaitingRoomEnabled,
+		MaxParticipants:        maxParticipants,
+		Title:                  params.Title,
+		ScheduledStart:         &start,
+		ScheduledEnd:           &end,
+		TimeZone:               params.TimeZone,
+		PasscodeHash:           passcodeHash,
 	}
 	if err := s.repo.CreateRoom(ctx, rm); err != nil {
 		return nil, fmt.Errorf("failed to persist scheduled room: %w", err)
@@ -299,6 +303,219 @@ func (s *Service) GetUpcomingRooms(ctx context.Context, user *auth.User, limit i
 		limit = 50
 	}
 	return s.repo.GetUpcomingRooms(ctx, user.ID, limit)
+}
+
+// checkLockAuthority lets a co-host with the lock permission past the host-only policy result.
+func (s *Service) checkLockAuthority(ctx context.Context, user *auth.User, rm *Room, policyErr error) error {
+	if errors.Is(policyErr, ErrUnauthorizedRoomAction) && s.canModerate(ctx, user, rm, PermLock) {
+		if rm.Status == "ended" {
+			return ErrRoomEnded
+		}
+		return nil
+	}
+	return policyErr
+}
+
+// canModerate reports whether the user is the host, or a co-host holding the permission.
+func (s *Service) canModerate(ctx context.Context, user *auth.User, rm *Room, permission string) bool {
+	if user == nil || rm == nil {
+		return false
+	}
+	if s.policy.IsHost(user, rm) {
+		return true
+	}
+	if !rm.CoHostPermissions[permission] {
+		return false
+	}
+	p, err := s.repo.GetParticipant(ctx, rm.ID, "user:"+user.ID)
+	return err == nil && p != nil && p.Role == livekit.RoleCoHost
+}
+
+// checkModerationTarget stops co-hosts acting on the host or on each other.
+func (s *Service) checkModerationTarget(ctx context.Context, user *auth.User, rm *Room, target string) error {
+	if target == "user:"+rm.HostUserID && !s.policy.IsHost(user, rm) {
+		return ErrUnauthorizedRoomAction
+	}
+	if s.policy.IsHost(user, rm) {
+		return nil
+	}
+	p, err := s.repo.GetParticipant(ctx, rm.ID, target)
+	if err == nil && p != nil && p.Role == livekit.RoleCoHost {
+		return ErrUnauthorizedRoomAction
+	}
+	return nil
+}
+
+// syncMediaRole applies a role to the SFU. PostgreSQL stays authoritative, and tokens are issued
+// from it, so a failure here is recorded rather than undoing the role change.
+func (s *Service) syncMediaRole(ctx context.Context, rm *Room, identity, role, actorID, clientIP, reqID string) {
+	if s.roomManager == nil {
+		return
+	}
+	rpcCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	var err error
+	switch {
+	case role == livekit.RoleHost || role == livekit.RoleCoHost:
+		err = s.roomManager.GrantFullPublishing(rpcCtx, rm.PublicCode, identity)
+	case rm.ParticipantsCanPublish:
+		err = s.roomManager.PromoteToSpeaker(rpcCtx, rm.PublicCode, identity)
+	default:
+		err = s.roomManager.DemoteToParticipant(rpcCtx, rm.PublicCode, identity)
+	}
+	if err != nil && s.auditService != nil {
+		s.auditService.Record(ctx, audit.AuditParams{EventType: "room.sfu_sync_failed", Severity: "WARN", ActorID: actorID, RoomID: rm.ID, ClientIP: clientIP, RequestID: reqID})
+	}
+}
+
+// SetCoHost grants or revokes co-host status. The host only.
+func (s *Service) SetCoHost(ctx context.Context, code string, user *auth.User, target string, grant bool, clientIP, reqID string) error {
+	rm, err := s.repo.GetRoomByCode(ctx, NormalizeCode(code))
+	if err != nil {
+		return ErrRoomNotFound
+	}
+	if !s.policy.IsHost(user, rm) {
+		if s.auditService != nil && user != nil {
+			s.auditService.Record(ctx, audit.AuditParams{EventType: audit.EventHostActionDenied, Severity: "WARN", ActorID: user.ID, RoomID: rm.ID, ClientIP: clientIP, RequestID: reqID})
+		}
+		return ErrUnauthorizedRoomAction
+	}
+	if err := s.repo.SetCoHost(ctx, rm.ID, target, grant); err != nil {
+		return err
+	}
+	role, event := livekit.RoleCoHost, audit.EventType("room.cohost_granted")
+	if !grant {
+		role, event = livekit.RoleParticipant, audit.EventType("room.cohost_revoked")
+	}
+	s.syncMediaRole(ctx, rm, target, role, user.ID, clientIP, reqID)
+	if s.auditService != nil {
+		s.auditService.Record(ctx, audit.AuditParams{EventType: event, Severity: "INFO", ActorID: user.ID, RoomID: rm.ID, ClientIP: clientIP, RequestID: reqID, Metadata: map[string]any{"target": target}})
+	}
+	return nil
+}
+
+// TransferHost hands the meeting to a connected, signed-in participant, effective immediately.
+// The database locks the room, so concurrent transfers cannot both succeed.
+func (s *Service) TransferHost(ctx context.Context, code string, user *auth.User, target, clientIP, reqID string) error {
+	rm, err := s.repo.GetRoomByCode(ctx, NormalizeCode(code))
+	if err != nil {
+		return ErrRoomNotFound
+	}
+	if !s.policy.IsHost(user, rm) {
+		if s.auditService != nil && user != nil {
+			s.auditService.Record(ctx, audit.AuditParams{EventType: audit.EventHostActionDenied, Severity: "WARN", ActorID: user.ID, RoomID: rm.ID, ClientIP: clientIP, RequestID: reqID})
+		}
+		return ErrUnauthorizedRoomAction
+	}
+	if err := s.repo.TransferHost(ctx, rm.ID, target); err != nil {
+		return err
+	}
+	s.syncMediaRole(ctx, rm, target, livekit.RoleHost, user.ID, clientIP, reqID)
+	s.syncMediaRole(ctx, rm, "user:"+user.ID, livekit.RoleParticipant, user.ID, clientIP, reqID)
+	if s.auditService != nil {
+		s.auditService.Record(ctx, audit.AuditParams{EventType: "room.host_transferred", Severity: "INFO", ActorID: user.ID, RoomID: rm.ID, ClientIP: clientIP, RequestID: reqID, Metadata: map[string]any{"target": target}})
+	}
+	return nil
+}
+
+// RoomPermissions is what the host may configure for co-hosts and regular participants.
+type RoomPermissions struct {
+	CoHost                 map[string]bool `json:"coHost"`
+	ParticipantsCanPublish bool            `json:"participantsCanPublish"`
+}
+
+// SetRoomPermissions changes the room's permissions. The host only. Unknown names are rejected,
+// and connected regular participants are updated straight away.
+func (s *Service) SetRoomPermissions(ctx context.Context, code string, user *auth.User, perms RoomPermissions, clientIP, reqID string) error {
+	rm, err := s.repo.GetRoomByCode(ctx, NormalizeCode(code))
+	if err != nil {
+		return ErrRoomNotFound
+	}
+	if !s.policy.IsHost(user, rm) {
+		return ErrUnauthorizedRoomAction
+	}
+	merged := DefaultCoHostPermissions()
+	for name, allowed := range perms.CoHost {
+		if _, known := merged[name]; !known {
+			return fmt.Errorf("%w: unknown co-host permission %q", ErrInvalidSchedule, name)
+		}
+		merged[name] = allowed
+	}
+	if err := s.repo.SetRoomPermissions(ctx, rm.ID, merged, perms.ParticipantsCanPublish); err != nil {
+		return err
+	}
+	rm.ParticipantsCanPublish = perms.ParticipantsCanPublish
+	if participants, err := s.repo.GetActiveParticipants(ctx, rm.ID); err == nil {
+		for _, p := range participants {
+			if p.Role == livekit.RoleParticipant {
+				s.syncMediaRole(ctx, rm, p.Identity, p.Role, user.ID, clientIP, reqID)
+			}
+		}
+	}
+	if s.auditService != nil {
+		s.auditService.Record(ctx, audit.AuditParams{EventType: "room.permissions_changed", Severity: "INFO", ActorID: user.ID, RoomID: rm.ID, ClientIP: clientIP, RequestID: reqID})
+	}
+	return nil
+}
+
+// MuteAll mutes every participant except the host, co-hosts and the caller.
+func (s *Service) MuteAll(ctx context.Context, code string, user *auth.User, clientIP, reqID string) error {
+	rm, err := s.repo.GetRoomByCode(ctx, NormalizeCode(code))
+	if err != nil {
+		return ErrRoomNotFound
+	}
+	if !s.canModerate(ctx, user, rm, PermMute) {
+		return ErrUnauthorizedRoomAction
+	}
+	if s.roomManager != nil {
+		except := map[string]bool{"user:" + user.ID: true, "user:" + rm.HostUserID: true}
+		if participants, err := s.repo.GetActiveParticipants(ctx, rm.ID); err == nil {
+			for _, p := range participants {
+				if p.Role == livekit.RoleCoHost {
+					except[p.Identity] = true
+				}
+			}
+		}
+		if err := s.roomManager.MuteAll(ctx, rm.PublicCode, except); err != nil {
+			return fmt.Errorf("%w: %v", ErrSFUSyncFailed, err)
+		}
+	}
+	if s.auditService != nil {
+		s.auditService.Record(ctx, audit.AuditParams{EventType: "room.muted_all", Severity: "INFO", ActorID: user.ID, RoomID: rm.ID, ClientIP: clientIP, RequestID: reqID})
+	}
+	return nil
+}
+
+// MyRole is the caller's current standing in a room, so clients can follow role changes.
+type MyRole struct {
+	Role        string          `json:"role"`
+	IsHost      bool            `json:"isHost"`
+	HostID      string          `json:"hostIdentity"`
+	Permissions map[string]bool `json:"permissions"`
+}
+
+// GetMyRole returns the caller's role, and is denied to anyone without room access.
+func (s *Service) GetMyRole(ctx context.Context, code, identity string) (*MyRole, error) {
+	rm, err := s.repo.GetRoomByCode(ctx, NormalizeCode(code))
+	if err != nil {
+		return nil, ErrRoomNotFound
+	}
+	if _, _, err := s.ValidateRoomAccess(ctx, code, identity); err != nil {
+		return nil, err
+	}
+	result := &MyRole{Role: livekit.RoleParticipant, HostID: "user:" + rm.HostUserID, Permissions: map[string]bool{}}
+	if identity == result.HostID {
+		result.Role, result.IsHost = livekit.RoleHost, true
+		result.Permissions = DefaultCoHostPermissions()
+		return result, nil
+	}
+	if p, err := s.repo.GetParticipant(ctx, rm.ID, identity); err == nil && p != nil && p.Role != "" {
+		result.Role = p.Role
+	}
+	if result.Role == livekit.RoleCoHost {
+		result.Permissions = rm.CoHostPermissions
+	}
+	return result, nil
 }
 
 // GetRoom retrieves a room by its normalized public code.
@@ -463,7 +680,10 @@ func (s *Service) JoinRoomWithPasscode(ctx context.Context, code string, user *a
 		isHost = false
 	}
 
-	if err := s.repo.UpsertParticipant(ctx, participant); err != nil {
+	// A client rejoining after a crash keeps its record, and with it any co-host or speaker role.
+	if existing, err := s.repo.GetParticipant(ctx, rm.ID, participant.Identity); err == nil && existing != nil {
+		participant = existing
+	} else if err := s.repo.UpsertParticipant(ctx, participant); err != nil {
 		return nil, fmt.Errorf("failed to register participant: %w", err)
 	}
 
@@ -502,6 +722,11 @@ func (s *Service) LeaveRoom(ctx context.Context, code string, identity string, c
 		return nil
 	}
 	_ = s.repo.MarkParticipantLeft(ctx, rm.ID, identity, time.Now().UTC())
+	if identity == "user:"+rm.HostUserID {
+		if err := s.repo.EnqueueHostSuccession(ctx, rm.ID, identity); err != nil {
+			log.Printf("[WARN] Failed to schedule host succession for room %s: %v", rm.ID, err)
+		}
+	}
 	return nil
 }
 
@@ -513,7 +738,7 @@ func (s *Service) LockRoom(ctx context.Context, code string, user *auth.User, cl
 		return ErrRoomNotFound
 	}
 
-	if err := s.policy.CanLock(user, rm); err != nil {
+	if err := s.checkLockAuthority(ctx, user, rm, s.policy.CanLock(user, rm)); err != nil {
 		if s.auditService != nil {
 			s.auditService.Record(ctx, audit.AuditParams{
 				EventType: audit.EventHostActionDenied,
@@ -553,7 +778,7 @@ func (s *Service) UnlockRoom(ctx context.Context, code string, user *auth.User, 
 		return ErrRoomNotFound
 	}
 
-	if err := s.policy.CanUnlock(user, rm); err != nil {
+	if err := s.checkLockAuthority(ctx, user, rm, s.policy.CanUnlock(user, rm)); err != nil {
 		if s.auditService != nil {
 			s.auditService.Record(ctx, audit.AuditParams{
 				EventType: audit.EventHostActionDenied,
@@ -733,14 +958,20 @@ func (s *Service) GenerateToken(ctx context.Context, code string, user *auth.Use
 		}
 	}
 
-	token, err := s.tokenService.GenerateToken(livekit.GrantParams{
+	grant := livekit.GrantParams{
 		RoomCode:    rm.PublicCode,
 		Identity:    identity,
 		DisplayName: displayName,
 		Role:        role,
 		IsHost:      isHost,
 		ValidFor:    10 * time.Minute,
-	})
+	}
+	if role == livekit.RoleParticipant && rm.ParticipantsCanPublish {
+		canPublish := true
+		grant.CanPublish = &canPublish
+		grant.CanPublishSources = []string{livekit.TrackSourceCamera, livekit.TrackSourceMicrophone, livekit.TrackSourceScreenShare, livekit.TrackSourceScreenShareAudio}
+	}
+	token, err := s.tokenService.GenerateToken(grant)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate media token: %w", err)
 	}
@@ -852,7 +1083,7 @@ func (s *Service) GetPendingAdmissions(ctx context.Context, code string, user *a
 	if err != nil {
 		return nil, ErrRoomNotFound
 	}
-	if !s.policy.IsHost(user, rm) {
+	if !s.canModerate(ctx, user, rm, PermAdmit) {
 		return nil, ErrUnauthorizedRoomAction
 	}
 
@@ -866,7 +1097,7 @@ func (s *Service) DecideAdmission(ctx context.Context, code string, user *auth.U
 	if err != nil {
 		return ErrRoomNotFound
 	}
-	if !s.policy.IsHost(user, rm) {
+	if !s.canModerate(ctx, user, rm, PermAdmit) {
 		return ErrUnauthorizedRoomAction
 	}
 
@@ -915,12 +1146,15 @@ func (s *Service) RemoveParticipant(ctx context.Context, code string, user *auth
 	if err != nil {
 		return ErrRoomNotFound
 	}
-	if !s.policy.IsHost(user, rm) {
+	if !s.canModerate(ctx, user, rm, PermRemove) {
 		return ErrUnauthorizedRoomAction
 	}
 
 	if targetIdentity == "user:"+user.ID {
 		return errors.New("cannot remove room host; use end room instead")
+	}
+	if err := s.checkModerationTarget(ctx, user, rm, targetIdentity); err != nil {
+		return err
 	}
 
 	if err := s.repo.SetParticipantRemoved(ctx, rm.ID, targetIdentity); err != nil {
@@ -952,8 +1186,12 @@ func (s *Service) MuteParticipant(ctx context.Context, code string, user *auth.U
 	if err != nil {
 		return ErrRoomNotFound
 	}
-	if !s.policy.IsHost(user, rm) {
+	if !s.canModerate(ctx, user, rm, PermMute) {
 		return ErrUnauthorizedRoomAction
+	}
+
+	if err := s.checkModerationTarget(ctx, user, rm, targetIdentity); err != nil {
+		return err
 	}
 
 	if s.roomManager != nil {
@@ -990,7 +1228,7 @@ func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.Us
 	if err != nil {
 		return ErrRoomNotFound
 	}
-	if !s.policy.IsHost(user, rm) {
+	if !s.canModerate(ctx, user, rm, PermSpeakers) {
 		return ErrUnauthorizedRoomAction
 	}
 
@@ -1014,6 +1252,10 @@ func (s *Service) PromoteSpeaker(ctx context.Context, code string, user *auth.Us
 	prevRole := part.Role
 	if prevRole == "" {
 		prevRole = livekit.RoleParticipant
+	}
+	// Speaker changes would strip a higher role, which has its own endpoints.
+	if prevRole == livekit.RoleCoHost || prevRole == livekit.RoleHost {
+		return ErrIneligibleTarget
 	}
 
 	opID := uuid.NewString()
@@ -1140,7 +1382,7 @@ func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.Use
 	if err != nil {
 		return ErrRoomNotFound
 	}
-	if !s.policy.IsHost(user, rm) {
+	if !s.canModerate(ctx, user, rm, PermSpeakers) {
 		return ErrUnauthorizedRoomAction
 	}
 
@@ -1164,6 +1406,10 @@ func (s *Service) DemoteSpeaker(ctx context.Context, code string, user *auth.Use
 	prevRole := part.Role
 	if prevRole == "" {
 		prevRole = livekit.RoleParticipant
+	}
+	// Speaker changes would strip a higher role, which has its own endpoints.
+	if prevRole == livekit.RoleCoHost || prevRole == livekit.RoleHost {
+		return ErrIneligibleTarget
 	}
 
 	opID := uuid.NewString()

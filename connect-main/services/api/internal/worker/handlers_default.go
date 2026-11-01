@@ -447,6 +447,33 @@ func NewFilePurgeHandler(storage StorageDeleter, logger *slog.Logger) HandlerFun
 	}
 }
 
+// HostSuccessionData identifies the room whose host left.
+type HostSuccessionData struct {
+	RoomID string `json:"roomId"`
+}
+
+// NewHostSuccessionHandler promotes a connected co-host if the host has not returned.
+func NewHostSuccessionHandler(pool *pgxpool.Pool, logger *slog.Logger) func(ctx context.Context, job *Job) error {
+	return func(ctx context.Context, job *Job) error {
+		var data HostSuccessionData
+		payload, err := ParsePayload(job.Payload)
+		if err != nil {
+			return MarkPermanent(err)
+		}
+		if err := json.Unmarshal(payload.Data, &data); err != nil || data.RoomID == "" {
+			return MarkPermanent(fmt.Errorf("invalid host succession payload: %w", err))
+		}
+		var successor *string
+		if err := pool.QueryRow(ctx, `SELECT connect_auth.succeed_room_host($1::UUID)`, data.RoomID).Scan(&successor); err != nil {
+			return fmt.Errorf("host succession failed: %w", err)
+		}
+		if successor != nil {
+			logger.Info("room_host_succeeded", slog.String("room_id", data.RoomID), slog.String("identity", *successor))
+		}
+		return nil
+	}
+}
+
 // RegisterDefaultHandlers registers all standard Connect handlers into the registry.
 func RegisterDefaultHandlers(r *Registry, pool *pgxpool.Pool, storage StorageDeleter, logger *slog.Logger) {
 	if logger == nil {
@@ -457,4 +484,5 @@ func RegisterDefaultHandlers(r *Registry, pool *pgxpool.Pool, storage StorageDel
 	r.RegisterFunc(TypeRoomCleanup, NewRoomCleanupHandler(pool, logger))
 	r.RegisterFunc(TypeAttendanceReconcile, NewAttendanceReconcileHandler(pool, logger))
 	r.RegisterFunc(TypeFilePurge, NewFilePurgeHandler(storage, logger))
+	r.RegisterFunc(TypeRoomHostSuccession, NewHostSuccessionHandler(pool, logger))
 }

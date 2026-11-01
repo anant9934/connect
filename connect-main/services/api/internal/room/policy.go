@@ -18,6 +18,7 @@ var (
 	ErrInvalidPasscode               = errors.New("the passcode is incorrect")
 	ErrInvalidSchedule               = errors.New("the meeting schedule is invalid")
 	ErrScheduleConflict              = errors.New("you already have a meeting scheduled during this time")
+	ErrIneligibleTarget              = errors.New("this participant is not eligible for that role")
 	ErrAdmissionRequired             = errors.New("admission to this meeting is awaiting host approval")
 	ErrAdmissionPending              = errors.New("your request to join is pending host review")
 	ErrAdmissionDenied               = errors.New("the host has declined your request to join this meeting")
@@ -38,6 +39,21 @@ type Policy struct{}
 // NewPolicy constructs a room policy checker.
 func NewPolicy() *Policy {
 	return &Policy{}
+}
+
+// Co-host permissions the host can switch on or off. Ending, transferring and managing
+// co-hosts always stay with the host.
+const (
+	PermAdmit    = "admit"
+	PermMute     = "mute"
+	PermRemove   = "remove"
+	PermLock     = "lock"
+	PermSpeakers = "speakers"
+)
+
+// DefaultCoHostPermissions matches the column default in migration 000018.
+func DefaultCoHostPermissions() map[string]bool {
+	return map[string]bool{PermAdmit: true, PermMute: true, PermRemove: true, PermLock: true, PermSpeakers: true}
 }
 
 // IsHost checks if the authenticated user is the authoritative owner of the room.

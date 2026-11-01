@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/tathastu/connect/services/api/internal/auth"
 	"github.com/tathastu/connect/services/api/internal/database"
 	"github.com/tathastu/connect/services/api/internal/livekit"
 	"github.com/tathastu/connect/services/api/internal/middleware"
@@ -65,18 +66,21 @@ type TokenRequest struct {
 }
 
 type RoomDTO struct {
-	ID                 string `json:"id"`
-	PublicCode         string `json:"publicCode"`
-	Status             string `json:"status"`
-	IsLocked           bool   `json:"isLocked"`
-	WaitingRoomEnabled bool   `json:"waitingRoomEnabled"`
-	MaxParticipants    int    `json:"maxParticipants"`
-	CreatedAt          string `json:"createdAt"`
-	Title              string `json:"title,omitempty"`
-	ScheduledStart     string `json:"scheduledStart,omitempty"`
-	ScheduledEnd       string `json:"scheduledEnd,omitempty"`
-	TimeZone           string `json:"timeZone,omitempty"`
-	HasPasscode        bool   `json:"hasPasscode"`
+	ID                     string          `json:"id"`
+	PublicCode             string          `json:"publicCode"`
+	Status                 string          `json:"status"`
+	IsLocked               bool            `json:"isLocked"`
+	WaitingRoomEnabled     bool            `json:"waitingRoomEnabled"`
+	MaxParticipants        int             `json:"maxParticipants"`
+	CreatedAt              string          `json:"createdAt"`
+	Title                  string          `json:"title,omitempty"`
+	ScheduledStart         string          `json:"scheduledStart,omitempty"`
+	ScheduledEnd           string          `json:"scheduledEnd,omitempty"`
+	TimeZone               string          `json:"timeZone,omitempty"`
+	HasPasscode            bool            `json:"hasPasscode"`
+	HostIdentity           string          `json:"hostIdentity"`
+	ParticipantsCanPublish bool            `json:"participantsCanPublish"`
+	CoHostPermissions      map[string]bool `json:"coHostPermissions,omitempty"`
 }
 
 type ParticipantDTO struct {
@@ -111,16 +115,19 @@ type MuteParticipantPayload struct {
 
 func toRoomDTO(r *Room) RoomDTO {
 	dto := RoomDTO{
-		ID:                 r.ID,
-		PublicCode:         r.PublicCode,
-		Status:             r.Status,
-		IsLocked:           r.IsLocked,
-		WaitingRoomEnabled: r.WaitingRoomEnabled,
-		MaxParticipants:    r.MaxParticipants,
-		CreatedAt:          r.CreatedAt.Format(time.RFC3339),
-		Title:              r.Title,
-		TimeZone:           r.TimeZone,
-		HasPasscode:        r.PasscodeHash != "",
+		ID:                     r.ID,
+		PublicCode:             r.PublicCode,
+		Status:                 r.Status,
+		IsLocked:               r.IsLocked,
+		WaitingRoomEnabled:     r.WaitingRoomEnabled,
+		MaxParticipants:        r.MaxParticipants,
+		CreatedAt:              r.CreatedAt.Format(time.RFC3339),
+		Title:                  r.Title,
+		TimeZone:               r.TimeZone,
+		HasPasscode:            r.PasscodeHash != "",
+		HostIdentity:           "user:" + r.HostUserID,
+		ParticipantsCanPublish: r.ParticipantsCanPublish,
+		CoHostPermissions:      r.CoHostPermissions,
 	}
 	if r.ScheduledStart != nil {
 		dto.ScheduledStart = r.ScheduledStart.UTC().Format(time.RFC3339)
@@ -146,6 +153,113 @@ func sendScheduleError(w http.ResponseWriter, r *http.Request, err error) bool {
 		return false
 	}
 	return true
+}
+
+func sendRoleError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, ErrUnauthorizedRoomAction):
+		model.SendJSONError(w, r, http.StatusForbidden, "FORBIDDEN", "You do not have permission to do this.")
+	case errors.Is(err, ErrRoomNotFound):
+		model.SendJSONError(w, r, http.StatusNotFound, "ROOM_NOT_FOUND", "This meeting is unavailable.")
+	case errors.Is(err, ErrParticipantNotFoundInRoom):
+		model.SendJSONError(w, r, http.StatusNotFound, "NOT_FOUND", "That person is not in this meeting.")
+	case errors.Is(err, ErrIneligibleTarget):
+		model.SendJSONError(w, r, http.StatusConflict, "INELIGIBLE_TARGET", "That person is not eligible for this role.")
+	case errors.Is(err, ErrInvalidSchedule):
+		model.SendJSONError(w, r, http.StatusBadRequest, "INVALID_PERMISSIONS", err.Error())
+	case errors.Is(err, ErrSFUSyncFailed):
+		model.SendJSONError(w, r, http.StatusBadGateway, "SFU_SYNC_FAILED", "The media server could not apply this.")
+	default:
+		model.SendJSONError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "This could not be completed.")
+	}
+}
+
+// requireUser writes a 401 and returns nil when the request has no session.
+func requireUser(w http.ResponseWriter, r *http.Request) *auth.User {
+	user, ok := middleware.UserFromContext(r.Context())
+	if !ok || user == nil {
+		model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication required")
+		return nil
+	}
+	return user
+}
+
+func (h *Handlers) setCoHost(w http.ResponseWriter, r *http.Request, grant bool) {
+	user := requireUser(w, r)
+	if user == nil {
+		return
+	}
+	if err := h.service.SetCoHost(r.Context(), chi.URLParam(r, "code"), user, chi.URLParam(r, "identity"), grant, extractIP(r), getRequestID(r)); err != nil {
+		sendRoleError(w, r, err)
+		return
+	}
+	model.SendJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// GrantCoHost handles POST /api/v1/rooms/{code}/participants/{identity}/cohost
+func (h *Handlers) GrantCoHost(w http.ResponseWriter, r *http.Request) { h.setCoHost(w, r, true) }
+
+// RevokeCoHost handles DELETE /api/v1/rooms/{code}/participants/{identity}/cohost
+func (h *Handlers) RevokeCoHost(w http.ResponseWriter, r *http.Request) { h.setCoHost(w, r, false) }
+
+// TransferHost handles POST /api/v1/rooms/{code}/participants/{identity}/transfer-host
+func (h *Handlers) TransferHost(w http.ResponseWriter, r *http.Request) {
+	user := requireUser(w, r)
+	if user == nil {
+		return
+	}
+	if err := h.service.TransferHost(r.Context(), chi.URLParam(r, "code"), user, chi.URLParam(r, "identity"), extractIP(r), getRequestID(r)); err != nil {
+		sendRoleError(w, r, err)
+		return
+	}
+	model.SendJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// UpdatePermissions handles PUT /api/v1/rooms/{code}/permissions
+func (h *Handlers) UpdatePermissions(w http.ResponseWriter, r *http.Request) {
+	user := requireUser(w, r)
+	if user == nil {
+		return
+	}
+	var perms RoomPermissions
+	if err := json.NewDecoder(r.Body).Decode(&perms); err != nil {
+		model.SendJSONError(w, r, http.StatusBadRequest, "INVALID_PERMISSIONS", "Invalid request body.")
+		return
+	}
+	if err := h.service.SetRoomPermissions(r.Context(), chi.URLParam(r, "code"), user, perms, extractIP(r), getRequestID(r)); err != nil {
+		sendRoleError(w, r, err)
+		return
+	}
+	model.SendJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// MuteAll handles POST /api/v1/rooms/{code}/mute-all
+func (h *Handlers) MuteAll(w http.ResponseWriter, r *http.Request) {
+	user := requireUser(w, r)
+	if user == nil {
+		return
+	}
+	if err := h.service.MuteAll(r.Context(), chi.URLParam(r, "code"), user, extractIP(r), getRequestID(r)); err != nil {
+		sendRoleError(w, r, err)
+		return
+	}
+	model.SendJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// Me handles GET /api/v1/rooms/{code}/me
+func (h *Handlers) Me(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	identity, r := callerIdentity(r, NormalizeCode(code))
+	if identity == "" {
+		model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Valid participant identity required.")
+		return
+	}
+	role, err := h.service.GetMyRole(r.Context(), code, identity)
+	if err != nil {
+		sendRoleError(w, r, err)
+		return
+	}
+	model.SendJSON(w, http.StatusOK, role)
 }
 
 // Upcoming handles GET /api/v1/rooms/upcoming

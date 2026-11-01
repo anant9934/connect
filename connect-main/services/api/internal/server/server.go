@@ -196,6 +196,36 @@ func BuildRouter(
 						appmw.RequireAuth(authService),
 					).Post("/participants/{identity}/demote-speaker", roomHandler.DemoteSpeaker)
 
+					// Co-hosts, host transfer and room permissions
+					roomDetail.With(
+						appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+						appmw.RequireAuth(authService),
+					).Post("/participants/{identity}/cohost", roomHandler.GrantCoHost)
+
+					roomDetail.With(
+						appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+						appmw.RequireAuth(authService),
+					).Delete("/participants/{identity}/cohost", roomHandler.RevokeCoHost)
+
+					roomDetail.With(
+						appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+						appmw.RequireAuth(authService),
+					).Post("/participants/{identity}/transfer-host", roomHandler.TransferHost)
+
+					roomDetail.With(
+						appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+						appmw.RequireAuth(authService),
+					).Put("/permissions", roomHandler.UpdatePermissions)
+
+					roomDetail.With(
+						appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+						appmw.RequireAuth(authService),
+					).Post("/mute-all", roomHandler.MuteAll)
+
+					roomDetail.With(
+						appmw.OptionalAuth(authService),
+					).Get("/me", roomHandler.Me)
+
 					// Host actions: Lock, Unlock, End (Require authenticated session)
 					roomDetail.With(
 						appmw.CSRFProtection(cfg.CORSAllowedOrigins),

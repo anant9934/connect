@@ -286,6 +286,48 @@ func (m *RoomManager) PromoteToSpeaker(ctx context.Context, roomCode, identity s
 	})
 }
 
+// GrantFullPublishing gives a host or co-host every publishing source in real-time.
+func (m *RoomManager) GrantFullPublishing(ctx context.Context, roomCode, identity string) error {
+	return m.UpdateParticipantPermissions(ctx, roomCode, identity, &proto.ParticipantPermission{
+		CanSubscribe:   true,
+		CanPublish:     true,
+		CanPublishData: true,
+		CanPublishSources: []proto.TrackSource{
+			proto.TrackSource_CAMERA,
+			proto.TrackSource_MICROPHONE,
+			proto.TrackSource_SCREEN_SHARE,
+			proto.TrackSource_SCREEN_SHARE_AUDIO,
+		},
+	})
+}
+
+// MuteAll mutes every published microphone except those of the given identities.
+func (m *RoomManager) MuteAll(ctx context.Context, roomCode string, except map[string]bool) error {
+	if m.client == nil {
+		return nil
+	}
+	scopedCtx := WithRoomScope(ctx, roomCode)
+	res, err := m.client.ListParticipants(scopedCtx, &proto.ListParticipantsRequest{Room: roomCode})
+	if err != nil {
+		return fmt.Errorf("livekit list participants failed: %w", err)
+	}
+	var firstErr error
+	for _, p := range res.GetParticipants() {
+		if except[p.GetIdentity()] {
+			continue
+		}
+		for _, track := range p.GetTracks() {
+			if track.GetSource() != proto.TrackSource_MICROPHONE || track.GetMuted() {
+				continue
+			}
+			if err := m.MuteParticipantTrack(ctx, roomCode, p.GetIdentity(), track.GetSid()); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
+}
+
 // DemoteToParticipant revokes publishing permissions from a participant in real-time.
 func (m *RoomManager) DemoteToParticipant(ctx context.Context, roomCode, identity string) error {
 	return m.UpdateParticipantPermissions(ctx, roomCode, identity, &proto.ParticipantPermission{

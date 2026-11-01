@@ -106,6 +106,9 @@ func toSessionEvent(event *livekit.WebhookEvent) (SessionEvent, bool) {
 	return ev, false
 }
 
+// hostSuccessionGraceSeconds gives a departed host time to reconnect before a co-host takes over.
+const hostSuccessionGraceSeconds = 60
+
 // PgxSessionStore implements SessionStore on PostgreSQL.
 type PgxSessionStore struct {
 	pool *pgxpool.Pool
@@ -175,6 +178,10 @@ func (s *PgxSessionStore) Apply(ctx context.Context, ev SessionEvent) error {
 			ON CONFLICT (room_id, participant_sid) DO UPDATE
 			SET left_at = GREATEST(participant_media_sessions.joined_at, EXCLUDED.left_at)
 		`, *roomID, ev.ParticipantSID, ev.Identity, userIDFromIdentity(ev.Identity), ev.JoinedAt, ev.OccurredAt)
+		if err == nil {
+			// A crashed client never calls /leave, so this is how a vanished host is noticed.
+			_, err = tx.Exec(ctx, `SELECT connect_auth.enqueue_host_succession($1::UUID, $2, $3)`, *roomID, ev.Identity, hostSuccessionGraceSeconds)
+		}
 	case webhook.EventRoomFinished:
 		_, err = tx.Exec(ctx, `
 			UPDATE participant_media_sessions

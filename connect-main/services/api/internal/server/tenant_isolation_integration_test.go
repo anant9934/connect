@@ -3,6 +3,7 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -359,6 +360,177 @@ func TestWorkflowDB_APITenantIsolation(t *testing.T) {
 		api.want("host cancels", http.StatusOK, http.MethodPost, roomPath(secondCode)+"/cancel", host, nil)
 		api.want("join cancelled", http.StatusGone, http.MethodPost, roomPath(secondCode)+"/join", user, map[string]any{})
 		api.want("lookup cancelled", http.StatusGone, http.MethodGet, roomPath(secondCode), user, nil)
+	})
+
+	t.Run("co-host and host transfer", func(t *testing.T) {
+		hostID, hostToken := api.signup()
+		coID, coToken := api.signup()
+		plainID, plainToken := api.signup()
+		_, outsiderToken := api.signup()
+		secondID, secondToken := api.signup()
+		host, co, plain, outsider, second := caller{token: hostToken}, caller{token: coToken}, caller{token: plainToken}, caller{token: outsiderToken}, caller{token: secondToken}
+		code := createRoom(hostToken, false)
+		base := roomPath(code)
+		people := func(id string) string { return base + "/participants/user:" + id }
+		for _, who := range []caller{co, plain, second} {
+			api.want("join", http.StatusOK, http.MethodPost, base+"/join", who, map[string]any{})
+		}
+		res := api.want("guest join", http.StatusOK, http.MethodPost, base+"/join", caller{}, map[string]any{"displayName": "Guest"})
+		guestPart, _ := res["participant"].(map[string]any)
+		guestIdentity, _ := guestPart["identity"].(string)
+
+		// Promotion
+		api.want("participant promotes", http.StatusForbidden, http.MethodPost, people(coID)+"/cohost", plain, nil)
+		api.want("outsider promotes", http.StatusForbidden, http.MethodPost, people(coID)+"/cohost", outsider, nil)
+		api.want("guest cannot be co-host", http.StatusConflict, http.MethodPost, base+"/participants/"+guestIdentity+"/cohost", host, nil)
+		api.want("non participant", http.StatusNotFound, http.MethodPost, people(uuid.NewString())+"/cohost", host, nil)
+		api.want("host promotes", http.StatusOK, http.MethodPost, people(coID)+"/cohost", host, nil)
+		res = api.want("role is visible", http.StatusOK, http.MethodGet, base+"/me", co, nil)
+		if res["role"] != "co-host" || res["permissions"] == nil {
+			t.Errorf("co-host role not synchronized: %v", res)
+		}
+
+		// Moderation rights and owner-only limits
+		api.want("co-host locks", http.StatusOK, http.MethodPost, base+"/lock", co, nil)
+		api.want("co-host unlocks", http.StatusOK, http.MethodPost, base+"/unlock", co, nil)
+		api.want("co-host ends", http.StatusForbidden, http.MethodPost, base+"/end", co, nil)
+		api.want("co-host transfers", http.StatusForbidden, http.MethodPost, people(plainID)+"/transfer-host", co, nil)
+		api.want("co-host promotes", http.StatusForbidden, http.MethodPost, people(plainID)+"/cohost", co, nil)
+		api.want("co-host changes permissions", http.StatusForbidden, http.MethodPut, base+"/permissions", co, map[string]any{"participantsCanPublish": true})
+		api.want("co-host removes host", http.StatusForbidden, http.MethodPost, people(hostID)+"/remove", co, nil)
+		api.want("participant mutes all", http.StatusForbidden, http.MethodPost, base+"/mute-all", plain, nil)
+		api.want("co-host mutes all", http.StatusOK, http.MethodPost, base+"/mute-all", co, nil)
+		api.want("co-host lists admissions", http.StatusOK, http.MethodGet, base+"/admission/pending", co, nil)
+
+		// Permissions are configurable
+		api.want("unknown permission", http.StatusBadRequest, http.MethodPut, base+"/permissions", host, map[string]any{"coHost": map[string]bool{"end": true}, "participantsCanPublish": true})
+		api.want("host narrows co-host", http.StatusOK, http.MethodPut, base+"/permissions", host, map[string]any{"coHost": map[string]bool{"lock": false}, "participantsCanPublish": true})
+		api.want("lock no longer allowed", http.StatusForbidden, http.MethodPost, base+"/lock", co, nil)
+		api.want("host restores", http.StatusOK, http.MethodPut, base+"/permissions", host, map[string]any{"participantsCanPublish": true})
+
+		// The database refuses what the service would, without relying on it
+		if _, err := app.Exec(ctx, `UPDATE rooms SET host_user_id = $1 WHERE public_code = $2`, plainID, code); err != nil {
+			t.Fatalf("no-context update errored unexpectedly: %v", err)
+		}
+		tx, err := app.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, `SELECT connect_auth.authenticate_session($1::VARCHAR, NULL)`, auth.HashSessionToken(hostToken)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE rooms SET host_user_id = $1 WHERE public_code = $2`, plainID, code); err == nil {
+			t.Error("a host changed ownership without the transfer function")
+		}
+		_ = tx.Rollback(ctx)
+
+		// Removal strips the role
+		api.want("host removes co-host", http.StatusOK, http.MethodPost, people(coID)+"/remove", host, nil)
+		api.want("removed co-host locks", http.StatusForbidden, http.MethodPost, base+"/lock", co, nil)
+		var coRole string
+		if err := admin.QueryRow(ctx, `SELECT rp.role FROM room_participants rp JOIN rooms r ON r.id = rp.room_id WHERE r.public_code = $1 AND rp.identity = $2`, code, "user:"+coID).Scan(&coRole); err != nil || coRole != "participant" {
+			t.Errorf("removed co-host kept role %q, err=%v", coRole, err)
+		}
+
+		// Revocation
+		api.want("promote second", http.StatusOK, http.MethodPost, people(secondID)+"/cohost", host, nil)
+		api.want("revoke second", http.StatusOK, http.MethodDelete, people(secondID)+"/cohost", host, nil)
+		api.want("revoked co-host locks", http.StatusForbidden, http.MethodPost, base+"/lock", second, nil)
+		api.want("rejoin keeps a single record", http.StatusOK, http.MethodPost, base+"/join", second, map[string]any{})
+		var rows int
+		if err := admin.QueryRow(ctx, `SELECT count(*) FROM room_participants rp JOIN rooms r ON r.id = rp.room_id WHERE r.public_code = $1 AND rp.identity = $2 AND rp.left_at IS NULL`, code, "user:"+secondID).Scan(&rows); err != nil || rows != 1 {
+			t.Errorf("rejoin created %d active records, err=%v", rows, err)
+		}
+
+		// Transfer targets
+		api.want("transfer to guest", http.StatusConflict, http.MethodPost, base+"/participants/"+guestIdentity+"/transfer-host", host, nil)
+		api.want("transfer to outsider", http.StatusNotFound, http.MethodPost, people(uuid.NewString())+"/transfer-host", host, nil)
+		api.want("participant transfers", http.StatusForbidden, http.MethodPost, people(plainID)+"/transfer-host", plain, nil)
+
+		// Concurrent transfers: exactly one wins and there is exactly one host.
+		codes := make(chan int, 2)
+		for _, target := range []string{plainID, secondID} {
+			go func() {
+				got, _ := api.call(http.MethodPost, people(target)+"/transfer-host", host, nil)
+				codes <- got
+			}()
+		}
+		first, other := <-codes, <-codes
+		if !(first == http.StatusOK && other == http.StatusForbidden) && !(first == http.StatusForbidden && other == http.StatusOK) {
+			t.Errorf("concurrent transfers returned %d and %d", first, other)
+		}
+		var newHost string
+		var hosts int
+		if err := admin.QueryRow(ctx, `SELECT r.host_user_id::text, (SELECT count(*) FROM room_participants rp WHERE rp.room_id = r.id AND rp.role = 'host' AND rp.left_at IS NULL) FROM rooms r WHERE r.public_code = $1`, code).Scan(&newHost, &hosts); err != nil {
+			t.Fatal(err)
+		}
+		if hosts != 1 || (newHost != plainID && newHost != secondID) {
+			t.Errorf("after transfer: host %s, %d host records", newHost, hosts)
+		}
+		var oldRole string
+		if err := admin.QueryRow(ctx, `SELECT rp.role FROM room_participants rp JOIN rooms r ON r.id = rp.room_id WHERE r.public_code = $1 AND rp.identity = $2 AND rp.left_at IS NULL`, code, "user:"+hostID).Scan(&oldRole); err != nil || oldRole != "participant" {
+			t.Errorf("previous host has role %q, err=%v", oldRole, err)
+		}
+		api.want("previous host ends", http.StatusForbidden, http.MethodPost, base+"/end", host, nil)
+		newHostCaller := plain
+		if newHost == secondID {
+			newHostCaller = second
+		}
+		res = api.want("new host role", http.StatusOK, http.MethodGet, base+"/me", newHostCaller, nil)
+		if res["isHost"] != true {
+			t.Errorf("new host not reflected: %v", res)
+		}
+
+		// Audit trail, written asynchronously
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			var events int
+			if err := admin.QueryRow(ctx, `SELECT count(DISTINCT event_type) FROM security_audit_events WHERE metadata->>'room_id' = (SELECT id::text FROM rooms WHERE public_code = $1) AND event_type IN ('room.cohost_granted', 'room.cohost_revoked', 'room.host_transferred')`, code).Scan(&events); err != nil {
+				t.Fatal(err)
+			}
+			if events == 3 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Errorf("expected 3 audit event types, found %d", events)
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	})
+
+	t.Run("participant publishing follows the room setting", func(t *testing.T) {
+		_, hostToken := api.signup()
+		_, userToken := api.signup()
+		host, user := caller{token: hostToken}, caller{token: userToken}
+		code := createRoom(hostToken, false)
+		api.want("join", http.StatusOK, http.MethodPost, roomPath(code)+"/join", user, map[string]any{})
+		grants := func() map[string]any {
+			t.Helper()
+			res := api.want("token", http.StatusOK, http.MethodPost, roomPath(code)+"/token", user, nil)
+			token, _ := res["token"].(string)
+			parts := strings.Split(token, ".")
+			if len(parts) != 3 {
+				t.Fatalf("not a JWT: %v", res)
+			}
+			raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var claims map[string]any
+			if err := json.Unmarshal(raw, &claims); err != nil {
+				t.Fatal(err)
+			}
+			video, _ := claims["video"].(map[string]any)
+			return video
+		}
+		if grants()["canPublish"] != true {
+			t.Error("participants should publish by default")
+		}
+		api.want("host restricts", http.StatusOK, http.MethodPut, roomPath(code)+"/permissions", host, map[string]any{"participantsCanPublish": false})
+		if grants()["canPublish"] == true {
+			t.Error("participant still publishes after the host restricted it")
+		}
 	})
 
 	t.Run("institutional room is limited to its organization", func(t *testing.T) {

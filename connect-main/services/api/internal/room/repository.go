@@ -37,6 +37,9 @@ type Room struct {
 	ScheduledEnd       *time.Time
 	TimeZone           string
 	PasscodeHash       string // Never serialized to clients
+	CoHostPermissions  map[string]bool
+	// ParticipantsCanPublish is false in classrooms where only promoted speakers may publish.
+	ParticipantsCanPublish bool
 }
 
 // Participant represents a connected user or guest in a room.
@@ -122,7 +125,14 @@ type Repository interface {
 	UpdateRoomSchedule(ctx context.Context, roomID, title string, start, end time.Time, timeZone string) error
 	GetUpcomingRooms(ctx context.Context, hostUserID string, limit int) ([]*Room, error)
 	HasScheduleConflict(ctx context.Context, hostUserID, excludeRoomID string, start, end time.Time) (bool, error)
+	SetCoHost(ctx context.Context, roomID, identity string, grant bool) error
+	TransferHost(ctx context.Context, roomID, identity string) error
+	SetRoomPermissions(ctx context.Context, roomID string, coHost map[string]bool, participantsCanPublish bool) error
+	EnqueueHostSuccession(ctx context.Context, roomID, identity string) error
 }
+
+// HostSuccessionGraceSeconds gives a departed host time to reconnect before a co-host takes over.
+const HostSuccessionGraceSeconds = 60
 
 // PgxRepository implements room.Repository via PostgreSQL pool.
 type PgxRepository struct {
@@ -190,23 +200,30 @@ func (r *PgxRepository) CreateRoom(ctx context.Context, rm *Room) error {
 		                   title, scheduled_start, scheduled_end, time_zone, passcode_hash)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'personal_commons', NULLIF($10, ''), $11, $12, NULLIF($13, ''), NULLIF($14, ''))
 	`
+	rm.CoHostPermissions = DefaultCoHostPermissions()
+	rm.ParticipantsCanPublish = true
 	_, err := r.exec(ctx, "", query, rm.ID, rm.PublicCode, rm.HostUserID, rm.Status, rm.IsLocked, rm.WaitingRoomEnabled, rm.MaxParticipants, rm.CreatedAt, rm.StartedAt,
 		rm.Title, rm.ScheduledStart, rm.ScheduledEnd, rm.TimeZone, rm.PasscodeHash)
 	return err
 }
 
 const roomColumns = `id, public_code, host_user_id, status, is_locked, waiting_room_enabled, max_participants, created_at, started_at, ended_at, locked_at,
-	COALESCE(title, ''), scheduled_start, scheduled_end, COALESCE(time_zone, ''), COALESCE(passcode_hash, '')`
+	COALESCE(title, ''), scheduled_start, scheduled_end, COALESCE(time_zone, ''), COALESCE(passcode_hash, ''),
+	cohost_permissions::text, participants_can_publish`
 
 func scanRoom(row pgx.Row) (*Room, error) {
 	var rm Room
+	var coHost string
 	err := row.Scan(&rm.ID, &rm.PublicCode, &rm.HostUserID, &rm.Status, &rm.IsLocked, &rm.WaitingRoomEnabled, &rm.MaxParticipants, &rm.CreatedAt, &rm.StartedAt, &rm.EndedAt, &rm.LockedAt,
-		&rm.Title, &rm.ScheduledStart, &rm.ScheduledEnd, &rm.TimeZone, &rm.PasscodeHash)
+		&rm.Title, &rm.ScheduledStart, &rm.ScheduledEnd, &rm.TimeZone, &rm.PasscodeHash, &coHost, &rm.ParticipantsCanPublish)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrRoomNotFound
 		}
 		return nil, err
+	}
+	if err := json.Unmarshal([]byte(coHost), &rm.CoHostPermissions); err != nil {
+		return nil, fmt.Errorf("invalid co-host permissions: %w", err)
 	}
 	return &rm, nil
 }
@@ -281,6 +298,46 @@ func (r *PgxRepository) HasScheduleConflict(ctx context.Context, hostUserID, exc
 		`, hostUserID, excludeRoomID, start, end).Scan(&conflict)
 	})
 	return conflict, err
+}
+
+func mapRoleError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "42501":
+			return ErrUnauthorizedRoomAction
+		case "CN404":
+			return ErrParticipantNotFoundInRoom
+		case "CN422":
+			return ErrIneligibleTarget
+		}
+	}
+	return err
+}
+
+func (r *PgxRepository) SetCoHost(ctx context.Context, roomID, identity string, grant bool) error {
+	_, err := r.exec(ctx, roomID, `SELECT connect_auth.set_cohost($1::UUID, $2, $3)`, roomID, identity, grant)
+	return mapRoleError(err)
+}
+
+func (r *PgxRepository) TransferHost(ctx context.Context, roomID, identity string) error {
+	_, err := r.exec(ctx, roomID, `SELECT connect_auth.transfer_room_host($1::UUID, $2)`, roomID, identity)
+	return mapRoleError(err)
+}
+
+func (r *PgxRepository) SetRoomPermissions(ctx context.Context, roomID string, coHost map[string]bool, participantsCanPublish bool) error {
+	raw, err := json.Marshal(coHost)
+	if err != nil {
+		return err
+	}
+	_, err = r.exec(ctx, roomID, `UPDATE rooms SET cohost_permissions = $1::jsonb, participants_can_publish = $2 WHERE id = $3`, string(raw), participantsCanPublish, roomID)
+	return mapRoleError(err)
+}
+
+// EnqueueHostSuccession schedules the check, which does nothing unless identity is the host.
+func (r *PgxRepository) EnqueueHostSuccession(ctx context.Context, roomID, identity string) error {
+	_, err := r.pool.Exec(ctx, `SELECT connect_auth.enqueue_host_succession($1::UUID, $2, $3)`, roomID, identity, HostSuccessionGraceSeconds)
+	return err
 }
 
 func (r *PgxRepository) CanEnterRoom(ctx context.Context, roomID, identity string) (bool, error) {
@@ -772,7 +829,7 @@ func (r *PgxRepository) UpdateAdmissionRequestStatus(ctx context.Context, roomID
 func (r *PgxRepository) SetParticipantRemoved(ctx context.Context, roomID, identity string) error {
 	query := `
 		UPDATE room_participants
-		SET is_removed = true, left_at = $1
+		SET is_removed = true, left_at = $1, role = 'participant'
 		WHERE room_id = $2 AND identity = $3
 	`
 	_, err := r.exec(ctx, roomID, query, time.Now().UTC(), roomID, identity)
@@ -845,6 +902,78 @@ type MemoryRepository struct {
 	participants      map[string][]*Participant      // key: roomID
 	admissions        map[string][]*AdmissionRequest // key: roomID
 	removedIdentities map[string]map[string]bool     // key: roomID -> identity -> bool
+}
+
+func (m *MemoryRepository) SetCoHost(_ context.Context, roomID, identity string, grant bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rm, ok := m.roomsByID[roomID]
+	if !ok {
+		return ErrRoomNotFound
+	}
+	if identity == "user:"+rm.HostUserID || (grant && !strings.HasPrefix(identity, "user:")) {
+		return ErrIneligibleTarget
+	}
+	found := false
+	for _, p := range m.participants[roomID] {
+		if p.Identity == identity && p.LeftAt == nil {
+			found = true
+			if grant {
+				p.Role = "co-host"
+			} else if p.Role == "co-host" {
+				p.Role = "participant"
+			}
+		}
+	}
+	if !found {
+		return ErrParticipantNotFoundInRoom
+	}
+	return nil
+}
+
+func (m *MemoryRepository) TransferHost(_ context.Context, roomID, identity string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rm, ok := m.roomsByID[roomID]
+	if !ok {
+		return ErrRoomNotFound
+	}
+	if !strings.HasPrefix(identity, "user:") || identity == "user:"+rm.HostUserID {
+		return ErrIneligibleTarget
+	}
+	var target *Participant
+	for _, p := range m.participants[roomID] {
+		if p.Identity == identity && p.LeftAt == nil {
+			target = p
+		}
+	}
+	if target == nil {
+		return ErrParticipantNotFoundInRoom
+	}
+	for _, p := range m.participants[roomID] {
+		if p.Identity == "user:"+rm.HostUserID && p.LeftAt == nil {
+			p.Role = "participant"
+		}
+	}
+	target.Role = "host"
+	rm.HostUserID = strings.TrimPrefix(identity, "user:")
+	return nil
+}
+
+func (m *MemoryRepository) SetRoomPermissions(_ context.Context, roomID string, coHost map[string]bool, participantsCanPublish bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rm, ok := m.roomsByID[roomID]
+	if !ok {
+		return ErrRoomNotFound
+	}
+	rm.CoHostPermissions, rm.ParticipantsCanPublish = coHost, participantsCanPublish
+	return nil
+}
+
+// EnqueueHostSuccession does nothing: memory mode has no background worker.
+func (m *MemoryRepository) EnqueueHostSuccession(context.Context, string, string) error {
+	return nil
 }
 
 func (m *MemoryRepository) SetRoomStatus(_ context.Context, roomID, status string) error {
