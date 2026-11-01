@@ -37,6 +37,10 @@ permission policy and were not retried another way. `TestRLS_WebhookStoreUnderRu
 `connect_app`. If that role has BYPASSRLS, which is expected for a Neon owner but not confirmed by
 catalog query, FORCE RLS has no effect and tenant isolation rests on application code alone.
 
+**CI evidence (run 41338673459, disposable Postgres 16):** before `000011`, both `connect_app` and
+`connect_worker` (bypassrls=false) failed the webhook and attendance job tests: real rooms are invisible
+without an auth context. Migrations 000001-000010, the SQL security suites and `000010` rollback passed.
+
 **Plan:** Render is confirmed Free. `render.yaml` differs from the live service in name and region
 (`singapore` vs `ohio`), so do not sync the Blueprint from it.
 

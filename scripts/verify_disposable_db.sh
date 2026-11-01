@@ -33,9 +33,12 @@ SQL
 echo "PASS: existing data survived the upgrade"
 
 echo "== Step 3: rollback and re-apply"
+"${PSQL[@]}" < "${MIGRATIONS}/000011_service_role_access.sql"
+"${PSQL[@]}" < "${ROOT}/tests/sql/rollback_000011.sql"
 "${PSQL[@]}" < "${ROOT}/tests/sql/rollback_000010.sql"
 "${PSQL[@]}" -tAc "SELECT to_regclass('participant_media_sessions') IS NULL" | grep -qx t
 "${PSQL[@]}" < "${MIGRATIONS}/000010_trusted_sessions_and_attendance_policies.sql"
+"${PSQL[@]}" < "${MIGRATIONS}/000011_service_role_access.sql"
 echo "PASS: rollback and re-apply"
 
 echo "== Step 4: RLS tests under each restricted runtime role"
@@ -46,7 +49,7 @@ for role in connect_app connect_worker; do
   (cd "${ROOT}/connect-main/services/api" && \
     TEST_DATABASE_URL="${ADMIN}" \
     TEST_APP_DATABASE_URL="postgres://${role}:disposable@127.0.0.1:55432/connect_test?sslmode=disable" \
-    go test -count=1 -v -run TestRLS_ ./internal/attendance) || STATUS=1
+    go test -count=1 -v -run TestRLS_ $([ "${role}" = connect_worker ] && echo ./internal/worker) ./internal/attendance) || STATUS=1
 done
 
 if [ "${STATUS}" -ne 0 ]; then

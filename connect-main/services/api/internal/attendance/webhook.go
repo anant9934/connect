@@ -125,10 +125,13 @@ func (s *PgxSessionStore) Apply(ctx context.Context, ev SessionEvent) error {
 	}
 	defer tx.Rollback(ctx)
 
-	var roomID string
-	err = tx.QueryRow(ctx, `SELECT id::text FROM rooms WHERE public_code = $1`, ev.RoomName).Scan(&roomID)
+	var roomID *string
+	err = tx.QueryRow(ctx, `SELECT connect_auth.webhook_room_id($1)::text`, ev.RoomName).Scan(&roomID)
+	if err == nil && roomID == nil {
+		err = pgx.ErrNoRows
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Keep a durable trace: row-level security can make a real room look unknown.
+		// Keep a durable trace of authentic events for rooms we do not track.
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO livekit_webhook_events (event_id, event_type, room_name, outcome)
 			VALUES ($1, $2, $3, 'unknown_room')
@@ -163,7 +166,7 @@ func (s *PgxSessionStore) Apply(ctx context.Context, ev SessionEvent) error {
 			INSERT INTO participant_media_sessions (room_id, participant_sid, identity, user_id, joined_at)
 			VALUES ($1, $2, $3, $4, $5)
 			ON CONFLICT (room_id, participant_sid) DO NOTHING
-		`, roomID, ev.ParticipantSID, ev.Identity, userIDFromIdentity(ev.Identity), ev.JoinedAt)
+		`, *roomID, ev.ParticipantSID, ev.Identity, userIDFromIdentity(ev.Identity), ev.JoinedAt)
 	case webhook.EventParticipantLeft:
 		// Upsert because deliveries may arrive out of order or the join may have been lost.
 		_, err = tx.Exec(ctx, `
@@ -171,13 +174,13 @@ func (s *PgxSessionStore) Apply(ctx context.Context, ev SessionEvent) error {
 			VALUES ($1, $2, $3, $4, $5, GREATEST($5, $6))
 			ON CONFLICT (room_id, participant_sid) DO UPDATE
 			SET left_at = GREATEST(participant_media_sessions.joined_at, EXCLUDED.left_at)
-		`, roomID, ev.ParticipantSID, ev.Identity, userIDFromIdentity(ev.Identity), ev.JoinedAt, ev.OccurredAt)
+		`, *roomID, ev.ParticipantSID, ev.Identity, userIDFromIdentity(ev.Identity), ev.JoinedAt, ev.OccurredAt)
 	case webhook.EventRoomFinished:
 		_, err = tx.Exec(ctx, `
 			UPDATE participant_media_sessions
 			SET left_at = GREATEST(joined_at, $2)
 			WHERE room_id = $1 AND left_at IS NULL
-		`, roomID, ev.OccurredAt)
+		`, *roomID, ev.OccurredAt)
 	}
 	if err != nil {
 		return err
