@@ -12,29 +12,35 @@ Compact checkpoint. Resume from here. Budget: free tier only.
 | Runtime DB role | `neondb_owner` through the pooler, not `connect_app` |
 | Vercel | Project `connect`, root `connect-main/apps/web`, production branch `main` |
 
-## Verified on disposable Postgres 16 (CI run 41358542181, commit `5015de5`)
+## Verified on disposable Postgres 16 (CI run 41361616420, commit `e790366`)
 
-- Migrations 000001-000014, SQL security suites, rollback and re-apply of 000010-000014.
-- `TestWorkflowDB_ClassSessionAttendance`, `TestWorkflowDB_AuthContextIsolation` (as before).
-- `TestWorkflowDB_NotesHTTP`, `TestWorkflowDB_FilesHTTP`: real routes as `connect_app`, two independent
-  hosts, participants, guests, removed/left users, forged context, pool reuse. Session validation still
-  uses the admin pool, and rooms are `personal_commons`; institutional rooms are not covered here.
-- `TestWorkflowDB_WebhookHTTPBoundary`: missing, garbage, wrong-secret, tampered, malformed, replay.
-- `TestWorkflowDB_AttendanceQueueLifecycle`: real `Runner` as `connect_worker`: duplicate enqueue, failure
-  and retry, duplicate delivery, dead letter. Not covered: process restart mid-job.
+- Migrations 000001-000016, SQL security suites, rollback and re-apply of 000010-000016.
+- `TestWorkflowDB_APITenantIsolation`: the full router with auth, room, notes and files all on `connect_app`:
+  account lifecycle, room flow, forged leave and identity theft, waiting room, institutional rooms, suspended member.
+- `TestWorkflowDB_EveryTableHasRLS`: every public table has forced RLS; only `schema_metadata` is exempt.
+- `TestWorkflowDB_NotesHTTP`, `FilesHTTP`, `WebhookHTTPBoundary`, `AttendanceQueueLifecycle`,
+  `WorkerRestartRecovery`, `ClassSessionAttendance`, `AuthContextIsolation`.
 
-Limits: SECURITY DEFINER helpers depend on the function owner bypassing RLS, unconfirmed in production.
-Deploy order: migrations 000013 and 000014 must be applied before this code, or notes and files fail.
+Security defects fixed on this branch (none deployed yet): anyone could end another participant's session via
+`/leave`; `/participants` was public; `/join` and `/admission/request` minted guest tokens for client-supplied
+identities; `/token` accepted a bare identity; the waiting room flag was never persisted, so it did nothing in
+Postgres; users, sessions, audit and participant tables had no RLS; any user could join any room's P2P signaling.
 
-## Current phase: API request context
+Limits:
+- Only the attendance job handler is tested as `connect_worker`; room cleanup and file purge handlers are not.
+- The API still connects as `neondb_owner` in production, where RLS may not apply. Moving to `connect_app` and
+  `connect_worker` needs a separate worker pool and owner approval.
+- SECURITY DEFINER functions and foreign key checks need the table owner to bypass RLS; unconfirmed in production.
+- Deploy order: migrations 000013-000016 must be applied before this code, or the API fails.
+- Behavior change: guests are refused in institutional rooms. Mobile has no waiting room screen yet.
 
-`notes` and `files` are converted. See `DB_CALL_SITE_REGISTER.md` for the rest.
+## Current phase: product scope, Phase 1 gaps
+
+Security foundation items 1-6 are done at the level above. Attendance is not Phase 3; see `FEATURE_REGISTER.md`.
 
 ## Next action
 
-Convert `room`, using `WithRoomGuestContext` for guests and a narrow function for the pre-membership join
-lookup. Then `auth` and `audit` through narrow definer functions, because they run before a session exists.
-Only after that can the API role move to `connect_app` (needs owner approval).
+Scheduled meetings and passcodes (P1-02, P1-03), then co-host, then course management, recurring scheduling.
 
 ## Not started or blocked
 
