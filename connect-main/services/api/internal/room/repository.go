@@ -228,7 +228,7 @@ func (r *PgxRepository) GetRoomByID(ctx context.Context, id string) (*Room, erro
 
 // SetRoomStatus moves a room between scheduled, active and cancelled. Hosts only, through RLS.
 func (r *PgxRepository) SetRoomStatus(ctx context.Context, roomID, status string) error {
-	_, err := r.exec(ctx, roomID, `UPDATE rooms SET status = $1, started_at = CASE WHEN $1 = 'active' THEN clock_timestamp() ELSE started_at END WHERE id = $2`, status, roomID)
+	_, err := r.exec(ctx, roomID, `UPDATE rooms SET status = $1::varchar, started_at = CASE WHEN $1::varchar = 'active' THEN clock_timestamp() ELSE started_at END WHERE id = $2`, status, roomID)
 	return err
 }
 
