@@ -180,3 +180,18 @@ jobs:
             echo "::endgroup::"
           done
           exit $status
+
+      - name: Verify Class Session Attendance Workflow
+        env:
+          TEST_DATABASE_URL: "postgres://connect_admin:connect_disposable_ci_password_456@localhost:5432/connect_test_ci_runner?sslmode=disable"
+          TEST_CONNECT_APP_URL: "postgres://connect_app:disposable@localhost:5432/connect_test_ci_runner?sslmode=disable"
+          TEST_CONNECT_WORKER_URL: "postgres://connect_worker:disposable@localhost:5432/connect_test_ci_runner?sslmode=disable"
+        run: |
+          cd connect-main/services/api
+          status=0
+          go test -count=1 -v -run 'TestWorkflowDB_' ./internal/... > /tmp/wf.txt 2>&1 || status=1
+          cat /tmp/wf.txt
+          grep -E -- '--- (PASS|FAIL|SKIP)|_test\.go:[0-9]+:' /tmp/wf.txt | while IFS= read -r line; do
+            echo "::notice title=RLS workflow::$line"
+          done
+          exit $status
