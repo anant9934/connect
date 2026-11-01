@@ -171,14 +171,14 @@ func (s *PgxSessionStore) Apply(ctx context.Context, ev SessionEvent) error {
 		// Upsert because deliveries may arrive out of order or the join may have been lost.
 		_, err = tx.Exec(ctx, `
 			INSERT INTO participant_media_sessions (room_id, participant_sid, identity, user_id, joined_at, left_at)
-			VALUES ($1, $2, $3, $4, $5, GREATEST($5, $6))
+			VALUES ($1, $2, $3, $4, $5::timestamptz, GREATEST($5::timestamptz, $6::timestamptz))
 			ON CONFLICT (room_id, participant_sid) DO UPDATE
 			SET left_at = GREATEST(participant_media_sessions.joined_at, EXCLUDED.left_at)
 		`, *roomID, ev.ParticipantSID, ev.Identity, userIDFromIdentity(ev.Identity), ev.JoinedAt, ev.OccurredAt)
 	case webhook.EventRoomFinished:
 		_, err = tx.Exec(ctx, `
 			UPDATE participant_media_sessions
-			SET left_at = GREATEST(joined_at, $2)
+			SET left_at = GREATEST(joined_at, $2::timestamptz)
 			WHERE room_id = $1 AND left_at IS NULL
 		`, *roomID, ev.OccurredAt)
 	}

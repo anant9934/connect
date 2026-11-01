@@ -33,3 +33,19 @@ CREATE POLICY rls_course_enrollments_worker_select ON course_enrollments
     FOR SELECT TO connect_worker USING (true);
 CREATE POLICY rls_attendance_records_worker ON attendance_records
     FOR ALL TO connect_worker USING (true) WITH CHECK (true);
+
+-- The attendance eligibility trigger locks enrollments FOR SHARE, which needs an UPDATE policy.
+-- WITH CHECK (false) permits the lock while still refusing any actual update.
+CREATE POLICY rls_course_enrollments_worker_lock ON course_enrollments
+    FOR UPDATE TO connect_worker USING (true) WITH CHECK (false);
+
+-- RESTRICTIVE tenant policies cannot be satisfied without org context, so exempt only the worker.
+ALTER POLICY rls_tenant_enrollments ON course_enrollments USING (
+    connect_auth.is_super_admin() OR organization_id = connect_auth.current_org_id() OR CURRENT_USER = 'connect_worker'
+);
+ALTER POLICY rls_tenant_sessions ON class_sessions USING (
+    connect_auth.is_super_admin() OR organization_id = connect_auth.current_org_id() OR CURRENT_USER = 'connect_worker'
+);
+ALTER POLICY rls_tenant_attendance ON attendance_records USING (
+    connect_auth.is_super_admin() OR organization_id = connect_auth.current_org_id() OR CURRENT_USER = 'connect_worker'
+);
