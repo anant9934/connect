@@ -1,0 +1,23 @@
+-- Reverses migration 000016 on a disposable database during verification.
+GRANT UPDATE, DELETE ON security_audit_events TO connect_app, connect_worker;
+DROP POLICY IF EXISTS rls_audit_events_insert ON security_audit_events;
+DROP POLICY IF EXISTS rls_audit_events_select ON security_audit_events;
+DROP POLICY IF EXISTS rls_sessions_login ON sessions;
+DROP POLICY IF EXISTS rls_sessions_self_select ON sessions;
+DROP POLICY IF EXISTS rls_users_signup ON users;
+DROP POLICY IF EXISTS rls_users_self_update ON users;
+DROP POLICY IF EXISTS rls_users_self_select ON users;
+ALTER TABLE security_audit_events NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE security_audit_events DISABLE ROW LEVEL SECURITY;
+ALTER TABLE sessions NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE sessions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE users NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+DROP FUNCTION IF EXISTS connect_auth.auth_revoke_user_sessions(UUID, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS connect_auth.auth_revoke_session(UUID, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS connect_auth.auth_touch_session(UUID, TIMESTAMPTZ);
+DROP FUNCTION IF EXISTS connect_auth.auth_session_by_hash(TEXT);
+DROP FUNCTION IF EXISTS connect_auth.auth_user_by_google(TEXT);
+DROP FUNCTION IF EXISTS connect_auth.auth_user_by_id(UUID);
+DROP FUNCTION IF EXISTS connect_auth.auth_user_by_email(TEXT);
+DELETE FROM schema_metadata WHERE version = '000016_auth_and_audit_rls';
