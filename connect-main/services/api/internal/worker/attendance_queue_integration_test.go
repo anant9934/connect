@@ -85,7 +85,7 @@ func TestWorkflowDB_AttendanceQueueLifecycle(t *testing.T) {
 	}
 	records := func() (n int, status string) {
 		t.Helper()
-		if err := admin.QueryRow(ctx, `SELECT count(*), COALESCE(max(status), '') FROM attendance_records WHERE class_session_id = $1 AND student_user_id = $2`, w.sessionID, student).Scan(&n, &status); err != nil {
+		if err := admin.QueryRow(ctx, `SELECT count(*), COALESCE(max(attendance_status), '') FROM attendance_records WHERE class_session_id = $1 AND student_user_id = $2`, w.sessionID, student).Scan(&n, &status); err != nil {
 			t.Fatal(err)
 		}
 		return n, status
