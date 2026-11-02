@@ -1,25 +1,37 @@
 package lab
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tathastu/connect/services/api/internal/audit"
 	"github.com/tathastu/connect/services/api/internal/database"
 )
 
+var (
+	errInvalidOrgID    = errors.New("invalid organization id")
+	errInvalidUserID   = errors.New("invalid user id in session")
+	errUnauthenticated = errors.New("authentication required")
+)
+
+type withAuthContextFunc func(ctx context.Context, pool *pgxpool.Pool, tokenHash string, orgID *string, fn func(pgx.Tx, *database.AuthContext) error) error
+
 // Handler serves practical learning and programming lab endpoints.
 type Handler struct {
-	pool  *pgxpool.Pool
-	audit *audit.Service
-	repo  *Repository
+	pool          *pgxpool.Pool
+	audit         *audit.Service
+	repo          *Repository
+	withAuthCtxFn withAuthContextFunc
 }
 
 // NewHandler constructs the lab handler.
@@ -54,9 +66,13 @@ func (h *Handler) inOrg(r *http.Request, fn func(pgx.Tx, *database.AuthContext, 
 	orgStr := chi.URLParam(r, "org")
 	orgID, err := uuid.Parse(orgStr)
 	if err != nil {
-		return errors.New("invalid organization id")
+		return errInvalidOrgID
 	}
-	return database.WithAuthContext(r.Context(), h.pool, database.SessionTokenHash(r.Context()), &orgStr, func(tx pgx.Tx, authCtx *database.AuthContext) error {
+	runner := database.WithAuthContext
+	if h.withAuthCtxFn != nil {
+		runner = h.withAuthCtxFn
+	}
+	return runner(r.Context(), h.pool, database.SessionTokenHash(r.Context()), &orgStr, func(tx pgx.Tx, authCtx *database.AuthContext) error {
 		return fn(tx, authCtx, orgID)
 	})
 }
@@ -86,6 +102,58 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
+// handleLabError translates database and internal errors into safe, client-facing HTTP responses.
+// Authorization and cross-tenant failures (e.g. SQLSTATE 42501, 28000) are mapped to HTTP 403 Forbidden.
+// Validation and malformed UUID errors are mapped to HTTP 400 Bad Request.
+// Missing resources are mapped to HTTP 404 Not Found.
+// Genuine internal errors return HTTP 500 without leaking raw SQL, SQLSTATE codes, or internal database UUIDs.
+func (h *Handler) handleLabError(w http.ResponseWriter, r *http.Request, err error) {
+	if err == nil {
+		return
+	}
+
+	if errors.Is(err, errInvalidOrgID) {
+		writeError(w, http.StatusBadRequest, "invalid organization id")
+		return
+	}
+
+	if errors.Is(err, errUnauthenticated) || errors.Is(err, errInvalidUserID) {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "resource not found")
+		return
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "42501", "28000":
+			writeError(w, http.StatusForbidden, "you do not have permission to access this organization's resources")
+			return
+		case "23505":
+			writeError(w, http.StatusConflict, "resource already exists")
+			return
+		case "23503", "23514", "22P02", "P0001":
+			writeError(w, http.StatusBadRequest, "invalid request data or referenced entity not found")
+			return
+		case "CN404":
+			writeError(w, http.StatusNotFound, "resource not found")
+			return
+		}
+	}
+
+	if strings.Contains(err.Error(), "token hash is required") {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	// Fallback for genuine internal server errors: safe generic error message.
+	writeError(w, http.StatusInternalServerError, "an unexpected internal error occurred")
+}
+
 func (h *Handler) listCourses(w http.ResponseWriter, r *http.Request) {
 	err := h.inOrg(r, func(tx pgx.Tx, authCtx *database.AuthContext, orgID uuid.UUID) error {
 		courses, err := h.repo.ListLabCourses(r.Context(), tx, orgID)
@@ -99,7 +167,7 @@ func (h *Handler) listCourses(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.handleLabError(w, r, err)
 	}
 }
 
@@ -125,7 +193,7 @@ func (h *Handler) getCourse(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.handleLabError(w, r, err)
 	}
 }
 
@@ -148,7 +216,7 @@ func (h *Handler) listModules(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.handleLabError(w, r, err)
 	}
 }
 
@@ -172,7 +240,7 @@ func (h *Handler) getExercise(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.handleLabError(w, r, err)
 	}
 }
 
@@ -200,7 +268,7 @@ func (h *Handler) listAssignments(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.handleLabError(w, r, err)
 	}
 }
 
@@ -228,7 +296,7 @@ func (h *Handler) getAssignment(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.handleLabError(w, r, err)
 	}
 }
 
@@ -284,7 +352,7 @@ func (h *Handler) createAssignment(w http.ResponseWriter, r *http.Request) {
 		}
 		authorID, err := uuid.Parse(authCtx.UserID)
 		if err != nil {
-			return errors.New("invalid user id in session")
+			return errInvalidUserID
 		}
 
 		assignment := &LabAssignment{
@@ -311,7 +379,7 @@ func (h *Handler) createAssignment(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.handleLabError(w, r, err)
 	}
 }
 
@@ -353,7 +421,7 @@ func (h *Handler) submitAssignment(w http.ResponseWriter, r *http.Request) {
 	err = h.inOrg(r, func(tx pgx.Tx, authCtx *database.AuthContext, orgID uuid.UUID) error {
 		studentID, err := uuid.Parse(authCtx.UserID)
 		if err != nil {
-			return errors.New("invalid user id")
+			return errInvalidUserID
 		}
 
 		// Retrieve all test cases for assignment (including hidden test cases)
@@ -432,7 +500,7 @@ func (h *Handler) submitAssignment(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.handleLabError(w, r, err)
 	}
 }
 
@@ -451,7 +519,7 @@ func (h *Handler) submitExercise(w http.ResponseWriter, r *http.Request) {
 	err = h.inOrg(r, func(tx pgx.Tx, authCtx *database.AuthContext, orgID uuid.UUID) error {
 		studentID, err := uuid.Parse(authCtx.UserID)
 		if err != nil {
-			return errors.New("invalid user id")
+			return errInvalidUserID
 		}
 
 		testCases, err := h.repo.GetAllTestCasesForEvaluation(r.Context(), tx, orgID, nil, &exID)
@@ -499,7 +567,7 @@ func (h *Handler) submitExercise(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.handleLabError(w, r, err)
 	}
 }
 
@@ -525,7 +593,7 @@ func (h *Handler) listSubmissions(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.handleLabError(w, r, err)
 	}
 }
 
@@ -553,7 +621,7 @@ func (h *Handler) gradeSubmission(w http.ResponseWriter, r *http.Request) {
 		}
 		graderID, err := uuid.Parse(authCtx.UserID)
 		if err != nil {
-			return errors.New("invalid user id")
+			return errInvalidUserID
 		}
 
 		sub, err := h.repo.GetSubmission(r.Context(), tx, orgID, subID)
@@ -608,7 +676,7 @@ func (h *Handler) gradeSubmission(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.handleLabError(w, r, err)
 	}
 }
 
@@ -616,7 +684,7 @@ func (h *Handler) getProgress(w http.ResponseWriter, r *http.Request) {
 	err := h.inOrg(r, func(tx pgx.Tx, authCtx *database.AuthContext, orgID uuid.UUID) error {
 		studentID, err := uuid.Parse(authCtx.UserID)
 		if err != nil {
-			return errors.New("invalid user id")
+			return errInvalidUserID
 		}
 		progress, err := h.repo.GetStudentProgress(r.Context(), tx, orgID, studentID)
 		if err != nil {
@@ -629,7 +697,7 @@ func (h *Handler) getProgress(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.handleLabError(w, r, err)
 	}
 }
 
@@ -647,6 +715,6 @@ func (h *Handler) getFacultyOverview(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		h.handleLabError(w, r, err)
 	}
 }
