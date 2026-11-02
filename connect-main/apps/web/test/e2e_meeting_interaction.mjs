@@ -27,6 +27,10 @@ const browser = await puppeteer.launch({
     '--no-sandbox',
     '--use-fake-device-for-media-stream',
     '--use-fake-ui-for-media-stream',
+    // Each person is a separate page, and only one is ever in front.
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
     '--auto-accept-this-tab-capture',
     '--auto-select-desktop-capture-source=Entire screen',
   ],
