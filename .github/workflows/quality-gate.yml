@@ -155,6 +155,7 @@ jobs:
         env:
           ADMIN_URL: "postgres://connect_admin:connect_disposable_ci_password_456@localhost:5432/connect_test_ci_runner?sslmode=disable"
         run: |
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000024.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000023.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000022.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000021.sql
@@ -184,6 +185,7 @@ jobs:
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000021_polls_quizzes_doubts.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000022_notifications.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000023_meeting_search.sql
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000024_admin_dashboard.sql
 
       - name: Verify RLS Under Restricted Runtime Roles
         env:
@@ -279,7 +281,10 @@ jobs:
           { echo "==== server log ===="; docker logs livekit 2>&1 | grep -E 'negotiat|participant closing' | tail -6 | cut -c1-200; } >> /tmp/media_trace.txt
           echo "runner: $(nproc) cpus, load $(cut -d' ' -f1-3 /proc/loadavg)" >> /tmp/media_trace.txt
           node test/e2e_schedule_passcode.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          # Signup allows 10 a minute from one address, so each journey starts a new window.
+          sleep 61
           node test/e2e_history.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          sleep 61
           node test/e2e_institution.mjs >> /tmp/e2e.txt 2>&1 || status=1
           cat /tmp/e2e.txt
           [ $status -eq 0 ] || tail -20 /tmp/api.log
