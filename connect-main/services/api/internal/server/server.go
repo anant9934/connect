@@ -311,6 +311,10 @@ func BuildRouter(
 						roomDetail.With(
 							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
 							appmw.OptionalAuth(authService),
+						).Post("/activity", interactionHandler.ReportActivity)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
 						).Post("/hand", interactionHandler.SetHand)
 						roomDetail.With(
 							appmw.CSRFProtection(cfg.CORSAllowedOrigins),

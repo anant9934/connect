@@ -409,6 +409,39 @@ type Reaction struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// ReportActivity records how long this tab was visible, for classes. It is self-reported, so the
+// database caps it at the time that has passed and institutions choose whether it counts at all.
+func (h *Handler) ReportActivity(w http.ResponseWriter, r *http.Request) {
+	c, ok := h.resolve(w, r)
+	if !ok {
+		return
+	}
+	if !h.allow(w, c, "activity", 20, time.Minute) {
+		return
+	}
+	var req struct {
+		VisibleSeconds int `json:"visibleSeconds"`
+		HiddenSeconds  int `json:"hiddenSeconds"`
+	}
+	if err := json.NewDecoder(c.r.Body).Decode(&req); err != nil || req.VisibleSeconds < 0 || req.HiddenSeconds < 0 ||
+		req.VisibleSeconds > 3600 || req.HiddenSeconds > 3600 {
+		model.SendJSONError(w, c.r, http.StatusBadRequest, "INVALID_ACTIVITY", "Activity times are not valid.")
+		return
+	}
+	// Only people with a session are tracked: guests have no attendance.
+	recorded := false
+	if tokenHash := database.SessionTokenHash(c.r.Context()); tokenHash != "" {
+		err := database.WithAuthContext(c.r.Context(), h.pool, tokenHash, nil, func(tx pgx.Tx, _ *database.AuthContext) error {
+			return tx.QueryRow(c.r.Context(), `SELECT connect_auth.report_browser_activity($1::UUID, $2, $3)`, c.roomID, req.VisibleSeconds, req.HiddenSeconds).Scan(&recorded)
+		})
+		if err != nil {
+			sendDBError(w, c.r, err, "Could not record activity.")
+			return
+		}
+	}
+	model.SendJSON(w, http.StatusOK, map[string]any{"recorded": recorded})
+}
+
 // LiveState handles GET /rooms/{code}/live-state?afterSeq=. Clients poll it, and on a data channel
 // hint, so a reconnect or missed hint costs only a short delay.
 func (h *Handler) LiveState(w http.ResponseWriter, r *http.Request) {

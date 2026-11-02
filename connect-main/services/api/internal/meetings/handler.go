@@ -223,9 +223,9 @@ func (h *Handler) detail(w http.ResponseWriter, r *http.Request) {
 		model.SendJSONError(w, r, http.StatusNotFound, "NOT_FOUND", "This meeting is unavailable.")
 		return
 	}
-	var raw []byte
+	var raw, attendance []byte
 	err := database.WithAuthContext(r.Context(), h.pool, database.SessionTokenHash(r.Context()), nil, func(tx pgx.Tx, _ *database.AuthContext) error {
-		return tx.QueryRow(r.Context(), `SELECT connect_auth.meeting_detail($1::UUID)`, id).Scan(&raw)
+		return tx.QueryRow(r.Context(), `SELECT connect_auth.meeting_detail($1::UUID), connect_auth.my_attendance_detail($1::UUID)`, id).Scan(&raw, &attendance)
 	})
 	if err != nil {
 		model.SendJSONError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not load this meeting.")
@@ -235,5 +235,5 @@ func (h *Handler) detail(w http.ResponseWriter, r *http.Request) {
 		model.SendJSONError(w, r, http.StatusNotFound, "NOT_FOUND", "This meeting is unavailable.")
 		return
 	}
-	model.SendJSON(w, http.StatusOK, map[string]any{"meeting": json.RawMessage(raw)})
+	model.SendJSON(w, http.StatusOK, map[string]any{"meeting": json.RawMessage(raw), "attendance": json.RawMessage(attendance)})
 }

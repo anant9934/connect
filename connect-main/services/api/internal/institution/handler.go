@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -67,6 +68,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		o.Get("/sessions/{id}/attendance.csv", h.sessionAttendanceCSV)
 		o.Post("/sessions/{id}/attendance/{student}/overrule", h.overruleAttendance)
 		o.Get("/attendance/summary", h.attendanceSummary)
+		o.Get("/attendance/classes", h.attendanceByClass)
+		o.Get("/sessions/{id}/engagement", h.sessionEngagement)
 		o.Get("/attendance-policies", h.listPolicies)
 		o.Post("/attendance-policies", h.createPolicy)
 	})
@@ -761,7 +764,9 @@ func (h *Handler) cancelSession(w http.ResponseWriter, r *http.Request) {
 
 const attendanceQuery = `
 	SELECT ar.student_user_id AS "studentUserId", ar.total_connected_seconds AS "connectedSeconds", ar.attendance_status AS status,
-	       ar.is_overruled AS "isOverruled", ar.original_status AS "originalStatus", ar.overrule_reason AS "overruleReason", ar.policy_version AS "policyVersion"
+	       ar.is_overruled AS "isOverruled", ar.original_status AS "originalStatus", ar.overrule_reason AS "overruleReason", ar.policy_version AS "policyVersion",
+	       ar.first_joined_at AS "firstJoinedAt", ar.last_left_at AS "lastLeftAt", ar.joined_late AS "joinedLate", ar.left_early AS "leftEarly",
+	       ar.duration_ratio AS "durationRatio", ar.engagement_ratio AS "engagementRatio", ar.browser_ratio AS "browserRatio", ar.score, ar.calculation
 	FROM attendance_records ar
 	WHERE ar.organization_id = $1 AND ar.class_session_id = $2
 	ORDER BY ar.student_user_id`
@@ -780,15 +785,18 @@ func csvCell(value string) string {
 
 func (h *Handler) sessionAttendanceCSV(w http.ResponseWriter, r *http.Request) {
 	type row struct {
-		student, status string
-		seconds         int
-		overruled       bool
-		reason, version *string
+		student, status                      string
+		seconds                              int
+		overruled                            bool
+		reason, version                      *string
+		late, early                          bool
+		duration, engagement, browser, score *string
 	}
 	var rows []row
 	err := h.inOrg(r, func(tx pgx.Tx, _ *database.AuthContext) error {
 		result, err := tx.Query(r.Context(), `
-			SELECT student_user_id::text, attendance_status, total_connected_seconds, is_overruled, overrule_reason, policy_version::text
+			SELECT student_user_id::text, attendance_status, total_connected_seconds, is_overruled, overrule_reason, policy_version::text,
+			       joined_late, left_early, duration_ratio::text, engagement_ratio::text, browser_ratio::text, score::text
 			FROM attendance_records WHERE organization_id = $1 AND class_session_id = $2 ORDER BY student_user_id
 		`, chi.URLParam(r, "org"), chi.URLParam(r, "id"))
 		if err != nil {
@@ -797,7 +805,8 @@ func (h *Handler) sessionAttendanceCSV(w http.ResponseWriter, r *http.Request) {
 		defer result.Close()
 		for result.Next() {
 			var item row
-			if err := result.Scan(&item.student, &item.status, &item.seconds, &item.overruled, &item.reason, &item.version); err != nil {
+			if err := result.Scan(&item.student, &item.status, &item.seconds, &item.overruled, &item.reason, &item.version,
+				&item.late, &item.early, &item.duration, &item.engagement, &item.browser, &item.score); err != nil {
 				return err
 			}
 			rows = append(rows, item)
@@ -811,7 +820,7 @@ func (h *Handler) sessionAttendanceCSV(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="attendance.csv"`)
 	out := csv.NewWriter(w)
-	_ = out.Write([]string{"student_user_id", "status", "connected_seconds", "overruled", "overrule_reason", "policy_version"})
+	_ = out.Write([]string{"student_user_id", "status", "connected_seconds", "overruled", "overrule_reason", "policy_version", "joined_late", "left_early", "duration_ratio", "engagement_ratio", "browser_ratio", "score"})
 	deref := func(s *string) string {
 		if s == nil {
 			return ""
@@ -819,7 +828,8 @@ func (h *Handler) sessionAttendanceCSV(w http.ResponseWriter, r *http.Request) {
 		return *s
 	}
 	for _, item := range rows {
-		_ = out.Write([]string{item.student, item.status, strconv.Itoa(item.seconds), strconv.FormatBool(item.overruled), csvCell(deref(item.reason)), deref(item.version)})
+		_ = out.Write([]string{item.student, item.status, strconv.Itoa(item.seconds), strconv.FormatBool(item.overruled), csvCell(deref(item.reason)), deref(item.version),
+			strconv.FormatBool(item.late), strconv.FormatBool(item.early), deref(item.duration), deref(item.engagement), deref(item.browser), deref(item.score)})
 	}
 	out.Flush()
 }
@@ -904,13 +914,50 @@ func (h *Handler) attendanceSummary(w http.ResponseWriter, r *http.Request) {
 		       count(*) FILTER (WHERE attendance_status = 'late') AS late,
 		       count(*) FILTER (WHERE attendance_status = 'partial') AS partial,
 		       count(*) FILTER (WHERE attendance_status = 'absent') AS absent,
-		       sum(total_connected_seconds) AS "connectedSeconds"
+		       sum(total_connected_seconds) AS "connectedSeconds",
+		       count(*) FILTER (WHERE joined_late) AS "joinedLate", count(*) FILTER (WHERE left_early) AS "leftEarly",
+		       count(*) FILTER (WHERE is_overruled) AS corrected,
+		       round(avg(duration_ratio), 3) AS "durationRatio", round(avg(engagement_ratio), 3) AS "engagementRatio",
+		       round(avg(browser_ratio), 3) AS "browserRatio"
 		FROM attendance_records WHERE organization_id = $1 AND batch_id = $2
 		GROUP BY student_user_id ORDER BY student_user_id`, chi.URLParam(r, "org"), batch)
 }
 
+// attendanceByClass reports each class in a batch. RLS decides which records count for this caller.
+func (h *Handler) attendanceByClass(w http.ResponseWriter, r *http.Request) {
+	batch := r.URL.Query().Get("batchId")
+	if _, err := uuid.Parse(batch); err != nil {
+		sendError(w, r, invalid("A batchId is required."))
+		return
+	}
+	h.list(w, r, "classes", `
+		SELECT cs.id, cs.title, cs.scheduled_start AS start, cs.status, cs.attendance_finalized AS "attendanceFinalized",
+		       count(ar.id) FILTER (WHERE ar.attendance_status = 'present') AS present,
+		       count(ar.id) FILTER (WHERE ar.attendance_status = 'late') AS late,
+		       count(ar.id) FILTER (WHERE ar.attendance_status = 'partial') AS partial,
+		       count(ar.id) FILTER (WHERE ar.attendance_status = 'absent') AS absent,
+		       round(avg(ar.duration_ratio), 3) AS "durationRatio", round(avg(ar.engagement_ratio), 3) AS "engagementRatio",
+		       round(avg(ar.browser_ratio), 3) AS "browserRatio"
+		FROM class_sessions cs
+		LEFT JOIN attendance_records ar ON ar.organization_id = cs.organization_id AND ar.class_session_id = cs.id
+		WHERE cs.organization_id = $1 AND cs.batch_id = $2
+		GROUP BY cs.id ORDER BY cs.scheduled_start DESC LIMIT 200`, chi.URLParam(r, "org"), batch)
+}
+
+// sessionEngagement reports what each person did in a class. The database limits it to staff.
+func (h *Handler) sessionEngagement(w http.ResponseWriter, r *http.Request) {
+	if _, err := uuid.Parse(chi.URLParam(r, "id")); err != nil {
+		sendError(w, r, invalid("A valid class is required."))
+		return
+	}
+	h.list(w, r, "people", `
+		SELECT user_id AS "userId", display_name AS "displayName", messages, reactions, hands, poll_answers AS "pollAnswers", doubts,
+		       visible_seconds AS "visibleSeconds", hidden_seconds AS "hiddenSeconds", reported
+		FROM connect_auth.session_engagement($1::uuid)`, chi.URLParam(r, "id"))
+}
+
 func (h *Handler) listPolicies(w http.ResponseWriter, r *http.Request) {
-	h.list(w, r, "policies", `SELECT version, min_present_ratio AS "minPresentRatio", min_partial_ratio AS "minPartialRatio", late_grace_seconds AS "lateGraceSeconds", created_at AS "createdAt" FROM attendance_policies WHERE organization_id = $1 ORDER BY version DESC`, chi.URLParam(r, "org"))
+	h.list(w, r, "policies", `SELECT version, min_present_ratio AS "minPresentRatio", min_partial_ratio AS "minPartialRatio", late_grace_seconds AS "lateGraceSeconds", early_leave_grace_seconds AS "earlyLeaveGraceSeconds", duration_weight AS "durationWeight", engagement_weight AS "engagementWeight", browser_weight AS "browserWeight", engagement_target AS "engagementTarget", created_at AS "createdAt" FROM attendance_policies WHERE organization_id = $1 ORDER BY version DESC`, chi.URLParam(r, "org"))
 }
 
 // createPolicy adds a new version. Past records keep the version they were evaluated with.
@@ -919,9 +966,39 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		MinPresentRatio  float64 `json:"minPresentRatio"`
 		MinPartialRatio  float64 `json:"minPartialRatio"`
 		LateGraceSeconds *int    `json:"lateGraceSeconds"`
+		// Each of these is optional, and left out means duration alone decides, as before.
+		EarlyLeaveGraceSeconds *int     `json:"earlyLeaveGraceSeconds"`
+		DurationWeight         *float64 `json:"durationWeight"`
+		EngagementWeight       *float64 `json:"engagementWeight"`
+		BrowserWeight          *float64 `json:"browserWeight"`
+		EngagementTarget       *int     `json:"engagementTarget"`
 	}
 	if err := decode(r, &req); err != nil {
 		sendError(w, r, err)
+		return
+	}
+	weight := func(value *float64, fallback float64) float64 {
+		if value == nil {
+			return fallback
+		}
+		return *value
+	}
+	durationWeight := weight(req.DurationWeight, 1)
+	engagementWeight, browserWeight := weight(req.EngagementWeight, 0), weight(req.BrowserWeight, 0)
+	if durationWeight < 0 || engagementWeight < 0 || browserWeight < 0 || math.Abs(durationWeight+engagementWeight+browserWeight-1) > 0.0001 {
+		sendError(w, r, invalid("Weights cannot be negative and must add up to 100%."))
+		return
+	}
+	engagementTarget := 3
+	if req.EngagementTarget != nil {
+		engagementTarget = *req.EngagementTarget
+	}
+	if engagementTarget < 1 || engagementTarget > 1000 {
+		sendError(w, r, invalid("The engagement target must be between 1 and 1000 actions."))
+		return
+	}
+	if (req.LateGraceSeconds != nil && *req.LateGraceSeconds < 0) || (req.EarlyLeaveGraceSeconds != nil && *req.EarlyLeaveGraceSeconds < 0) {
+		sendError(w, r, invalid("Grace periods cannot be negative."))
 		return
 	}
 	if req.MinPartialRatio < 0 || req.MinPartialRatio > req.MinPresentRatio || req.MinPresentRatio > 1 {
@@ -936,10 +1013,12 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		}
 		var qErr error
 		raw, qErr = insertJSON(r.Context(), tx, `
-			INSERT INTO attendance_policies (organization_id, version, min_present_ratio, min_partial_ratio, late_grace_seconds, created_by)
-			SELECT $1::uuid, COALESCE(max(version), 0) + 1, $2::numeric, $3::numeric, $4::int, $5::uuid FROM attendance_policies WHERE organization_id = $1::uuid
-			RETURNING version, min_present_ratio AS "minPresentRatio", min_partial_ratio AS "minPartialRatio", late_grace_seconds AS "lateGraceSeconds"
-		`, org, req.MinPresentRatio, req.MinPartialRatio, req.LateGraceSeconds, auth.UserID)
+			INSERT INTO attendance_policies (organization_id, version, min_present_ratio, min_partial_ratio, late_grace_seconds, created_by,
+			       early_leave_grace_seconds, duration_weight, engagement_weight, browser_weight, engagement_target)
+			SELECT $1::uuid, COALESCE(max(version), 0) + 1, $2::numeric, $3::numeric, $4::int, $5::uuid,
+			       $6::int, round($7::numeric, 3), round($8::numeric, 3), 1 - round($7::numeric, 3) - round($8::numeric, 3), $9::int FROM attendance_policies WHERE organization_id = $1::uuid
+			RETURNING version, min_present_ratio AS "minPresentRatio", min_partial_ratio AS "minPartialRatio", late_grace_seconds AS "lateGraceSeconds", early_leave_grace_seconds AS "earlyLeaveGraceSeconds", duration_weight AS "durationWeight", engagement_weight AS "engagementWeight", browser_weight AS "browserWeight", engagement_target AS "engagementTarget"
+		`, org, req.MinPresentRatio, req.MinPartialRatio, req.LateGraceSeconds, auth.UserID, req.EarlyLeaveGraceSeconds, durationWeight, engagementWeight, engagementTarget)
 		return qErr
 	})
 	if err != nil {
