@@ -1,0 +1,130 @@
+name: Android Emulator
+
+on:
+  push:
+    branches: ['feat/**']
+    paths:
+      - 'connect-main/apps/mobile/**'
+      - 'connect-main/services/api/**'
+      - 'connect-main/migrations/**'
+      - '.github/workflows/android-emulator.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: android-emulator-${{ github.ref }}
+  cancel-in-progress: true
+
+# Everything here is disposable and local to the runner: no production URL or credential is used.
+jobs:
+  android:
+    name: Android Meeting On Emulator
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: connect_admin
+          POSTGRES_PASSWORD: connect_disposable_ci_password_456
+          POSTGRES_DB: connect_test_ci_runner
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ADMIN_URL: "postgres://connect_admin:connect_disposable_ci_password_456@localhost:5432/connect_test_ci_runner?sslmode=disable"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.10'
+          cache-dependency-path: connect-main/services/api/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Prepare Disposable Database
+        env:
+          CONFIRM_DISPOSABLE_DB: "true"
+          TEST_DATABASE_URL: ${{ env.ADMIN_URL }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          chmod +x scripts/test_pg16_migrations.sh
+          ./scripts/test_pg16_migrations.sh > /tmp/migrations.log 2>&1 || { tail -30 /tmp/migrations.log; exit 1; }
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -c "ALTER ROLE connect_app PASSWORD 'disposable'; ALTER ROLE connect_worker PASSWORD 'disposable';"
+
+      # The emulator reaches the runner as 10.0.2.2, so the runner answers to that address too.
+      - name: Start Local API And Media Server
+        env:
+          DATABASE_URL: "postgres://connect_app:disposable@localhost:5432/connect_test_ci_runner?sslmode=disable"
+          WORKER_DATABASE_URL: "postgres://connect_worker:disposable@localhost:5432/connect_test_ci_runner?sslmode=disable"
+          WORKER_ENABLED: "true"
+          APP_ENV: development
+          PORT: "8080"
+          RATE_LIMIT_ENABLED: "false"
+          CORS_ALLOWED_ORIGINS: "http://localhost:3000,https://connect.aitathastu.com"
+          PUBLIC_APP_ORIGIN: "http://localhost:3000"
+          LIVEKIT_API_KEY: "disposablekey"
+          LIVEKIT_API_SECRET: "disposable_livekit_secret_for_browser_tests"
+          LIVEKIT_URL: "ws://10.0.2.2:7880"
+        run: |
+          sudo ip addr add 10.0.2.2/32 dev lo
+          docker run -d --name livekit --network host -e LIVEKIT_CONFIG="$(printf 'port: 7880\nrtc:\n  tcp_port: 7881\n  udp_port: 7882\n  use_external_ip: false\nkeys:\n  %s: %s\nwebhook:\n  api_key: %s\n  urls:\n    - http://localhost:8080/api/v1/livekit/webhook\n' "$LIVEKIT_API_KEY" "$LIVEKIT_API_SECRET" "$LIVEKIT_API_KEY")" livekit/livekit-server:v1.13.11 --node-ip 10.0.2.2 > /dev/null
+          (cd connect-main/services/api && go build -o /tmp/connect-api ./cmd/server)
+          nohup /tmp/connect-api > /tmp/api.log 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://localhost:8080/health/live > /dev/null && break; sleep 1; done
+          curl -sf http://localhost:8080/health/live
+
+      - name: Build Test APK
+        env:
+          EXPO_PUBLIC_API_URL: "http://10.0.2.2:8080"
+          NODE_ENV: production
+        run: |
+          cd connect-main
+          NODE_ENV=development npm ci --no-audit --no-fund > /tmp/npm.log 2>&1 || { tail -20 /tmp/npm.log; exit 1; }
+          cd apps/mobile/android
+          keytool -genkeypair -storetype JKS -keystore app/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" > /dev/null 2>&1
+          bash gradlew assembleDebug --no-daemon -q -Pconnect.bundleDebug=true -PreactNativeArchitectures=x86_64 > /tmp/gradle.log 2>&1 || { tail -30 /tmp/gradle.log; echo "::notice title=Android::build failed: $(grep -m1 -E 'went wrong' -A2 /tmp/gradle.log | tr '\n' ' ' | cut -c1-300)"; exit 1; }
+          ls -la app/build/outputs/apk/debug/
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run App On Emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          API_URL: "http://localhost:8080"
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -camera-back emulated -camera-front emulated
+          script: bash connect-main/apps/mobile/e2e/run_on_emulator.sh
+
+      - name: Report Android Results
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f /tmp/android.txt ]; then
+            grep -E '^(CHECK|E2E)' /tmp/android.txt | tail -9 | cut -c1-600 | while IFS= read -r line; do
+              echo "::notice title=Android::$line"
+            done
+            grep -E '^STEP' /tmp/android.txt | tail -1 | while IFS= read -r line; do
+              echo "::notice title=Android::last $line"
+            done
+          fi

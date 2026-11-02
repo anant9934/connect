@@ -19,6 +19,11 @@ react {
     cliFile = new File(["node", "--print", "require.resolve('@expo/cli', { paths: [require.resolve('expo/package.json')] })"].execute(null, rootDir).text.trim())
     bundleCommand = "export:embed"
 
+    // Lets emulator tests run a debuggable build, which permits local http, without a Metro server.
+    if (findProperty('connect.bundleDebug') == 'true') {
+        debuggableVariants = []
+    }
+
     /* Folders */
      //   The root of your project, i.e. where "package.json" lives. Default is '../..'
     // root = file("../../")
