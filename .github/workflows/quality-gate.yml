@@ -256,23 +256,29 @@ jobs:
           # A local media server. This proves our integration, not the LiveKit Cloud account.
           start_livekit() {
             docker rm -f livekit > /dev/null 2>&1 || true
-            docker run -d --name livekit --network host -e LIVEKIT_CONFIG="$(printf 'port: 7880\nlogging:\n  level: info\nrtc:\n  tcp_port: 7881\n  udp_port: 7882\n  use_external_ip: false\nkeys:\n  %s: %s\nwebhook:\n  api_key: %s\n  urls:\n    - http://localhost:8080/api/v1/livekit/webhook\n' "$LIVEKIT_API_KEY" "$LIVEKIT_API_SECRET" "$LIVEKIT_API_KEY")" "livekit/livekit-server:$1" --node-ip 127.0.0.1 > /dev/null
+            docker run -d --name livekit --network host -e LIVEKIT_CONFIG="$(printf 'port: 7880\nlogging:\n  level: info\nrtc:\n  tcp_port: 7881\n  udp_port: 7882\n  use_external_ip: false\nkeys:\n  %s: %s\nwebhook:\n  api_key: %s\n  urls:\n    - http://localhost:8080/api/v1/livekit/webhook\n' "$LIVEKIT_API_KEY" "$LIVEKIT_API_SECRET" "$LIVEKIT_API_KEY")" "livekit/livekit-server:v1.13.11" --node-ip 127.0.0.1 > /dev/null
             sleep 3
           }
           : > /tmp/media_trace.txt
-          for version in v1.9.0 latest; do
-            start_livekit "$version"
-            MEDIA_TRACE_LABEL="server-$version" node test/e2e_media_stability.mjs >> /tmp/e2e.txt 2>&1 || true
-            { echo "==== server log $version ===="; docker logs livekit 2>&1 | grep -E 'starting|participant closing|Version|version|negotiat|ICE' | cut -c1-220 | tail -25; } >> /tmp/media_trace.txt
+          # livekit-client 2.22 renegotiates forever against server v1.9.0, reconnecting every 15s.
+          start_livekit
+          two_pass=0; for i in 1 2 3; do
+            MEDIA_TRACE_LABEL="two-$i" node test/e2e_media_stability.mjs >> /tmp/e2e.txt 2>&1 && two_pass=$((two_pass + 1)) || status=1
           done
+          three_pass=0; for i in 1 2 3; do
+            node test/e2e_meeting_interaction.mjs >> /tmp/e2e.txt 2>&1 && three_pass=$((three_pass + 1)) || status=1
+          done
+          echo "::notice title=RLS browser::repeat results: two-browser $two_pass/3 passed, three-browser $three_pass/3 passed"
+          grep -E '^CHECK FAIL' /tmp/e2e.txt | sort | uniq -c | head -3 | cut -c1-220 | while IFS= read -r line; do
+            echo "::notice title=RLS browser::$line"
+          done
+          { echo "==== server log ===="; docker logs livekit 2>&1 | grep -E 'negotiat|participant closing' | tail -6 | cut -c1-200; } >> /tmp/media_trace.txt
           echo "runner: $(nproc) cpus, load $(cut -d' ' -f1-3 /proc/loadavg)" >> /tmp/media_trace.txt
-          start_livekit v1.9.0
           node test/e2e_schedule_passcode.mjs >> /tmp/e2e.txt 2>&1 || status=1
           node test/e2e_institution.mjs >> /tmp/e2e.txt 2>&1 || status=1
-          node test/e2e_meeting_interaction.mjs >> /tmp/e2e.txt 2>&1 || status=1
           cat /tmp/e2e.txt
           [ $status -eq 0 ] || tail -20 /tmp/api.log
-          grep -E 'E2E|^page ' /tmp/e2e.txt | tail -7 | while IFS= read -r line; do
+          grep -E 'E2E (PASS|FAIL)|^page ' /tmp/e2e.txt | sort | uniq -c | sed 's/^ *//' | cut -c1-230 | tail -7 | while IFS= read -r line; do
             echo "::notice title=RLS browser::$line"
           done
           grep -E '^STEP' /tmp/e2e.txt | tail -1 | while IFS= read -r line; do

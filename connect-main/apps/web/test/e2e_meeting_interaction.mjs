@@ -231,29 +231,14 @@ try {
   const sessions = () => execFileSync('psql', [process.env.ADMIN_DATABASE_URL, '-tAc',
     `SELECT m.identity || ':' || count(*) FROM participant_media_sessions m JOIN rooms r ON r.id = m.room_id WHERE r.public_code = '${code}' AND m.identity LIKE 'user:%' GROUP BY m.identity ORDER BY 1`]).toString().trim();
 
-  // Three browsers encoding video can overload a CI runner into reconnecting on its own, so this
-  // check runs with less load and first confirms the connections are stable without a role change.
-  step('connections settle before the transfer');
-  await guest.close();
-  delete people.guest;
-  await click(host, 'Turn off camera');
-  let sessionsBefore = sessions();
-  for (let settled = 0, i = 0; settled < 3; i++) {
-    assert.ok(i < 30, `connections never settled: ${sessionsBefore}`);
-    await new Promise((r) => setTimeout(r, 4000));
-    const now = sessions();
-    settled = now === sessionsBefore ? settled + 1 : 0;
-    sessionsBefore = now;
-  }
-  console.log(`page baseline sessions per user: ${sessionsBefore.replace(/user:[0-9a-f-]{36}:/g, '').replace(/\s+/g, ',')}`);
-
   step('the host transfers the meeting, and nobody is disconnected');
   await clickByText(host, 'Make host');
   await waitForText(member, 'Meeting permissions', 15000);
   await waitGone(host, 'Meeting permissions', 15000);
   await new Promise((r) => setTimeout(r, 4000));
-  const sessionsAfter = sessions();
-  assert.equal(sessionsAfter.replace(/user:[0-9a-f-]{28}/g, ''), sessionsBefore.replace(/user:[0-9a-f-]{28}/g, ''), `a role change reconnected someone: ${sessionsBefore} then ${sessionsAfter}`);
+  // Neither has reloaded, so a healthy meeting means one LiveKit session each from start to finish.
+  const counts = sessions().split(/\s+/).map((row) => row.split(':').pop());
+  assert.deepEqual(counts, ['1', '1'], `unexplained reconnects: ${sessions()}`);
 
   step('screen sharing publishes');
   await click(member, 'Share screen');
