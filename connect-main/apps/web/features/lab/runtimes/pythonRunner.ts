@@ -1,16 +1,9 @@
 /**
  * pythonRunner.ts
- * In-browser WebAssembly Python execution engine powered by Pyodide.
- * Captures stdout, stderr, execution duration, and supports stdin emulation.
+ * In-browser WebAssembly Python execution engine powered by Pyodide in a dedicated Web Worker.
+ * Ensures true pre-emptive timeout termination (preventing UI thread hangs on infinite loops),
+ * stdout/stderr redirection, stdin buffer emulation, and 64KB output buffer limits.
  */
-
-declare global {
-  interface Window {
-    loadPyodide?: (config: { indexURL: string }) => Promise<any>;
-    __pyodideInstance?: any;
-    __pyodideLoading?: Promise<any>;
-  }
-}
 
 export interface PythonExecutionResult {
   stdout: string;
@@ -20,126 +13,183 @@ export interface PythonExecutionResult {
   errorMessage?: string;
 }
 
+const MAX_OUTPUT_BYTES = 65536; // 64 KB safety buffer limit
 const PYODIDE_CDN_VERSION = 'v0.25.1';
-const PYODIDE_BASE_URL = `https://cdn.jsdelivr.net/pyodide/${PYODIDE_CDN_VERSION}/full/`;
 
-let pyodideInstance: any = null;
-let pyodideLoadPromise: Promise<any> | null = null;
-
-async function loadPyodideScript(): Promise<void> {
-  if (typeof window === 'undefined') {
-    throw new Error('Pyodide can only run in the browser');
+function clampOutput(str: string): string {
+  if (str.length > MAX_OUTPUT_BYTES) {
+    return str.slice(0, MAX_OUTPUT_BYTES) + '\n[Output truncated: Exceeded 64KB buffer limit]';
   }
+  return str;
+}
 
-  if (window.loadPyodide) {
-    return;
-  }
+// Dedicated inline Worker script source
+const PYODIDE_WORKER_SCRIPT = `
+importScripts("https://cdn.jsdelivr.net/pyodide/${PYODIDE_CDN_VERSION}/full/pyodide.js");
 
-  const existingScript = document.querySelector(`script[src*="pyodide.js"]`);
-  if (existingScript) {
-    return new Promise((resolve, reject) => {
-      existingScript.addEventListener('load', () => resolve());
-      existingScript.addEventListener('error', (e) => reject(e));
-    });
-  }
-
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = `${PYODIDE_BASE_URL}pyodide.js`;
-    script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Failed to load Pyodide WebAssembly script from CDN'));
-    document.head.appendChild(script);
+let pyodideReadyPromise = (async () => {
+  const py = await loadPyodide({
+    indexURL: "https://cdn.jsdelivr.net/pyodide/${PYODIDE_CDN_VERSION}/full/",
   });
-}
+  return py;
+})();
 
-export async function getPyodide(): Promise<any> {
-  if (pyodideInstance) {
-    return pyodideInstance;
-  }
-
-  if (pyodideLoadPromise) {
-    return pyodideLoadPromise;
-  }
-
-  pyodideLoadPromise = (async () => {
-    await loadPyodideScript();
-    if (!window.loadPyodide) {
-      throw new Error('Pyodide script loaded but window.loadPyodide is not defined');
-    }
-    const pyodide = await window.loadPyodide({
-      indexURL: PYODIDE_BASE_URL,
-    });
-    pyodideInstance = pyodide;
-    return pyodide;
-  })();
-
-  return pyodideLoadPromise;
-}
-
-export async function runPythonCode(
-  code: string,
-  stdin: string = '',
-  timeoutMs: number = 8000,
-): Promise<PythonExecutionResult> {
-  const startTime = performance.now();
-
+self.onmessage = async (e) => {
+  const { id, code, stdin } = e.data;
   try {
-    const pyodide = await getPyodide();
+    const pyodide = await pyodideReadyPromise;
 
-    // Prepare sandbox with captured stdout & stderr and mock stdin
-    const setupScript = `
+    const setupScript = \`
 import sys
 from io import StringIO
 
 sys.stdout = StringIO()
 sys.stderr = StringIO()
 
-# Setup stdin buffer
-stdin_lines = ${JSON.stringify(stdin.split('\n'))}
-_stdin_iter = iter(stdin_lines)
+_stdin_lines = \${JSON.stringify(stdin ? stdin.split('\\n') : [])}
+_stdin_iter = iter(_stdin_lines)
 def _mock_input(prompt=""):
     try:
         return next(_stdin_iter)
     except StopIteration:
         return ""
 __builtins__.input = _mock_input
-`;
+\`;
     await pyodide.runPythonAsync(setupScript);
+    await pyodide.runPythonAsync(code);
 
-    // Run user code with timeout guard
-    const executePromise = pyodide.runPythonAsync(code);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`Execution timed out after ${timeoutMs}ms`)), timeoutMs)
-    );
-
-    await Promise.race([executePromise, timeoutPromise]);
-
-    const harvestScript = `
-out_val = sys.stdout.getvalue()
-err_val = sys.stderr.getvalue()
-(out_val, err_val)
-`;
+    const harvestScript = \`
+[sys.stdout.getvalue(), sys.stderr.getvalue()]
+\`;
     const [stdout, stderr] = await pyodide.runPythonAsync(harvestScript);
-    const durationMs = Math.round(performance.now() - startTime);
-
-    return {
-      stdout: stdout || '',
-      stderr: stderr || '',
-      durationMs,
-      status: stderr ? 'error' : 'passed',
-      errorMessage: stderr || undefined,
-    };
-  } catch (err: any) {
-    const durationMs = Math.round(performance.now() - startTime);
-    const errMsg = err?.message || String(err);
-
-    return {
-      stdout: '',
-      stderr: errMsg,
-      durationMs,
-      status: 'error',
-      errorMessage: errMsg,
-    };
+    self.postMessage({ id, status: 'success', stdout: stdout || '', stderr: stderr || '' });
+  } catch (err) {
+    self.postMessage({ id, status: 'error', error: err.message || String(err) });
   }
+};
+`;
+
+let workerBlobUrl: string | null = null;
+let activeWorker: Worker | null = null;
+
+function getWorker(): Worker {
+  if (typeof window === 'undefined') {
+    throw new Error('Pyodide can only run in a browser environment');
+  }
+
+  if (!workerBlobUrl) {
+    const blob = new Blob([PYODIDE_WORKER_SCRIPT], { type: 'application/javascript' });
+    workerBlobUrl = URL.createObjectURL(blob);
+  }
+
+  if (!activeWorker) {
+    activeWorker = new Worker(workerBlobUrl);
+  }
+
+  return activeWorker;
+}
+
+function terminateActiveWorker() {
+  if (activeWorker) {
+    try {
+      activeWorker.terminate();
+    } catch (e) {
+      // ignore
+    }
+    activeWorker = null;
+  }
+}
+
+export async function runPythonCode(
+  code: string,
+  stdin: string = '',
+  timeoutMs: number = 6000,
+): Promise<PythonExecutionResult> {
+  const startTime = performance.now();
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+  return new Promise<PythonExecutionResult>((resolve) => {
+    let worker: Worker;
+    try {
+      worker = getWorker();
+    } catch (err: any) {
+      resolve({
+        stdout: '',
+        stderr: `Worker Initialization Error: ${err.message || String(err)}`,
+        durationMs: 0,
+        status: 'error',
+        errorMessage: err.message || String(err),
+      });
+      return;
+    }
+
+    let isDone = false;
+
+    // Hard timeout timer: terminates the worker thread if it loops infinitely
+    const timer = setTimeout(() => {
+      if (isDone) return;
+      isDone = true;
+      const durationMs = Math.round(performance.now() - startTime);
+
+      // Kill the spinning thread immediately
+      terminateActiveWorker();
+
+      resolve({
+        stdout: '',
+        stderr: `Execution Terminated: Time limit exceeded (${timeoutMs}ms). Possible infinite loop or excessive resource consumption.`,
+        durationMs,
+        status: 'error',
+        errorMessage: 'Time limit exceeded',
+      });
+    }, timeoutMs);
+
+    worker.onmessage = (e: MessageEvent) => {
+      if (isDone) return;
+      if (e.data && e.data.id === requestId) {
+        isDone = true;
+        clearTimeout(timer);
+        const durationMs = Math.round(performance.now() - startTime);
+
+        if (e.data.status === 'success') {
+          const stdout = clampOutput(e.data.stdout);
+          const stderr = clampOutput(e.data.stderr);
+          resolve({
+            stdout,
+            stderr,
+            durationMs,
+            status: stderr ? 'error' : 'passed',
+            errorMessage: stderr || undefined,
+          });
+        } else {
+          const errMsg = clampOutput(e.data.error || 'Unknown runtime error');
+          resolve({
+            stdout: '',
+            stderr: errMsg,
+            durationMs,
+            status: 'error',
+            errorMessage: errMsg,
+          });
+        }
+      }
+    };
+
+    worker.onerror = (err: ErrorEvent) => {
+      if (isDone) return;
+      isDone = true;
+      clearTimeout(timer);
+      const durationMs = Math.round(performance.now() - startTime);
+      terminateActiveWorker();
+
+      const errMsg = clampOutput(err.message || 'Worker thread execution error');
+      resolve({
+        stdout: '',
+        stderr: errMsg,
+        durationMs,
+        status: 'error',
+        errorMessage: errMsg,
+      });
+    };
+
+    worker.postMessage({ id: requestId, code, stdin });
+  });
 }

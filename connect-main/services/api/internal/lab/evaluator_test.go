@@ -113,6 +113,19 @@ func TestEvaluateSubmissionAgainstTestCases(t *testing.T) {
 	if score2 != 100 || passed2 != 3 || total2 != 3 || status2 != "passed" {
 		t.Errorf("expected perfect score 100 passed, got %d score, %d/%d passed, status=%s", score2, passed2, total2, status2)
 	}
+
+	// Case 3: Blocked execution for compiled binaries queues as pending
+	blockedErrors := map[string]string{
+		tc1ID.String():      "Execution BLOCKED: compilation disabled under ₹0 policy",
+		tc2ID.String():      "Execution BLOCKED: compilation disabled under ₹0 policy",
+		hiddenTcID.String(): "Execution BLOCKED: compilation disabled under ₹0 policy",
+	}
+	score3, passed3, total3, status3, _ := EvaluateSubmissionAgainstTestCases(
+		testCases, nil, blockedErrors, nil, 100, true,
+	)
+	if status3 != "pending" || score3 != 0 || passed3 != 0 || total3 != 3 {
+		t.Errorf("expected status 'pending' for blocked execution, got status=%s, score=%d", status3, score3)
+	}
 }
 
 func TestComputeStreak(t *testing.T) {

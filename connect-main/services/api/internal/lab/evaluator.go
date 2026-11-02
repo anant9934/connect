@@ -88,7 +88,11 @@ func EvaluateSubmissionAgainstTestCases(
 		} else {
 			// For students, hidden test case inputs and outputs are never leaked
 			if !passed {
-				res.ErrorMessage = "Hidden test case failed"
+				if strings.Contains(errMsg, "BLOCKED") {
+					res.ErrorMessage = "Hidden test case execution BLOCKED"
+				} else {
+					res.ErrorMessage = "Hidden test case failed"
+				}
 			}
 		}
 
@@ -101,7 +105,17 @@ func EvaluateSubmissionAgainstTestCases(
 		score = 0
 	}
 
-	if passedCount == totalCount {
+	allBlocked := true
+	for _, res := range results {
+		if !strings.Contains(res.ErrorMessage, "BLOCKED") {
+			allBlocked = false
+			break
+		}
+	}
+
+	if allBlocked && len(results) > 0 {
+		status = "pending"
+	} else if passedCount == totalCount {
 		status = "passed"
 	} else if passedCount > 0 {
 		status = "failed"

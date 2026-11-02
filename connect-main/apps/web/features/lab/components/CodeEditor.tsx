@@ -201,22 +201,25 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
         setExecutionTime(dur);
         setStdout('Live preview updated.');
       } else {
-        // C++ & Java: Client-side syntax and AST validation
+        // C++ & Java: Remote execution is explicitly BLOCKED under zero-trust policy
         setActiveConsoleTab('output');
-        const dur = 45; // simulated compiler parse time
-        setExecutionTime(dur);
-
-        // Basic sanity check
-        if (language === 'cpp' && !code.includes('main')) {
-          setStderr('Compiler Error: in function \'main\': main function not declared or defined.');
-          onExecute?.({ stdout: '', stderr: 'No main function', durationMs: dur, status: 'error' });
-        } else if (language === 'java' && !code.includes('class')) {
-          setStderr('Compiler Error: class, interface, or enum expected.');
-          onExecute?.({ stdout: '', stderr: 'No class defined', durationMs: dur, status: 'error' });
-        } else {
-          setStdout(`[Connect Compiler Engine: ${language.toUpperCase()}]\nCode successfully parsed and verified.\nTo run automated test cases against server test suite, click 'Submit Code'.`);
-          onExecute?.({ stdout: 'Parsed successfully', stderr: '', durationMs: dur, status: 'passed' });
-        }
+        setExecutionTime(0);
+        const langName = language === 'cpp' ? 'C++' : 'Java';
+        const notice =
+          `[EXECUTION BLOCKED: ${langName.toUpperCase()}]\n` +
+          `----------------------------------------------------------------------\n` +
+          `Direct compilation and execution of untrusted native ${langName} code is BLOCKED.\n\n` +
+          `Architectural Constraints & Security Boundaries:\n` +
+          `• In-Process Security: Running untrusted compiler subprocesses inside the web server or API process is strictly prohibited (prevents arbitrary code execution & host compromise).\n` +
+          `• Infrastructure Budget: Provisioning dedicated, isolated microVM sandbox instances (such as Firecracker or gVisor nsjail with strict kernel cgroups) requires additional infrastructure budget (Current Budget: ₹0).\n` +
+          `• Workspace Status: Full editing, syntax highlighting, templates, and assignment submission are operational. Direct live runtime execution remains BLOCKED until sandboxed microVM workers are provisioned.`;
+        setStderr(notice);
+        onExecute?.({
+          stdout: '',
+          stderr: `${langName} remote execution is BLOCKED under zero-trust ₹0 policy.`,
+          durationMs: 0,
+          status: 'error',
+        });
       }
     } catch (err: any) {
       setStderr(err.message || String(err));
@@ -225,12 +228,16 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
     }
   };
 
-  // Listen for console logs posted from preview iframe
+  // Listen for console logs posted from preview iframe with strict origin/source validation
   useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
+      // Validate that message strictly originates from our preview iframe contentWindow
+      if (!previewIframeRef.current || e.source !== previewIframeRef.current.contentWindow) {
+        return;
+      }
       if (e.data && e.data.type === 'CONNECT_LAB_CONSOLE') {
-        const line = `[${e.data.level.toUpperCase()}] ${e.data.text}\n`;
-        setStdout((prev) => prev + line);
+        const line = `[${String(e.data.level).toUpperCase()}] ${String(e.data.text)}\n`;
+        setStdout((prev) => (prev.length < 65536 ? prev + line : prev));
       }
     };
     window.addEventListener('message', handleMessage);

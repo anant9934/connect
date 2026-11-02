@@ -37,6 +37,7 @@ var rolePermissions = map[string]struct {
 			{"users", "INSERT"}, {"sessions", "INSERT"}, {"rooms", "UPDATE"}, {"room_participants", "INSERT"},
 			{"meeting_notes", "SELECT"}, {"meeting_files", "SELECT"}, {"security_audit_events", "INSERT"},
 			{"livekit_webhook_events", "INSERT"}, {"participant_media_sessions", "INSERT"},
+			{"lab_courses", "SELECT"}, {"lab_assignments", "INSERT"}, {"lab_submissions", "INSERT"},
 		},
 		functions: []string{
 			"connect_auth.authenticate_session(character varying,uuid)",
@@ -47,7 +48,7 @@ var rolePermissions = map[string]struct {
 			"connect_auth.enqueue_job_at(text,text,jsonb,timestamp with time zone)",
 			"connect_auth.transfer_room_host(uuid,text)",
 		},
-		emptyWithoutContext: []string{"users", "sessions", "rooms", "room_participants", "background_jobs", "security_audit_events", "organizations"},
+		emptyWithoutContext: []string{"users", "sessions", "rooms", "room_participants", "background_jobs", "security_audit_events", "organizations", "lab_courses", "lab_assignments", "lab_submissions"},
 	},
 	RoleWorker: {
 		tables: []tablePrivilege{

@@ -83,10 +83,10 @@ export const AssignmentSolver: React.FC<AssignmentSolverProps> = ({ assignment, 
             actual: actualStr,
           };
         } else {
-          // Compiled runtimes: basic check
+          // Compiled runtimes (C++, Java): Execution is explicitly BLOCKED under ₹0 policy
           results[tc.id] = {
-            passed: true,
-            actual: '[Pre-compilation Passed]',
+            passed: false,
+            actual: '[EXECUTION BLOCKED] Compilation & sandbox execution disabled under zero-trust ₹0 infrastructure policy.',
           };
         }
       }
@@ -111,9 +111,19 @@ export const AssignmentSolver: React.FC<AssignmentSolverProps> = ({ assignment, 
           outputs[tc.id] = res.stdout;
           errors[tc.id] = res.stderr;
           durations[tc.id] = res.durationMs;
+        } else if (selectedLanguage === 'sql') {
+          const res = await executeSqlQuery(code);
+          const hasErr = res.some((r) => !!r.error);
+          if (hasErr) {
+            errors[tc.id] = res.filter((r) => r.error).map((r) => r.error).join('\n');
+          } else {
+            outputs[tc.id] = JSON.stringify(res[0]?.values || []);
+          }
+          durations[tc.id] = res[0]?.executionTimeMs || 5;
         } else {
-          outputs[tc.id] = tc.expected_output; // simulated match for non-wasm runtimes
-          durations[tc.id] = 12;
+          // C++ / Java: Do not simulate successful execution. Flag honestly for manual faculty evaluation.
+          errors[tc.id] = 'Automated execution BLOCKED for compiled binaries under zero-trust ₹0 policy (queued for manual faculty review)';
+          durations[tc.id] = 0;
         }
       }
 
