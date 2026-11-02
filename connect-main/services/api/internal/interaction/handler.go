@@ -36,7 +36,7 @@ const (
 
 var (
 	clientMessageIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-	allowedReactions       = map[string]bool{"👍": true, "👏": true, "❤️": true, "😂": true, "😮": true, "🎉": true, "🤔": true, "👎": true}
+	allowedReactions       = map[string]bool{"👍": true, "👏": true, "❤️": true, "😂": true, "😮": true, "🎉": true, "🤔": true, "👎": true, "💡": true, "🔥": true}
 )
 
 // Handler serves the interaction routes.

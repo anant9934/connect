@@ -229,13 +229,17 @@ func TestWorkflowDB_MeetingInteraction(t *testing.T) {
 		api.want("raise", http.StatusOK, http.MethodPost, base+"/hand", member, map[string]any{"raised": true})
 		api.want("raise twice", http.StatusOK, http.MethodPost, base+"/hand", member, map[string]any{"raised": true})
 		api.want("guest raises", http.StatusOK, http.MethodPost, base+"/hand", guest, map[string]any{"raised": true})
+		// Every emoji either client offers must be accepted.
+		for _, emoji := range []string{"👍", "👏", "❤️", "🎉", "💡", "🔥"} {
+			api.want("offered emoji "+emoji, http.StatusCreated, http.MethodPost, base+"/reactions", member, map[string]any{"emoji": emoji})
+		}
 		api.want("react", http.StatusCreated, http.MethodPost, base+"/reactions", guest, map[string]any{"emoji": "👏"})
 		state := api.want("state", http.StatusOK, http.MethodGet, base+"/live-state", co, nil)
 		hands, _ := state["raisedHands"].([]any)
 		if len(hands) != 2 {
 			t.Errorf("expected 2 hands, got %v", hands)
 		}
-		if list := rowsOf(state, "reactions"); len(list) != 1 || list[0]["identity"] != guestIdentity {
+		if list := rowsOf(state, "reactions"); len(list) != 7 || list[6]["identity"] != guestIdentity {
 			t.Errorf("reactions: %v", list)
 		}
 		api.want("participant lowers another", http.StatusForbidden, http.MethodDelete, base+"/participants/user:"+memberID+"/hand", caller{token: strangerToken}, nil)

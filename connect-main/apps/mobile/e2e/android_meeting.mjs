@@ -184,7 +184,7 @@ try {
   step('a reaction is stored');
   await tap('Send emoji reaction');
   await sleep(1000);
-  const emoji = screen().find((n) => ['👍', '👏', '❤️', '🎉', '😂', '😮'].includes(n.text));
+  const emoji = screen().find((n) => ['👍', '👏', '❤️', '🎉', '💡', '🔥'].includes(n.text));
   assert.ok(emoji, 'no reaction picker');
   adb('shell', 'input', 'tap', String(Math.round(emoji.x)), String(Math.round(emoji.y)));
   await until(async () => (await api('GET', `/api/v1/rooms/${code}/live-state`, host.token)).data.reactions.length === 1, 'the reaction');
