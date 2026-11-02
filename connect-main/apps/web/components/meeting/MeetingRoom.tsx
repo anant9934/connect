@@ -159,6 +159,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Set inside a breakout: leaving or an ended group goes back to the main meeting.
   const [mainCode, setMainCode] = useState<string | null>(null);
+  // A group that closes returns its people to the main meeting.
+  useEffect(() => {
+    if (meetingEnded && mainCode) window.location.assign(`/room/${mainCode}/preview`);
+  }, [meetingEnded, mainCode]);
   const activityRecorded = useBrowserActivity(roomCode, Boolean(initialIdentity?.startsWith('user:')));
 
   const interaction = useMeetingInteraction(

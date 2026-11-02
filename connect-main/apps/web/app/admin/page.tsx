@@ -8,6 +8,7 @@ import { ApiError } from '@/lib/api/client';
 import * as api from '@/features/institution/api';
 
 const AUDIT_PAGE_SIZE = 25;
+const AUDIT_REFRESH_MS = 5000;
 const inputClass =
   'w-full px-3 py-2 rounded-xl border border-[#E9E9E5] bg-[#FCFCFA] text-[16px] sm:text-sm text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7258E8] min-h-[44px]';
 const labelClass = 'block text-xs font-semibold text-[#171717] mb-1';
@@ -111,8 +112,11 @@ export default function AdminPage() {
     loadState();
   }, [loadState]);
 
+  // Audit entries are written just after each action, so the log refreshes on its own.
   useEffect(() => {
     loadEvents();
+    const timer = setInterval(loadEvents, AUDIT_REFRESH_MS);
+    return () => clearInterval(timer);
   }, [loadEvents]);
 
   const changeMember = async (member: api.Member, role: string, status: string) => {
@@ -122,8 +126,6 @@ export default function AdminPage() {
       await api.updateMember(orgId, member.userId, role, status);
       setNotice(`${member.displayName} is now ${ROLE_LABELS[role]}, ${STATUS_LABELS[status].toLowerCase()}.`);
       await loadState();
-      // The audit entry is written just after the response.
-      setTimeout(loadEvents, 500);
     } catch (err) {
       setError(messageOf(err, 'Could not change this person.'));
     }

@@ -10,6 +10,7 @@ const HIGHLIGHTER_WIDTH = 16;
 const MIN_POINT_DISTANCE = 0.002;
 const MAX_POINTS = 2000;
 const REFERENCE_WIDTH = 1000;
+const POLL_INTERVAL_MS = 4000;
 
 type Point = [number, number];
 
@@ -93,9 +94,12 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
     sync(true);
   }, [board, state.version]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A hint is only a hint: polling keeps a dropped one from hiding a line for good.
   useEffect(() => {
     sync(false);
-  }, [syncTick]); // eslint-disable-line react-hooks/exhaustive-deps
+    const timer = setInterval(() => sync(false), POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [syncTick, sync]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
