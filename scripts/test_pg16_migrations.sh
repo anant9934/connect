@@ -2,7 +2,7 @@
 # ==============================================================================
 # Script: test_pg16_migrations.sh
 # Purpose: Safe, production-gated PostgreSQL 16 test harness.
-# Executes migrations 000001-000024, privilege assertions, and restricted-role
+# Executes migrations 000001-000025, privilege assertions, and restricted-role
 # security tests against an explicit, confirmed disposable test database.
 # ==============================================================================
 
@@ -117,7 +117,7 @@ fi
 log_pass "Target identity verified. Database confirmed as disposable."
 
 # ------------------------------------------------------------------------------
-# 6. Execute Migrations 000001 - 000024 in Order
+# 6. Execute Migrations 000001 - 000025 in Order
 # ------------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -149,6 +149,7 @@ MIGRATIONS=(
   "000022_notifications.sql"
   "000023_meeting_search.sql"
   "000024_admin_dashboard.sql"
+  "000025_attendance_signals.sql"
 )
 
 echo ""
@@ -160,7 +161,7 @@ for mig in "${MIGRATIONS[@]}"; do
   psql "${TARGET_URL}" -v ON_ERROR_STOP=1 -f "${MIGRATIONS_DIR}/${mig}" > /dev/null
   log_pass "Migration ${mig} applied successfully."
 done
-log_pass "GROUP 1 (Migrations 000001-000024): PASS"
+log_pass "GROUP 1 (Migrations 000001-000025): PASS"
 
 # ------------------------------------------------------------------------------
 # 7. Execute Privilege & Role Assertions
