@@ -21,6 +21,9 @@
 
 ## 2. RENDER BACKEND ENVIRONMENT VARIABLES MATRIX
 
+`MIGRATION_DATABASE_URL` is for administrative tools on an operator machine (`run_migration`, `backfill_tenancy`,
+`inspect_db`, `verify_worker`). Never set it on a runtime service: production refuses to start if it is present.
+
 Configure these in Render Dashboard -> **Your Service** -> **Environment**:
 
 | Variable | Required | Secret? | Type | Example / Format | Purpose |
@@ -28,7 +31,11 @@ Configure these in Render Dashboard -> **Your Service** -> **Environment**:
 | `APP_ENV` | **Yes** | No | String | `production` (or `staging`) | Sets application runtime environment mode |
 | `PORT` | Auto | No | Integer | `10000` (Render injected) | Dynamic port Render listens on |
 | `LOG_LEVEL` | No | No | String | `info` (`debug`, `info`, `warn`, `error`) | Minimum log level for structured `slog` output |
-| `DATABASE_URL` | **Yes** | **Yes** | URI | `postgres://[user]:[password] (at) [pooler-host]:6543/postgres?sslmode=require` | PostgreSQL / Supabase connection pooler URL |
+| `DATABASE_URL` | **Yes** | **Yes** | URI | `postgres://connect_app:[password] (at) [pooler-host]/[db]?sslmode=require` | API connection. Must log in as `connect_app`; production refuses to start otherwise |
+| `WORKER_DATABASE_URL` | When `WORKER_ENABLED=true` or running `cmd/worker` | **Yes** | URI | `postgres://connect_worker:[password] (at) [pooler-host]/[db]?sslmode=require` | Worker connection and its own pool. Must log in as `connect_worker`. Never falls back to `DATABASE_URL` |
+| `WORKER_DB_MAX_OPEN_CONNS` | No | No | Integer | `5` | Maximum connections in the worker pool |
+| `WORKER_DB_MAX_IDLE_CONNS` | No | No | Integer | `1` | Connections the worker pool keeps open |
+| `GOOGLE_CLIENT_IDS` | For Google sign-in | No | String | `web-id.apps.googleusercontent.com,mobile-id.apps.googleusercontent.com` | OAuth clients whose tokens are accepted. Empty refuses all Google sign-in |
 | `DB_MAX_OPEN_CONNS` | No | No | Integer | `25` | Maximum open database pool connections |
 | `DB_MAX_IDLE_CONNS` | No | No | Integer | `10` | Maximum idle database pool connections |
 | `DB_CONN_MAX_LIFETIME_SEC` | No | No | Integer | `300` | Maximum connection reuse duration in seconds |

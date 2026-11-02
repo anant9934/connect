@@ -86,6 +86,24 @@ the new RLS test, 3 Redis tests, 1 R2 test and 1 worker lifecycle test, all need
 - Render services can sleep or restart: webhooks sent during downtime depend on LiveKit's
   retries, and worker latency has no guarantee.
 
+## Production role separation
+
+Code is ready on the branch; production is unchanged. Procedure, verification and rollback:
+[`deployment/ROLE_SEPARATION_RELEASE.md`](deployment/ROLE_SEPARATION_RELEASE.md).
+
+Checklist before release:
+
+- [x] API and worker use separate pools and settings; the worker has no fallback.
+- [x] Startup verifies the live role, privileges, memberships, ownership and RLS, and refuses in production.
+- [x] Administrative tools use only `MIGRATION_DATABASE_URL` and refuse runtime roles.
+- [x] Provisioning script no longer copies the API connection string.
+- [ ] Remaining production role queries reviewed by the owner.
+- [ ] Migrations rehearsed on a Neon branch of production data.
+- [ ] Runtime role passwords set; settings configured; coordinated deployment run and verified.
+
+Partial production result (owner, 2026-11-02): `neondb_owner` has `rolbypassrls=true`; `connect_app` and `connect_worker`
+have neither superuser nor BYPASSRLS. **Production still connects as the owner as last read, so RLS does not protect it yet.**
+
 ## Production role verification (owner runs in the Neon SQL console; read-only)
 
 ```sql
@@ -101,6 +119,30 @@ FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY 1;
 
 SELECT version FROM schema_metadata ORDER BY 1;
+```
+
+Also, for membership, attributes, live connections and table ownership:
+
+```sql
+WITH RECURSIVE reach AS (
+  SELECT m.member, m.roleid, m.member AS start_role FROM pg_auth_members m
+  WHERE m.member IN ('connect_app'::regrole, 'connect_worker'::regrole)
+  UNION
+  SELECT m.member, m.roleid, r.start_role FROM pg_auth_members m JOIN reach r ON m.member = r.roleid
+)
+SELECT r.start_role::regrole AS runtime_role, r.roleid::regrole AS reachable_role, a.rolsuper, a.rolbypassrls
+FROM reach r JOIN pg_roles a ON a.oid = r.roleid ORDER BY 1, 2;
+
+SELECT rolname, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin, rolreplication
+FROM pg_roles WHERE rolname IN ('connect_app', 'connect_worker');
+
+SELECT usename, application_name, state, count(*) FROM pg_stat_activity
+WHERE datname = current_database() GROUP BY 1, 2, 3 ORDER BY 1;
+
+SELECT c.relname, pg_get_userbyid(c.relowner) AS owner
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+  AND pg_get_userbyid(c.relowner) IN ('connect_app', 'connect_worker');
 ```
 
 `SECURITY DEFINER` helpers need their owner to have `rolsuper` or `rolbypassrls`. With `rolbypassrls` true for

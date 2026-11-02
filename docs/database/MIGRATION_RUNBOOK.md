@@ -12,14 +12,17 @@ Metadata Table  : schema_metadata (version, description, applied_at, execution_t
 
 ## 2. Standard Operating Procedures
 
+Run these from an operator machine, using the direct (non-pooler) connection of the role that owns the schema. The tools
+read only `MIGRATION_DATABASE_URL` and refuse `connect_app` and `connect_worker`. The owner role never goes on a runtime service.
+
 ### 2.1 Checking Migration Status
 ```bash
-DATABASE_URL="postgres://user:pass@host:5432/dbname" go run ./connect-main/services/api/cmd/run_migration status
+MIGRATION_DATABASE_URL="postgres://migration_role:pass@host:5432/dbname" go run ./connect-main/services/api/cmd/run_migration status
 ```
 
 ### 2.2 Applying Pending Migrations
 ```bash
-DATABASE_URL="postgres://user:pass@host:5432/dbname" go run ./connect-main/services/api/cmd/run_migration up
+MIGRATION_DATABASE_URL="postgres://migration_role:pass@host:5432/dbname" go run ./connect-main/services/api/cmd/run_migration up
 ```
 
 ---

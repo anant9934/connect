@@ -52,12 +52,18 @@ Fill in the deployment form with the following settings:
 - Leave **Auto-Deploy** as `Yes` (or `No` if manual approval is preferred).
 
 ### Step 4: Configure Environment Variables
+Do not sync this service from `render.yaml`: it names a different service and region from the live one. For an existing
+service, follow [ROLE_SEPARATION_RELEASE.md](ROLE_SEPARATION_RELEASE.md). The in-process worker runs inside this service
+on its own pool, so no paid worker is needed. `scripts/provision_render_worker.sh` creates a paid standalone worker, needs
+`WORKER_DATABASE_URL` from the operator and `CONFIRM_PAID_WORKER_PLAN=yes`, and should not run without owner approval.
+
 Under **Environment Variables**, configure the production credentials (from [ENVIRONMENT_VARIABLES.md](file:///Users/quantum/Desktop/connect/docs/deployment/ENVIRONMENT_VARIABLES.md)):
 
 ```ini
 APP_ENV=production
 LOG_LEVEL=info
-DATABASE_URL=postgres://[user]:[password] (at) [supabase-pooler-host]:6543/postgres?sslmode=require
+DATABASE_URL=postgres://connect_app:[password] (at) [pooler-host]/[db]?sslmode=require
+WORKER_DATABASE_URL=postgres://connect_worker:[password] (at) [pooler-host]/[db]?sslmode=require
 DB_MAX_OPEN_CONNS=25
 DB_MAX_IDLE_CONNS=10
 DB_CONN_MAX_LIFETIME_SEC=300

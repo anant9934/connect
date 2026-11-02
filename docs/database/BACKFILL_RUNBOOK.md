@@ -23,7 +23,7 @@ Checkpoint Table : migration_checkpoints (task_name, last_processed_id, rows_pro
 
 ### 3.1 Running the Backfill
 ```bash
-DATABASE_URL="postgres://user:pass@host:5432/dbname" go run ./connect-main/services/api/cmd/backfill_tenancy
+MIGRATION_DATABASE_URL="postgres://migration_role:pass@host:5432/dbname" go run ./connect-main/services/api/cmd/backfill_tenancy
 ```
 
 ### 3.2 Keyset Pagination & Resumability

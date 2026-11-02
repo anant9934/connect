@@ -9,7 +9,7 @@ Compact checkpoint. Resume from here. Budget: free tier only.
 | Item | Evidence |
 | :--- | :--- |
 | Render | Service `connect`, plan **free**, region ohio, branch `main`, auto-deploy on, live commit `213d517` |
-| Runtime DB role | `neondb_owner` through the pooler, not `connect_app` |
+| Runtime DB role | `neondb_owner` through the pooler, not `connect_app`. Owner reports `rolbypassrls=true`, so RLS does not apply |
 | Vercel | Project `connect`, root `connect-main/apps/web`, production branch `main` |
 
 ## Verified on disposable Postgres 16 (CI run 41367090494, commit `d228b9c`)
@@ -34,13 +34,19 @@ Postgres; users, sessions, audit and participant tables had no RLS; any user cou
 Limits:
 - File purge touches storage only and has no database role to test. CI keeps only 10 pass annotations per step, so
   some passes are read from the step's exit status.
-- The API still connects as `neondb_owner` in production, where RLS may not apply. Moving to `connect_app` and
-  `connect_worker` needs a separate worker pool and owner approval.
+- Production still connects as `neondb_owner`, which bypasses RLS. Role separation is coded and tested on this branch;
+  applying it needs owner approval: `deployment/ROLE_SEPARATION_RELEASE.md`.
 - SECURITY DEFINER functions and foreign key checks need the table owner to bypass RLS; unconfirmed in production.
 - Deploy order: migrations 000013-000019 must be applied before this code, or the API fails.
 - Behavior changes: guests are refused in institutional rooms; class rooms admit only their batch, faculty and admins;
   Google sign-in is refused until `GOOGLE_CLIENT_IDS` is set in production; regular participants may publish by default,
   and class rooms start with publishing off.
+
+## Role separation
+
+Code, tests and procedure are on this branch. `DATABASE_URL` is `connect_app`, `WORKER_DATABASE_URL` is `connect_worker`,
+`MIGRATION_DATABASE_URL` is for tools only. Production enforces identity at startup, so merging without the coordinated
+procedure would fail the deploy.
 
 ## Current phase: Phases 1-3 product scope
 

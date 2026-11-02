@@ -8,6 +8,13 @@
 
 ---
 
+## 0. ROLE SEPARATION ROLLBACK
+
+Code and database connection settings roll back together. Code from before role separation cannot run as `connect_app`,
+and current code refuses to start as the owner in production. See [ROLE_SEPARATION_RELEASE.md](ROLE_SEPARATION_RELEASE.md).
+
+---
+
 ## 1. ROLLBACK TRIGGERS
 
 Initiate an emergency rollback immediately if any of the following conditions occur after deployment:
