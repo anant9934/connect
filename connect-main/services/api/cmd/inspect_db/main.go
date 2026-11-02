@@ -6,30 +6,26 @@ import (
 	"os"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tathastu/connect/services/api/internal/database"
 )
 
 func main() {
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		fmt.Fprintln(os.Stderr, "Error: DATABASE_URL environment variable is required")
-		os.Exit(1)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, dbURL)
+	db, err := database.ConnectAdmin(ctx)
 	if err != nil {
-		fmt.Printf("Failed to connect: %v\n", err)
+		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
-	defer pool.Close()
+	defer db.Close()
+	pool := db.Pool
 
 	if err := pool.Ping(ctx); err != nil {
 		fmt.Printf("Ping failed: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("SUCCESSFULLY CONNECTED TO SUPABASE POSTGRESQL!")
+	fmt.Println("Connected with the administrative role.")
 
 	// Inspect columns of users table
 	rows, err := pool.Query(ctx, `

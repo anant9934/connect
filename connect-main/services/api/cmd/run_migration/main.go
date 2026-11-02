@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tathastu/connect/services/api/internal/database"
 )
 
 const (
@@ -249,9 +250,9 @@ func main() {
 		cmd = os.Args[1]
 	}
 
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		fmt.Fprintln(os.Stderr, "Error: DATABASE_URL environment variable is required")
+	dbURL, err := database.AdminDatabaseURL()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 
@@ -272,6 +273,9 @@ func main() {
 
 	if err := pool.Ping(ctx); err != nil {
 		log.Fatalf("Database ping failed: %v", err)
+	}
+	if err := database.RejectRuntimeRole(ctx, pool); err != nil {
+		log.Fatalf("Refusing to run: %v", err)
 	}
 
 	switch cmd {

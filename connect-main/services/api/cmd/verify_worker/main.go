@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tathastu/connect/services/api/internal/config"
 	"github.com/tathastu/connect/services/api/internal/database"
 	"github.com/tathastu/connect/services/api/internal/worker"
 )
@@ -18,16 +17,10 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
-	cfg, err := config.Load()
-	if err != nil {
-		logger.Error("configuration_load_failed", slog.String("error", err.Error()))
-		os.Exit(1)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	db, err := database.Connect(ctx, cfg)
+	db, err := database.ConnectAdmin(ctx)
 	if err != nil {
 		logger.Error("database_connection_failed", slog.String("error", err.Error()))
 		os.Exit(1)

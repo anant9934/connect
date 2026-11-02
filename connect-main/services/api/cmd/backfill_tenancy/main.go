@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tathastu/connect/services/api/internal/database"
 )
 
 const (
@@ -57,9 +57,9 @@ func ClassifyRoom(classSessionID *string, hostUserID *string, isCollaborationNod
 }
 
 func main() {
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		log.Fatal("DATABASE_URL environment variable is required")
+	dbURL, err := database.AdminDatabaseURL()
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	ctx := context.Background()
@@ -74,6 +74,10 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer pool.Close()
+
+	if err := database.RejectRuntimeRole(ctx, pool); err != nil {
+		log.Fatalf("Refusing to run: %v", err)
+	}
 
 	stats, err := RunBackfill(ctx, pool, BatchSize, ThrottleInterval)
 	if err != nil {
