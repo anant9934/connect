@@ -266,7 +266,7 @@ jobs:
           grep -E '^STEP' /tmp/e2e.txt | tail -1 | while IFS= read -r line; do
             echo "::notice title=RLS browser::last $line"
           done
-          [ $status -eq 0 ] || docker logs livekit 2>&1 | grep -E 'closing|reason|disconnect' | tail -1 | cut -c1-300 | while IFS= read -r line; do
+          [ $status -eq 0 ] || docker logs livekit 2>&1 | grep -E 'participant closing' | tail -1 | grep -oE '"(reason|isExpectedToResume|clientInitiated)":[^,}]*' | tr '\n' ' ' | while IFS= read -r line; do
             echo "::notice title=RLS browser::livekit $line"
           done
           grep -E '"level":"ERROR"|panic' /tmp/api.log | tail -1 | cut -c1-200 | while IFS= read -r line; do

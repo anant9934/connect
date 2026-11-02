@@ -356,10 +356,9 @@ func (s *Service) syncMediaRole(ctx context.Context, rm *Room, identity, role, a
 	defer cancel()
 	var err error
 	switch {
-	case role == livekit.RoleHost || role == livekit.RoleCoHost:
+	// Matches the sources in a participant's token, so a role change never narrows a live connection needlessly.
+	case role == livekit.RoleHost || role == livekit.RoleCoHost || rm.ParticipantsCanPublish:
 		err = s.roomManager.GrantFullPublishing(rpcCtx, rm.PublicCode, identity)
-	case rm.ParticipantsCanPublish:
-		err = s.roomManager.PromoteToSpeaker(rpcCtx, rm.PublicCode, identity)
 	default:
 		err = s.roomManager.DemoteToParticipant(rpcCtx, rm.PublicCode, identity)
 	}
