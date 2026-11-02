@@ -31,8 +31,6 @@ export default function RoomPreviewPage() {
   const [user, setUser] = useState<User | null>(null);
   const [guestName, setGuestName] = useState('');
   const [guestNameError, setGuestNameError] = useState<string | null>(null);
-  const [passcode, setPasscode] = useState('');
-  const [passcodeError, setPasscodeError] = useState<string | null>(null);
 
   // Device and Media States (Default off on first visit until granted or explicitly activated by user)
   const [videoEnabled, setVideoEnabled] = useState(false);
@@ -265,7 +263,6 @@ export default function RoomPreviewPage() {
   const handleJoin = async (e?: React.FormEvent, joinMuted = false) => {
     if (e) e.preventDefault();
     setGuestNameError(null);
-    setPasscodeError(null);
 
     const effectiveName = user ? user.displayName : guestName.trim();
     if (!effectiveName || effectiveName.length < 2) {
@@ -279,7 +276,7 @@ export default function RoomPreviewPage() {
       const finalVideo = joinMuted ? false : videoEnabled;
       const finalAudio = joinMuted ? false : audioEnabled;
 
-      const joinRes = await joinRoom(roomCode, user ? undefined : effectiveName, passcode.trim());
+      const joinRes = await joinRoom(roomCode, user ? undefined : effectiveName);
 
       // Store device choices for room session initialization
       if (typeof window !== 'undefined') {
@@ -302,11 +299,6 @@ export default function RoomPreviewPage() {
 
       router.push(`/room/${roomCode}`);
     } catch (err) {
-      if (err instanceof ApiError && (err.code === 'PASSCODE_REQUIRED' || err.code === 'INVALID_PASSCODE')) {
-        setPasscodeError(err.message);
-        setJoining(false);
-        return;
-      }
       if (err instanceof ApiError) {
         setRoomError(err.message);
       } else {
@@ -361,9 +353,6 @@ export default function RoomPreviewPage() {
           <ArrowLeft className="w-4 h-4" />
           <span>Exit</span>
         </Link>
-        <Link href="/diagnostics" className="text-xs sm:text-sm text-[#7258E8] underline inline-flex items-center min-h-[44px]">
-          Check connection
-        </Link>
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
           <span className="text-xs font-mono font-medium text-[#171717] bg-[#F7F7F3] px-2.5 py-1 rounded-md border border-[#E9E9E5]">
@@ -400,26 +389,6 @@ export default function RoomPreviewPage() {
             </div>
 
             <form onSubmit={(e) => handleJoin(e, false)} className="space-y-4">
-              {room.hasPasscode && (
-                <div>
-                  <label htmlFor="meetingPasscode" className="block text-xs font-semibold text-[#171717] mb-1 uppercase tracking-wider">
-                    Meeting Passcode
-                  </label>
-                  <input
-                    id="meetingPasscode"
-                    type="password"
-                    autoComplete="off"
-                    value={passcode}
-                    onChange={(e) => setPasscode(e.target.value)}
-                    placeholder="Not needed if you are the host"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#E9E9E5] bg-[#FCFCFA] text-[16px] sm:text-sm text-[#171717] placeholder-[#888888] focus:outline-none focus:ring-2 focus:ring-[#7258E8] transition-all min-h-[44px]"
-                  />
-                  {passcodeError && (
-                    <p role="alert" className="text-xs text-red-600 mt-1">{passcodeError}</p>
-                  )}
-                </div>
-              )}
-
               {/* Identity State */}
               {user ? (
                 <div className="p-3 rounded-xl bg-[#F7F7F3] border border-[#E9E9E5]">

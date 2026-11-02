@@ -69,13 +69,14 @@ describe('Phase 3 Architecture, Security & Light-First Verification', () => {
     );
   });
 
-  test('Chat: stored by the server, with a size limit and data channels only as hints', () => {
+  test('Realtime Chat: Ephemeral messaging with verified sender identity and character caps', () => {
     const chatPanel = fs.readFileSync(path.join(webRoot, 'components/meeting/ChatPanel.tsx'), 'utf-8');
-    assert.ok(chatPanel.includes('MAX_MESSAGE_LENGTH = 2000'), 'Chat must enforce the server limit');
+    assert.ok(chatPanel.includes('1000') || chatPanel.includes('1,000'), 'Chat must enforce max 1000 characters');
+    assert.ok(chatPanel.includes('Ephemeral') || chatPanel.includes('visible to participants currently'), 'Chat must clearly document ephemeral retention behavior');
 
     const meetingRoom = fs.readFileSync(path.join(webRoot, 'components/meeting/MeetingRoom.tsx'), 'utf-8');
-    assert.ok(meetingRoom.includes('useMeetingInteraction'), 'MeetingRoom must use stored chat');
-    assert.ok(!meetingRoom.includes("topic === 'tc-chat'"), 'MeetingRoom must not trust data channel chat');
+    assert.ok(meetingRoom.includes('tc-chat'), 'MeetingRoom must use tc-chat LiveKit data channel');
+    assert.ok(meetingRoom.includes('participant.identity'), 'MeetingRoom must verify senderIdentity from LiveKit participant');
   });
 
   test('Security: Waiting room gatekeeping prevents unauthorized LiveKit token issuance', () => {
@@ -88,7 +89,7 @@ describe('Phase 3 Architecture, Security & Light-First Verification', () => {
 
   test('Meeting History: User-scoped and indexed history queries without raw media retention', () => {
     const historyPage = fs.readFileSync(path.join(webRoot, 'app/history/page.tsx'), 'utf-8');
-    assert.ok(historyPage.includes('searchMeetings'), 'History page must invoke getMeetingHistory API');
+    assert.ok(historyPage.includes('getMeetingHistory'), 'History page must invoke getMeetingHistory API');
     assert.ok(historyPage.includes('Authentication Required'), 'History page must prompt unauthenticated users');
   });
 });

@@ -4,11 +4,6 @@ export interface User {
   displayName: string;
 }
 
-export interface Profile extends User {
-  avatarUrl?: string;
-  authProvider?: string;
-}
-
 export interface SignupDTO {
   email: string;
   password: string;

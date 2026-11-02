@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     title: 'Zoom Alternative for Video Meetings & Research Teams | Tathastu Meet',
     description:
       'An honest, lightweight alternative to Zoom. Join video meetings in your browser without mandatory desktop downloads, no 40-minute cutoffs, and purpose-built rooms.',
-    url: 'https://connect.aitathastu.com/compare/zoom-alternative',
+    url: 'https://connect-mauve-nine.vercel.app/compare/zoom-alternative',
   },
 };
 
@@ -29,19 +29,19 @@ export default function ZoomAlternativePage() {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: 'https://connect.aitathastu.com',
+        item: 'https://connect-mauve-nine.vercel.app',
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: 'Compare',
-        item: 'https://connect.aitathastu.com/compare/zoom-alternative',
+        item: 'https://connect-mauve-nine.vercel.app/compare/zoom-alternative',
       },
       {
         '@type': 'ListItem',
         position: 3,
         name: 'Zoom Alternative',
-        item: 'https://connect.aitathastu.com/compare/zoom-alternative',
+        item: 'https://connect-mauve-nine.vercel.app/compare/zoom-alternative',
       },
     ],
   };

@@ -6,14 +6,6 @@ export interface Room {
   waitingRoomEnabled?: boolean;
   maxParticipants: number;
   createdAt: string;
-  title?: string;
-  scheduledStart?: string;
-  scheduledEnd?: string;
-  timeZone?: string;
-  hasPasscode?: boolean;
-  hostIdentity?: string;
-  participantsCanPublish?: boolean;
-  coHostPermissions?: Record<string, boolean>;
 }
 
 export interface Participant {
@@ -65,17 +57,3 @@ export interface MeetingHistoryItem {
   waiting_room_enabled?: boolean;
 }
 
-
-export interface RoomModeration {
-  permissions: Record<string, boolean>;
-  roles: Record<string, string>;
-  participantsCanPublish: boolean;
-  coHostPermissions: Record<string, boolean>;
-  error: string | null;
-  onGrantCoHost: (identity: string) => void;
-  onRevokeCoHost: (identity: string) => void;
-  onTransferHost: (identity: string) => void;
-  onMuteAll: () => void;
-  onLowerHand: (identity: string) => void;
-  onUpdatePermissions: (coHost: Record<string, boolean>, participantsCanPublish: boolean) => void;
-}

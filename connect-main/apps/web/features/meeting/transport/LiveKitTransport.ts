@@ -6,13 +6,9 @@ import {
   TrackPublication,
   Participant,
   LocalParticipant,
-  RemoteTrackPublication,
-  VideoQuality,
-  setLogLevel,
 } from 'livekit-client';
 import { LIVEKIT_ROOM_OPTIONS } from '../livekit';
 import {
-  BandwidthMode,
   MediaTransport,
   TransportType,
   TransportConnectOptions,
@@ -100,8 +96,6 @@ class LiveKitParticipantAdapter implements TransportParticipant {
 export class LiveKitTransport implements MediaTransport {
   readonly type: TransportType = 'livekit';
   private room: LiveKitRoom | null = null;
-  private connectAttempt: Promise<void> | null = null;
-  private bandwidthMode: BandwidthMode = 'normal';
   private eventListeners: Map<string, Set<Function>> = new Map();
   private _screenSharePub: TransportTrackPublication | null = null;
   private _screenShareParticipant: TransportParticipant | null = null;
@@ -113,12 +107,8 @@ export class LiveKitTransport implements MediaTransport {
   }
 
   private initRoom(): void {
-    if (typeof window !== 'undefined' && (window as any).__TC_ENABLE_TEST_DIAGNOSTICS) {
-      setLogLevel('debug');
-    }
     const room = new LiveKitRoom(LIVEKIT_ROOM_OPTIONS);
     this.room = room;
-    webDiagnostics.log('room', 'RoomCreated');
 
     room
       .on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
@@ -136,14 +126,8 @@ export class LiveKitTransport implements MediaTransport {
         this.updateScreenShareState();
         this.emit('participants_changed');
       })
-      .on(RoomEvent.SignalReconnecting, () => {
-        webDiagnostics.log('room', 'SignalReconnecting');
-      })
-      .on(RoomEvent.ParticipantPermissionsChanged, () => {
-        webDiagnostics.log('room', 'PermissionsChanged');
-      })
-      .on(RoomEvent.Disconnected, (reason?: unknown) => {
-        webDiagnostics.log('room', 'Disconnected', { details: { reason } });
+      .on(RoomEvent.Disconnected, () => {
+        webDiagnostics.log('room', 'Disconnected');
         this.emit('participants_changed');
       })
       .on(RoomEvent.Reconnecting, () => {
@@ -194,7 +178,6 @@ export class LiveKitTransport implements MediaTransport {
         this.emit('participants_changed');
       })
       .on(RoomEvent.TrackPublished, (pub: any, p: Participant) => {
-        this.applyBandwidthMode(pub);
         webDiagnostics.log('track', 'TrackPublished', {
           participantIdentity: p.identity,
           trackSid: pub?.trackSid,
@@ -304,19 +287,7 @@ export class LiveKitTransport implements MediaTransport {
     return this.room;
   }
 
-  // One connection per transport: a second call joins the attempt in progress or does nothing.
-  connect(options: TransportConnectOptions): Promise<void> {
-    if (this.connectAttempt) {
-      return this.connectAttempt;
-    }
-    this.connectAttempt = this.openConnection(options).catch((err) => {
-      this.connectAttempt = null;
-      throw err;
-    });
-    return this.connectAttempt;
-  }
-
-  private async openConnection(options: TransportConnectOptions): Promise<void> {
+  async connect(options: TransportConnectOptions): Promise<void> {
     if (!options.livekitUrl || !options.token) {
       throw new Error('LiveKit URL and token required for LiveKitTransport');
     }
@@ -325,9 +296,7 @@ export class LiveKitTransport implements MediaTransport {
       this.initRoom();
     }
 
-    webDiagnostics.log('room', 'ConnectStarted');
     await this.room!.connect(options.livekitUrl, options.token);
-    webDiagnostics.log('room', 'ConnectFinished', { details: { sid: this.room!.localParticipant?.sid } });
 
     if (typeof window !== 'undefined') {
       const allowDiagnostics =
@@ -337,7 +306,6 @@ export class LiveKitTransport implements MediaTransport {
       if (allowDiagnostics) {
         (window as any).__livekitRoom = this.room;
         (window as any).__tcDiagnostics = {
-          connectAgain: () => this.connect(options),
           getRoomState: () => this.room?.state,
           getPeerConnections: () => {
             const pcs: RTCPeerConnection[] = [];
@@ -389,7 +357,6 @@ export class LiveKitTransport implements MediaTransport {
   }
 
   async disconnect(): Promise<void> {
-    this.connectAttempt = null;
     if (typeof window !== 'undefined') {
       delete (window as any).__livekitRoom;
       delete (window as any).__tcDiagnostics;
@@ -425,22 +392,6 @@ export class LiveKitTransport implements MediaTransport {
       throw err;
     } finally {
       this.emit('participants_changed');
-    }
-  }
-
-  setBandwidthMode(mode: BandwidthMode): void {
-    this.bandwidthMode = mode;
-    this.room?.remoteParticipants.forEach((participant) => {
-      participant.trackPublications.forEach((pub) => this.applyBandwidthMode(pub as RemoteTrackPublication));
-    });
-  }
-
-  // Shared screens stay on in every mode: they are what a class is usually looking at.
-  private applyBandwidthMode(pub: RemoteTrackPublication): void {
-    if (pub.kind !== Track.Kind.Video || pub.source === Track.Source.ScreenShare) return;
-    pub.setSubscribed(this.bandwidthMode !== 'audio-only');
-    if (this.bandwidthMode !== 'audio-only') {
-      pub.setVideoQuality(this.bandwidthMode === 'low' ? VideoQuality.LOW : VideoQuality.HIGH);
     }
   }
 

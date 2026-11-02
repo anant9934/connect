@@ -1,18 +1,9 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
-import { AppMenu } from '@/components/AppMenu';
-import { getSession } from '@/features/auth/api';
-import { User } from '@/features/auth/types';
 
 export function LandingNav({ onStartMeeting }: { onStartMeeting?: () => void }) {
-  const [user, setUser] = useState<User | null>(null);
-
-  useEffect(() => {
-    getSession().then(setUser).catch(() => setUser(null));
-  }, []);
-
   return (
     <nav className="w-full bg-white/95 backdrop-blur-md sticky top-0 z-30 border-b border-[#F0EEE8]/80 transition-all">
       <div className="max-w-[1200px] mx-auto px-3 sm:px-8 py-2.5 sm:py-3 flex items-center justify-between gap-2 sm:gap-4">
@@ -64,17 +55,13 @@ export function LandingNav({ onStartMeeting }: { onStartMeeting?: () => void }) 
           >
             Join
           </a>
-          {user ? (
-            <AppMenu user={user} />
-          ) : (
-            <Link
-              id="nav-action-signin"
-              href="/sign-in"
-              className="text-[#5E5A50] hover:text-[#17151F] px-1.5 xs:px-2 sm:px-2.5 py-1.5 sm:py-2 rounded-lg hover:bg-[#F6F5F2] transition-colors no-underline inline-flex items-center justify-center min-h-[40px] whitespace-nowrap"
-            >
-              Sign in
-            </Link>
-          )}
+          <Link
+            id="nav-action-signin"
+            href="/sign-in"
+            className="text-[#5E5A50] hover:text-[#17151F] px-1.5 xs:px-2 sm:px-2.5 py-1.5 sm:py-2 rounded-lg hover:bg-[#F6F5F2] transition-colors no-underline inline-flex items-center justify-center min-h-[40px] whitespace-nowrap"
+          >
+            Sign in
+          </Link>
           <button
             id="nav-action-start"
             onClick={onStartMeeting}

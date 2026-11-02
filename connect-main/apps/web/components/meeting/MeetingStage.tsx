@@ -17,15 +17,10 @@ import { InviteDialog } from './InviteDialog';
 import { ChatPanel } from './ChatPanel';
 import { ParticipantsPanel } from './ParticipantsPanel';
 import { NotesPanel } from './NotesPanel';
-import { ClassroomPanel } from './ClassroomPanel';
-import { BandwidthControl } from './BandwidthControl';
-import { ClassroomBoard } from './ClassroomBoard';
-import { BreakoutControl } from './BreakoutControl';
 import { FilesPanel } from './FilesPanel';
 import { TransportDiagnostics } from './TransportDiagnostics';
 import { ChatMessage } from '@/features/chat/types';
-import { InteractionStatus } from '@/features/chat/useMeetingInteraction';
-import { AdmissionRequest, RoomModeration } from '@/features/rooms/types';
+import { AdmissionRequest } from '@/features/rooms/types';
 import { TransportParticipant, TransportTrackPublication, MediaTransport } from '@/features/meeting/transport';
 
 interface MeetingStageProps {
@@ -36,18 +31,6 @@ interface MeetingStageProps {
   screenSharePub: TrackPublication | TransportTrackPublication | any;
   screenShareParticipant: Participant | TransportParticipant | any;
   isHost: boolean;
-  moderation: RoomModeration;
-  interaction: {
-    status: InteractionStatus;
-    actionError: string | null;
-    canAnnounce: boolean;
-    hasOlder: boolean;
-    loadingOlder: boolean;
-    onLoadOlder: () => void;
-    onRetry: (message: ChatMessage) => void;
-    syncTick: number;
-    sendHint: () => void;
-  };
   isLocked: boolean;
   isMicMuted: boolean;
   isVideoMuted: boolean;
@@ -56,8 +39,7 @@ interface MeetingStageProps {
   onRequestDeviceHelp?: (device: 'camera' | 'microphone') => void;
   transport?: MediaTransport | null;
   isScreenSharing: boolean;
-  activePanel: 'chat' | 'participants' | 'notes' | 'files' | 'classroom' | null;
-  onMainCode: (code: string | null) => void;
+  activePanel: 'chat' | 'participants' | 'notes' | 'files' | null;
   unreadChatCount: number;
   chatMessages: ChatMessage[];
   pendingAdmissions: AdmissionRequest[];
@@ -70,10 +52,10 @@ interface MeetingStageProps {
   externalFileEvent?: { action: string; fileId: string; filename: string };
   captureMode?: 'detail' | 'motion';
   onToggleCaptureMode?: () => void;
-  onSendMessage: (text: string, kind: 'chat' | 'announcement') => void;
+  onSendMessage: (text: string) => Promise<void>;
   onSendReaction: (emoji: string) => void;
   onToggleHandRaise: () => void;
-  onTogglePanel: (panel: 'chat' | 'participants' | 'notes' | 'files' | 'classroom') => void;
+  onTogglePanel: (panel: 'chat' | 'participants' | 'notes' | 'files') => void;
   onClosePanel: () => void;
   onToggleMic: () => void;
   onToggleVideo: () => void;
@@ -95,8 +77,6 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
   screenSharePub,
   screenShareParticipant,
   isHost,
-  moderation,
-  interaction,
   isLocked,
   isMicMuted,
   isVideoMuted,
@@ -106,7 +86,6 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
   transport = null,
   isScreenSharing,
   activePanel,
-  onMainCode,
   unreadChatCount,
   chatMessages,
   pendingAdmissions,
@@ -202,7 +181,6 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
           <ConnectionStatus connectionState={connectionState} />
           {/* Integrated WebRTC Transport Diagnostics in header layout zone */}
           {transport && <TransportDiagnostics transport={transport} inline={true} />}
-          {transport && <BandwidthControl transport={transport} />}
         </div>
 
         <div className="flex items-center gap-3">
@@ -337,19 +315,6 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
               />
             </div>
           )}
-
-          <BreakoutControl
-            roomCode={roomCode}
-            syncTick={interaction.syncTick}
-            onChanged={interaction.sendHint}
-            onMainCode={onMainCode}
-          />
-          <ClassroomBoard
-            roomCode={roomCode}
-            selfIdentity={localParticipant?.identity || ''}
-            syncTick={interaction.syncTick}
-            onChanged={interaction.sendHint}
-          />
         </div>
 
         {/* Right-Side Panel: Shared Drawer (Chat / Participants) */}
@@ -357,13 +322,6 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
           <aside className="absolute inset-0 sm:relative sm:inset-auto w-full sm:w-80 md:w-96 bg-white border-l border-[#E5E5E3] flex flex-col shrink-0 z-30 shadow-lg animate-in slide-in-from-right duration-150">
             <ChatPanel
               messages={chatMessages}
-              status={interaction.status}
-              actionError={interaction.actionError}
-              canAnnounce={interaction.canAnnounce}
-              hasOlder={interaction.hasOlder}
-              loadingOlder={interaction.loadingOlder}
-              onLoadOlder={interaction.onLoadOlder}
-              onRetry={interaction.onRetry}
               onSendMessage={onSendMessage}
               onClose={onClosePanel}
             />
@@ -376,7 +334,6 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
               localParticipant={localParticipant}
               remoteParticipants={remoteParticipants}
               isHost={isHost}
-              moderation={moderation}
               isLocked={isLocked}
               pendingAdmissions={pendingAdmissions}
               raisedHands={raisedHands}
@@ -396,18 +353,6 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
         )}
 
         {/* Notes Panel (Single Right Drawer) */}
-        {activePanel === 'classroom' && (
-          <aside className="absolute inset-0 sm:relative sm:inset-auto w-full sm:w-80 md:w-96 bg-white border-l border-[#E5E5E3] flex flex-col shrink-0 z-30 shadow-lg animate-in slide-in-from-right duration-150">
-            <ClassroomPanel
-              roomCode={roomCode}
-              selfIdentity={localParticipant?.identity || ''}
-              syncTick={interaction.syncTick}
-              onChanged={interaction.sendHint}
-              onClose={onClosePanel}
-            />
-          </aside>
-        )}
-
         {activePanel === 'notes' && (
           <aside className="absolute inset-0 sm:relative sm:inset-auto w-full sm:w-80 md:w-96 bg-white border-l border-[#E5E5E3] flex flex-col shrink-0 z-30 shadow-lg animate-in slide-in-from-right duration-150">
             <NotesPanel

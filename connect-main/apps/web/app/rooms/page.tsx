@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     title: 'Meeting Rooms & Spaces | Tathastu Meet',
     description:
       'Discover purpose-built room formats in Tathastu Meet: Instant Meet, Research Rooms, Project Sprints, and Mentorship Sessions.',
-    url: 'https://connect.aitathastu.com/rooms',
+    url: 'https://connect-mauve-nine.vercel.app/rooms',
   },
 };
 
@@ -68,13 +68,13 @@ export default function RoomsPage() {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: 'https://connect.aitathastu.com',
+        item: 'https://connect-mauve-nine.vercel.app',
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: 'Rooms',
-        item: 'https://connect.aitathastu.com/rooms',
+        item: 'https://connect-mauve-nine.vercel.app/rooms',
       },
     ],
   };

@@ -55,7 +55,7 @@ export default function MeetingRoomPage() {
             // Automatically submit admission request for waiting room
             if (identity && displayName) {
               try {
-                await requestAdmission(roomCode, displayName);
+                await requestAdmission(roomCode, identity, displayName);
               } catch {
                 // If request already exists, ignore
               }

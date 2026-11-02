@@ -20,13 +20,6 @@ import {
   endRoom,
   getRoom,
   removeParticipant,
-  getMyRole,
-  getParticipants,
-  grantCoHost,
-  revokeCoHost,
-  transferHost,
-  muteAllParticipants,
-  updateRoomPermissions,
   muteParticipant,
   getPendingAdmissions,
   decideAdmission,
@@ -34,9 +27,6 @@ import {
 import { MeetingStage } from './MeetingStage';
 import { Loader2, AlertCircle, UserX, Clock, Volume2, X } from 'lucide-react';
 import { ChatMessage } from '@/features/chat/types';
-import { useMeetingInteraction } from '@/features/chat/useMeetingInteraction';
-import { useBrowserActivity } from '@/features/chat/useBrowserActivity';
-import { webDiagnostics } from '@/features/meeting/diagnostics';
 import { AdmissionRequest } from '@/features/rooms/types';
 import {
   MediaTransportFactory,
@@ -99,20 +89,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [isHost, setIsHost] = useState(initialIsHost);
-  const [myPermissions, setMyPermissions] = useState<Record<string, boolean>>(
-    initialIsHost ? { admit: true, mute: true, remove: true, lock: true, speakers: true } : {}
-  );
-  const [participantRoles, setParticipantRoles] = useState<Record<string, string>>({});
-  const [participantsCanPublish, setParticipantsCanPublish] = useState(true);
-  const [coHostPermissions, setCoHostPermissions] = useState<Record<string, boolean>>({});
-  const [moderationError, setModerationError] = useState<string | null>(null);
 
   // Phase 3 & 4 States: Panels, Chat, Reactions, Notes, Files, Host Moderation
-  const [activePanel, setActivePanel] = useState<'chat' | 'participants' | 'notes' | 'files' | 'classroom' | null>(null);
+  const [activePanel, setActivePanel] = useState<'chat' | 'participants' | 'notes' | 'files' | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
-  const [latestAnnouncement, setLatestAnnouncement] = useState<ChatMessage | null>(null);
-  const [myRole, setMyRole] = useState('participant');
-  const [syncTick, setSyncTick] = useState(0);
+  const [raisedHands, setRaisedHands] = useState<Set<string>>(new Set());
+  const [reactions, setReactions] = useState<Record<string, string>>({});
+  const [isLocalHandRaised, setIsLocalHandRaised] = useState(false);
   const [pendingAdmissions, setPendingAdmissions] = useState<AdmissionRequest[]>([]);
   const [externalNotesRevision, setExternalNotesRevision] = useState<number>(1);
   const [externalFileEvent, setExternalFileEvent] = useState<{ action: string; fileId: string; filename: string } | undefined>(undefined);
@@ -125,7 +109,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const roomRef = useRef<LiveKitRoom | null>(null);
   const transportRef = useRef<MediaTransport | null>(null);
   const [activeTransport, setActiveTransport] = useState<MediaTransport | null>(null);
-  const activePanelRef = useRef<'chat' | 'participants' | 'notes' | 'files' | 'classroom' | null>(null);
+  const activePanelRef = useRef<'chat' | 'participants' | 'notes' | 'files' | null>(null);
   activePanelRef.current = activePanel;
 
   // Sync active screen share publication across all participants
@@ -157,46 +141,64 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     setIsScreenSharing(false);
   }, []);
 
-  // Set inside a breakout: leaving or an ended group goes back to the main meeting.
-  const [mainCode, setMainCode] = useState<string | null>(null);
-  // A group that closes returns its people to the main meeting.
-  useEffect(() => {
-    if (meetingEnded && mainCode) window.location.assign(`/room/${mainCode}/preview`);
-  }, [meetingEnded, mainCode]);
-  const activityRecorded = useBrowserActivity(roomCode, Boolean(initialIdentity?.startsWith('user:')));
-
-  const interaction = useMeetingInteraction(
-    roomCode,
-    initialIdentity || '',
-    () => {
-      transportRef.current?.sendData('tc-sync', {}).catch(() => {
-        // Others catch up on their next poll.
-      });
-    },
-    (fromOthers) => {
-      if (activePanelRef.current !== 'chat') {
-        setUnreadChatCount((c) => c + fromOthers.length);
-      }
-      const announcement = [...fromOthers].reverse().find((m) => m.kind === 'announcement');
-      if (announcement) setLatestAnnouncement(announcement);
-    }
-  );
-  const chatMessages = interaction.messages;
-  const raisedHands = interaction.raisedHands;
-  const reactions = interaction.reactions;
-  const isLocalHandRaised = raisedHands.has(initialIdentity || '');
-  const refreshInteractionRef = useRef(interaction.refresh);
-  refreshInteractionRef.current = interaction.refresh;
-
   const handleDataPayload = useCallback((payload: Uint8Array, participant?: any, topic?: string) => {
+    const sender = participant || {
+      identity: 'remote-peer',
+      name: 'Participant',
+    };
+
     try {
       const text = new TextDecoder().decode(payload);
       const data = JSON.parse(text);
 
-      // Never trusted as content: it only says the stored state may have changed.
-      if (topic === 'tc-sync') {
-        refreshInteractionRef.current();
-        setSyncTick((tick) => tick + 1);
+      if (topic === 'tc-chat') {
+        if (typeof data.text === 'string' && data.text.length <= 1000) {
+          const newMsg: ChatMessage = {
+            id: typeof data.id === 'string' ? data.id : `msg-${Date.now()}`,
+            senderIdentity: sender.identity,
+            senderName: sender.name || sender.identity,
+            text: data.text,
+            timestamp: typeof data.timestamp === 'number' ? data.timestamp : Date.now(),
+            isSelf: false,
+            status: 'delivered',
+          };
+
+          setChatMessages((prev) => {
+            if (prev.some((m) => m.id === newMsg.id)) return prev;
+            return [...prev, newMsg];
+          });
+
+          if (activePanelRef.current !== 'chat') {
+            setUnreadChatCount((c) => c + 1);
+          }
+        }
+      } else if (topic === 'tc-reaction') {
+        if (data.type === 'hand_raise') {
+          setRaisedHands((prev) => {
+            const next = new Set(prev);
+            if (data.raised) {
+              next.add(participant.identity);
+            } else {
+              next.delete(participant.identity);
+            }
+            return next;
+          });
+        } else if (data.type === 'reaction' && typeof data.emoji === 'string') {
+          setReactions((prev) => ({
+            ...prev,
+            [participant.identity]: data.emoji,
+          }));
+          setTimeout(() => {
+            setReactions((prev) => {
+              if (prev[participant.identity] === data.emoji) {
+                const next = { ...prev };
+                delete next[participant.identity];
+                return next;
+              }
+              return prev;
+            });
+          }, 3500);
+        }
       } else if (topic === 'tc-notes') {
         if (typeof data.revision === 'number') {
           setExternalNotesRevision(data.revision);
@@ -219,7 +221,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   useEffect(() => {
     let isCancelled = false;
     const hasBeenConnectedRef = { current: false };
-    webDiagnostics.log('room', 'ConnectionEffectStarted');
 
     async function init() {
       try {
@@ -257,7 +258,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               setConnectionState(ConnectionState.Reconnecting);
             })
             .on(RoomEvent.Reconnected, () => {
-              refreshInteractionRef.current();
               setConnectionState(ConnectionState.Connected);
               setRemoteParticipants(Array.from(room.remoteParticipants.values()));
               setLocalParticipant(room.localParticipant);
@@ -272,6 +272,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               setRemoteParticipants(Array.from(room.remoteParticipants.values()));
               setLocalParticipant(room.localParticipant);
               updateScreenShareState(room);
+              setRaisedHands((prev) => {
+                if (!prev.has(participant.identity)) return prev;
+                const next = new Set(prev);
+                next.delete(participant.identity);
+                return next;
+              });
+              setReactions((prev) => {
+                if (!prev[participant.identity]) return prev;
+                const next = { ...prev };
+                delete next[participant.identity];
+                return next;
+              });
             })
             .on(RoomEvent.TrackSubscribed, () => {
               setRemoteParticipants(Array.from(room.remoteParticipants.values()));
@@ -380,8 +392,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           if (transportRef.current?.type === 'p2p') {
             const oldP2P = transportRef.current;
             const fallback = new LiveKitTransport();
-            const userIdent = initialIdentity || (initialIsHost ? 'user:host' : `guest:${Date.now()}`);
-            const userDisp = initialDisplayName || (initialIsHost ? 'Host' : 'Guest');
+            const userIdent = initialIdentity || (isHost ? 'user:host' : `guest:${Date.now()}`);
+            const userDisp = initialDisplayName || (isHost ? 'Host' : 'Guest');
 
             const room = fallback.getLiveKitRoom();
             if (room) {
@@ -400,7 +412,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 livekitUrl,
                 identity: userIdent,
                 displayName: userDisp,
-                isHost: initialIsHost,
+                isHost,
                 initialAudioEnabled: !isMicMutedRef.current,
                 initialVideoEnabled: !isVideoMutedRef.current,
                 audioDeviceId,
@@ -425,9 +437,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           roomCode,
           token,
           livekitUrl,
-          identity: initialIdentity || (initialIsHost ? 'user:host' : `guest:${Date.now()}`),
-          displayName: initialDisplayName || (initialIsHost ? 'Host' : 'Guest'),
-          isHost: initialIsHost,
+          identity: initialIdentity || (isHost ? 'user:host' : `guest:${Date.now()}`),
+          displayName: initialDisplayName || (isHost ? 'Host' : 'Guest'),
+          isHost,
           initialAudioEnabled: !isMicMutedRef.current,
           initialVideoEnabled: !isVideoMutedRef.current,
           audioDeviceId,
@@ -470,8 +482,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       try {
         const currentRoom = await getRoom(roomCode);
         setIsLocked(currentRoom.isLocked);
-        setParticipantsCanPublish(currentRoom.participantsCanPublish ?? true);
-        setCoHostPermissions(currentRoom.coHostPermissions ?? {});
         if (currentRoom.status === 'ended') {
           setMeetingEnded(true);
           transportRef.current?.disconnect();
@@ -489,7 +499,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }, 2000);
 
     return () => {
-      webDiagnostics.log('room', 'ConnectionEffectCleanup');
       isCancelled = true;
       clearInterval(statusInterval);
       if (typeof window !== 'undefined') {
@@ -512,35 +521,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     videoDeviceId,
     updateScreenShareState,
     handleDataPayload,
-    initialIsHost,
+    isHost,
   ]);
 
-  // Follow role changes made by the host, including transfers and succession
+  // Periodic poll for pending admissions (Host only)
   useEffect(() => {
-    let isMounted = true;
-    async function syncRoles() {
-      try {
-        const [me, participants] = await Promise.all([getMyRole(roomCode), getParticipants(roomCode)]);
-        if (!isMounted) return;
-        setIsHost(me.isHost);
-        setMyRole(me.role);
-        setMyPermissions(me.permissions || {});
-        setParticipantRoles(Object.fromEntries(participants.map((p) => [p.identity, p.identity === me.hostIdentity ? 'host' : p.role])));
-      } catch {
-        // Keeps the last known roles; the server still enforces every action
-      }
-    }
-    syncRoles();
-    const interval = setInterval(syncRoles, 3000);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, [roomCode]);
-
-  // Periodic poll for pending admissions (anyone allowed to admit)
-  useEffect(() => {
-    if (!myPermissions.admit) return;
+    if (!isHost) return;
 
     let isMounted = true;
     async function fetchAdmissions() {
@@ -561,7 +547,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       isMounted = false;
       clearInterval(interval);
     };
-  }, [myPermissions.admit, roomCode]);
+  }, [isHost, roomCode]);
 
   // Handle Controls Interactions
   const handleToggleMic = async () => {
@@ -694,7 +680,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const handleToggleLock = async () => {
-    if (!myPermissions.lock) return;
+    if (!isHost) return;
     try {
       if (isLocked) {
         await unlockRoom(roomCode);
@@ -714,7 +700,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       await leaveRoom(roomCode, localParticipant.identity);
       await transport.disconnect();
     }
-    router.push(mainCode ? `/room/${mainCode}/preview` : '/');
+    router.push('/');
   };
 
   const handleEndMeetingForEveryone = async () => {
@@ -731,22 +717,104 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  const handleSendMessage = (text: string, kind: 'chat' | 'announcement') => {
+  // Phase 3: Realtime Chat Sending
+  const handleSendMessage = async (text: string) => {
+    const transport = transportRef.current;
+    if (!transport || !localParticipant) return;
+
     const trimmed = text.trim();
-    if (trimmed) interaction.sendMessage(trimmed, kind);
+    if (!trimmed || trimmed.length > 1000) return;
+
+    const msgId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const newMsg: ChatMessage = {
+      id: msgId,
+      senderIdentity: localParticipant.identity,
+      senderName: localParticipant.name || 'You',
+      text: trimmed,
+      timestamp: Date.now(),
+      isSelf: true,
+      status: 'sending',
+    };
+
+    setChatMessages((prev) => [...prev, newMsg]);
+
+    try {
+      await transport.sendData('tc-chat', {
+        id: msgId,
+        text: trimmed,
+        timestamp: newMsg.timestamp,
+      });
+
+      setChatMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, status: 'sent' } : m))
+      );
+    } catch {
+      setChatMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, status: 'error' } : m))
+      );
+    }
   };
 
+  // Phase 3: Reactions & Hand Raise
   const handleSendReaction = (emoji: string) => {
-    interaction.react(emoji);
+    const transport = transportRef.current;
+    if (!transport || !localParticipant) return;
+
+    setReactions((prev) => ({
+      ...prev,
+      [localParticipant.identity]: emoji,
+    }));
+
+    setTimeout(() => {
+      setReactions((prev) => {
+        if (prev[localParticipant.identity] === emoji) {
+          const next = { ...prev };
+          delete next[localParticipant.identity];
+          return next;
+        }
+        return prev;
+      });
+    }, 3500);
+
+    try {
+      transport.sendData('tc-reaction', {
+        type: 'reaction',
+        emoji,
+        timestamp: Date.now(),
+      });
+    } catch {
+      // Non-blocking
+    }
   };
 
   const handleToggleHandRaise = () => {
-    interaction.setOwnHand(!isLocalHandRaised);
+    const transport = transportRef.current;
+    if (!transport || !localParticipant) return;
+
+    const nextState = !isLocalHandRaised;
+    setIsLocalHandRaised(nextState);
+
+    setRaisedHands((prev) => {
+      const next = new Set(prev);
+      if (nextState) next.add(localParticipant.identity);
+      else next.delete(localParticipant.identity);
+      return next;
+    });
+
+    try {
+      transport.sendData('tc-reaction', {
+        type: 'hand_raise',
+        raised: nextState,
+        timestamp: Date.now(),
+      });
+    } catch {
+      // Non-blocking
+    }
   };
 
   // Phase 3: Host Moderation Actions
   const handleRemoveParticipant = async (identity: string) => {
-    if (!myPermissions.remove) return;
+    if (!isHost) return;
     try {
       await removeParticipant(roomCode, identity);
     } catch {
@@ -755,7 +823,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const handleMuteParticipant = async (identity: string) => {
-    if (!myPermissions.mute) return;
+    if (!isHost) return;
     try {
       const rp = remoteParticipants.find((p) => p.identity === identity);
       const micPub = rp?.getTrackPublication(Track.Source.Microphone);
@@ -767,35 +835,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  const runModeration = async (action: () => Promise<void>, failure: string) => {
-    setModerationError(null);
-    try {
-      await action();
-    } catch (err: any) {
-      setModerationError(err?.message || failure);
-    }
-  };
-
-  const moderation = {
-    permissions: myPermissions,
-    roles: participantRoles,
-    participantsCanPublish,
-    coHostPermissions,
-    error: moderationError,
-    onGrantCoHost: (identity: string) => runModeration(() => grantCoHost(roomCode, identity), 'Could not make this person a co-host.'),
-    onRevokeCoHost: (identity: string) => runModeration(() => revokeCoHost(roomCode, identity), 'Could not revoke co-host.'),
-    onTransferHost: (identity: string) => runModeration(() => transferHost(roomCode, identity), 'Could not transfer the host role.'),
-    onLowerHand: (identity: string) => interaction.lowerHand(identity),
-    onMuteAll: () => runModeration(() => muteAllParticipants(roomCode), 'Could not mute everyone.'),
-    onUpdatePermissions: (coHost: Record<string, boolean>, canPublish: boolean) => {
-      setCoHostPermissions(coHost);
-      setParticipantsCanPublish(canPublish);
-      runModeration(() => updateRoomPermissions(roomCode, coHost, canPublish), 'Could not change meeting permissions.');
-    },
-  };
-
   const handleAdmitGuest = async (requestID: string) => {
-    if (!myPermissions.admit) return;
+    if (!isHost) return;
     try {
       await decideAdmission(roomCode, requestID, 'admitted');
       setPendingAdmissions((prev) => prev.filter((p) => p.id !== requestID));
@@ -805,7 +846,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const handleDenyGuest = async (requestID: string) => {
-    if (!myPermissions.admit) return;
+    if (!isHost) return;
     try {
       await decideAdmission(roomCode, requestID, 'denied');
       setPendingAdmissions((prev) => prev.filter((p) => p.id !== requestID));
@@ -814,7 +855,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  const handleTogglePanel = (panel: 'chat' | 'participants' | 'notes' | 'files' | 'classroom') => {
+  const handleTogglePanel = (panel: 'chat' | 'participants' | 'notes' | 'files') => {
     if (activePanel === panel) {
       setActivePanel(null);
     } else {
@@ -852,7 +893,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           </div>
           <div className="pt-2">
             <Link
-              href={mainCode ? `/room/${mainCode}/preview` : '/'}
+              href="/"
               className="inline-block w-full py-3 px-4 rounded-2xl bg-[#7658E8] hover:bg-[#6045D8] text-white text-xs font-semibold transition-colors shadow-xs"
             >
               Return to Home
@@ -949,23 +990,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         </div>
       )}
 
-      {latestAnnouncement && (
-        <div role="status" data-testid="announcement-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-50 w-[min(92vw,560px)] flex items-start gap-3 rounded-xl border border-amber-300 bg-[#FFF2BE] px-4 py-2.5 text-sm text-amber-950 shadow-lg">
-          <p className="min-w-0 break-words">
-            <span className="font-semibold">{latestAnnouncement.senderName}: </span>
-            {latestAnnouncement.text}
-          </p>
-          <button type="button" onClick={() => setLatestAnnouncement(null)} className="shrink-0 text-xs font-semibold underline min-h-[24px]">
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {activityRecorded && (
-        <p data-testid="activity-notice" className="px-3 py-1 text-xs text-center text-[#404040] bg-[#F3F0FF]">This class records how long this tab is visible, as one attendance signal. Nothing else about your browser is recorded.</p>
-      )}
       <MeetingStage
-        onMainCode={setMainCode}
         roomCode={roomCode}
         connectionState={connectionState}
         localParticipant={localParticipant}
@@ -973,22 +998,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         screenSharePub={screenSharePub}
         screenShareParticipant={screenShareParticipant}
         isHost={isHost}
-        moderation={moderation}
-        interaction={{
-          status: interaction.status,
-          actionError: interaction.actionError,
-          canAnnounce: isHost || myRole === 'co-host',
-          hasOlder: interaction.hasOlder,
-          loadingOlder: interaction.loadingOlder,
-          onLoadOlder: interaction.loadOlder,
-          onRetry: interaction.retryMessage,
-          syncTick,
-          sendHint: () => {
-            transportRef.current?.sendData('tc-sync', {}).catch(() => {
-              // Others catch up on their next poll.
-            });
-          },
-        }}
         isLocked={isLocked}
         isMicMuted={isMicMuted}
         isVideoMuted={isVideoMuted}

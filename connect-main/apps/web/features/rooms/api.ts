@@ -27,35 +27,10 @@ export async function getRoom(code: string): Promise<Room> {
   return res.room;
 }
 
-export interface ScheduleMeetingInput {
-  title: string;
-  scheduledStart: string;
-  scheduledEnd: string;
-  timeZone: string;
-  passcode?: string;
-  waitingRoomEnabled?: boolean;
-}
-
-export async function scheduleMeeting(input: ScheduleMeetingInput): Promise<CreateRoomResponse> {
-  return apiFetch<CreateRoomResponse>('/api/v1/rooms', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  });
-}
-
-export async function getUpcomingMeetings(): Promise<Room[]> {
-  const res = await apiFetch<{ rooms: Room[] }>('/api/v1/rooms/upcoming', { method: 'GET' });
-  return res.rooms || [];
-}
-
-export async function cancelMeeting(code: string): Promise<void> {
-  await apiFetch(`/api/v1/rooms/${encodeURIComponent(code)}/cancel`, { method: 'POST' });
-}
-
-export async function joinRoom(code: string, displayName?: string, passcode?: string): Promise<JoinRoomResponse> {
+export async function joinRoom(code: string, displayName?: string, identity?: string): Promise<JoinRoomResponse> {
   return apiFetch<JoinRoomResponse>(`/api/v1/rooms/${encodeURIComponent(code)}/join`, {
     method: 'POST',
-    body: JSON.stringify({ displayName, passcode: passcode || undefined }),
+    body: JSON.stringify({ displayName, identity }),
   });
 }
 
@@ -111,13 +86,14 @@ export async function getRoomToken(
 
 export async function requestAdmission(
   code: string,
-  displayName: string
+  displayName: string,
+  identity?: string
 ): Promise<{ request: { id: string; status: string } }> {
   return apiFetch<{ request: { id: string; status: string } }>(
     `/api/v1/rooms/${encodeURIComponent(code)}/admission/request`,
     {
       method: 'POST',
-      body: JSON.stringify({ displayName }),
+      body: JSON.stringify({ displayName, identity }),
     }
   );
 }
@@ -197,41 +173,3 @@ export async function getMeetingHistory(
   );
 }
 
-
-export interface MyRole {
-  role: string;
-  isHost: boolean;
-  hostIdentity: string;
-  permissions: Record<string, boolean>;
-}
-
-export async function getMyRole(code: string): Promise<MyRole> {
-  return apiFetch<MyRole>(`/api/v1/rooms/${encodeURIComponent(code)}/me`, { method: 'GET' });
-}
-
-export async function grantCoHost(code: string, identity: string): Promise<void> {
-  await apiFetch(`/api/v1/rooms/${encodeURIComponent(code)}/participants/${encodeURIComponent(identity)}/cohost`, { method: 'POST' });
-}
-
-export async function revokeCoHost(code: string, identity: string): Promise<void> {
-  await apiFetch(`/api/v1/rooms/${encodeURIComponent(code)}/participants/${encodeURIComponent(identity)}/cohost`, { method: 'DELETE' });
-}
-
-export async function transferHost(code: string, identity: string): Promise<void> {
-  await apiFetch(`/api/v1/rooms/${encodeURIComponent(code)}/participants/${encodeURIComponent(identity)}/transfer-host`, { method: 'POST' });
-}
-
-export async function muteAllParticipants(code: string): Promise<void> {
-  await apiFetch(`/api/v1/rooms/${encodeURIComponent(code)}/mute-all`, { method: 'POST' });
-}
-
-export async function updateRoomPermissions(
-  code: string,
-  coHost: Record<string, boolean>,
-  participantsCanPublish: boolean
-): Promise<void> {
-  await apiFetch(`/api/v1/rooms/${encodeURIComponent(code)}/permissions`, {
-    method: 'PUT',
-    body: JSON.stringify({ coHost, participantsCanPublish }),
-  });
-}

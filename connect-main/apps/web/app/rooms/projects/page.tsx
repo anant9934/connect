@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     title: 'Project Rooms for Agile Teams & Sprint Reviews | Tathastu Meet',
     description:
       'Real-time project rooms for engineering standups, design critiques, and product sprints. Fast screen sharing, low latency, and intuitive roundtable layout.',
-    url: 'https://connect.aitathastu.com/rooms/projects',
+    url: 'https://connect-mauve-nine.vercel.app/rooms/projects',
   },
 };
 
@@ -29,19 +29,19 @@ export default function ProjectRoomPage() {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: 'https://connect.aitathastu.com',
+        item: 'https://connect-mauve-nine.vercel.app',
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: 'Rooms',
-        item: 'https://connect.aitathastu.com/rooms',
+        item: 'https://connect-mauve-nine.vercel.app/rooms',
       },
       {
         '@type': 'ListItem',
         position: 3,
         name: 'Project Room',
-        item: 'https://connect.aitathastu.com/rooms/projects',
+        item: 'https://connect-mauve-nine.vercel.app/rooms/projects',
       },
     ],
   };

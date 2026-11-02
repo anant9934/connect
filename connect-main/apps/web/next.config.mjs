@@ -3,19 +3,6 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
-  redirects: async () => [
-    {
-      source: '/:path*',
-      has: [
-        {
-          type: 'host',
-          value: 'connect-mauve-nine.vercel.app',
-        },
-      ],
-      destination: 'https://connect.aitathastu.com/:path*',
-      permanent: true,
-    },
-  ],
   rewrites: async () => [
     {
       source: '/api/v1/:path*',
@@ -69,7 +56,7 @@ const nextConfig = {
             "script-src 'self' 'unsafe-inline'", // Next.js hydration bootstrap scripts
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "font-src 'self' https://fonts.gstatic.com data:",
-            "img-src 'self' data: blob: https: http://localhost:8080",
+            "img-src 'self' data: blob: https:",
             "connect-src 'self' http://localhost:8080 ws://localhost:8080 http://localhost:7880 ws://localhost:7880 wss://localhost:7880 https: wss:",
             "frame-ancestors 'none'",
             "object-src 'none'",
@@ -85,57 +72,6 @@ const nextConfig = {
           key: 'Permissions-Policy',
           value: 'camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=()',
         },
-        {
-          key: 'X-Robots-Tag',
-          value: 'noindex, nofollow, noarchive, nosnippet',
-        },
-        {
-          key: 'Cache-Control',
-          value: 'private, no-cache, no-store, max-age=0, must-revalidate',
-        },
-        {
-          key: 'Pragma',
-          value: 'no-cache',
-        },
-      ],
-    },
-    {
-      source: '/admin/:path*',
-      headers: [
-        {
-          key: 'X-Robots-Tag',
-          value: 'noindex, nofollow, noarchive, nosnippet',
-        },
-        {
-          key: 'Cache-Control',
-          value: 'private, no-cache, no-store, max-age=0, must-revalidate',
-        },
-        {
-          key: 'Pragma',
-          value: 'no-cache',
-        },
-      ],
-    },
-    {
-      source: '/attendance/:path*',
-      headers: [
-        {
-          key: 'X-Robots-Tag',
-          value: 'noindex, nofollow, noarchive, nosnippet',
-        },
-        {
-          key: 'Cache-Control',
-          value: 'private, no-cache, no-store, max-age=0, must-revalidate',
-        },
-        {
-          key: 'Pragma',
-          value: 'no-cache',
-        },
-      ],
-    },
-    {
-      source: '/profile/:path*',
-      headers: [
         {
           key: 'X-Robots-Tag',
           value: 'noindex, nofollow, noarchive, nosnippet',

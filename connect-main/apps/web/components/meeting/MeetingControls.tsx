@@ -17,7 +17,6 @@ import {
   MoreHorizontal,
   FileText,
   Paperclip,
-  GraduationCap,
   Hand,
   Smile,
   X,
@@ -34,14 +33,14 @@ interface MeetingControlsProps {
   isHost: boolean;
   isLocked: boolean;
   participantCount: number;
-  activePanel: 'chat' | 'participants' | 'notes' | 'files' | 'classroom' | null;
+  activePanel: 'chat' | 'participants' | 'notes' | 'files' | null;
   unreadChatCount: number;
   isHandRaised: boolean;
   onToggleMic: () => void;
   onToggleVideo: () => void;
   onRequestDeviceHelp?: (device: 'camera' | 'microphone') => void;
   onToggleScreenShare: () => void;
-  onTogglePanel: (panel: 'chat' | 'participants' | 'notes' | 'files' | 'classroom') => void;
+  onTogglePanel: (panel: 'chat' | 'participants' | 'notes' | 'files') => void;
   onOpenInvite: () => void;
   onToggleLock: () => void;
   onSendReaction: (emoji: string) => void;
@@ -279,20 +278,6 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
               <Paperclip className="w-5 h-5" />
             </button>
 
-            {/* Questions and doubts */}
-            <button
-              onClick={() => onTogglePanel('classroom')}
-              className={`hidden lg:flex relative min-w-[46px] min-h-[46px] p-3 rounded-2xl transition-all shadow-xs border items-center justify-center active:scale-95 ${
-                activePanel === 'classroom'
-                  ? 'bg-[#EEE8FF] border-[#D4C7FE] text-[#7658E8]'
-                  : 'bg-white border-[#E5E5E3] text-[#1C1C1C] hover:bg-[#F2F2F0]'
-              }`}
-              aria-label="Toggle questions and doubts"
-              title="Questions and doubts"
-            >
-              <GraduationCap className="w-5 h-5" />
-            </button>
-
             {/* 9. Mobile More Options Button */}
             <button
               id="toolbar-more-btn"
@@ -432,24 +417,6 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-semibold truncate">Shared Files</div>
                   <div className="text-[10px] text-[#666664]">View & upload</div>
-                </div>
-              </button>
-
-                <button
-                onClick={() => {
-                  onTogglePanel('classroom');
-                  setShowMoreSheet(false);
-                }}
-                className={`p-3 rounded-2xl border text-left flex items-center gap-3 transition-colors min-h-[48px] ${
-                  activePanel === 'classroom'
-                    ? 'bg-[#EEE8FF] border-[#D4C7FE] text-[#7658E8]'
-                    : 'bg-[#FAFAF8] border-[#E5E5E3] hover:bg-[#F2F2F0]'
-                }`}
-              >
-                <GraduationCap className="w-5 h-5" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold truncate">Questions and doubts</div>
-                  <div className="text-[10px] text-[#666664]">Polls, quizzes and doubts</div>
                 </div>
               </button>
 
