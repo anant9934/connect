@@ -72,3 +72,31 @@ export const listPolicies = async (org: string) =>
   (await apiFetch<{ policies: AttendancePolicy[] }>(orgPath(org, '/attendance-policies'), { method: 'GET' })).policies;
 export const createPolicy = (org: string, minPresentRatio: number, minPartialRatio: number, lateGraceSeconds: number) =>
   post(orgPath(org, '/attendance-policies'), { minPresentRatio, minPartialRatio, lateGraceSeconds });
+
+export interface OrgOverview {
+  people: { active: number; suspended: number; revoked: number; faculty: number; students: number; administrators: number };
+  structure: { departments: number; courses: number; batches: number; enrollments: number };
+  classes: { live: number; next7Days: number; completed30Days: number; cancelled30Days: number; awaitingAttendance: number };
+  attendance30Days: { present: number; late: number; partial: number; absent: number; corrected: number };
+}
+export interface AuditEvent {
+  id: string;
+  eventType: string;
+  severity: string;
+  actorName: string | null;
+  targetName: string | null;
+  target: string | null;
+  createdAt: string;
+}
+
+export const getOverview = async (org: string) =>
+  (await apiFetch<{ overview: OrgOverview }>(orgPath(org, '/admin/overview'), { method: 'GET' })).overview;
+export async function listAuditEvents(org: string, search: { event?: string; from?: string; to?: string; limit: number; offset: number }) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(search)) {
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  }
+  return apiFetch<{ events: AuditEvent[]; total: number }>(orgPath(org, `/admin/audit?${params}`), { method: 'GET' });
+}
+export const updateMember = (org: string, user: string, role: string, status: string) =>
+  apiFetch(orgPath(org, `/members/${encodeURIComponent(user)}`), { method: 'PATCH', body: JSON.stringify({ role, status }) });

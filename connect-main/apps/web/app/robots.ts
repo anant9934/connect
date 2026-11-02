@@ -11,6 +11,8 @@ export default function robots(): MetadataRoute.Robots {
         disallow: [
           '/room/',
           '/room/*',
+          '/admin',
+          '/admin/*',
           '/history',
           '/history/*',
           '/api/',

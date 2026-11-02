@@ -100,6 +100,23 @@ const nextConfig = {
       ],
     },
     {
+      source: '/admin/:path*',
+      headers: [
+        {
+          key: 'X-Robots-Tag',
+          value: 'noindex, nofollow, noarchive, nosnippet',
+        },
+        {
+          key: 'Cache-Control',
+          value: 'private, no-cache, no-store, max-age=0, must-revalidate',
+        },
+        {
+          key: 'Pragma',
+          value: 'no-cache',
+        },
+      ],
+    },
+    {
       source: '/history/:path*',
       headers: [
         {
