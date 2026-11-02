@@ -122,14 +122,14 @@ func TestWorkflowDB_RuntimeIdentityChecks(t *testing.T) {
 		expectProblem(t, connectAs(create("CREATEROLE")), "CREATEROLE")
 	})
 	t.Run("direct membership in a bypassing role", func(t *testing.T) {
-		bypasser, member := create("NOLOGIN BYPASSRLS"), create("")
+		bypasser, member := create("BYPASSRLS"), create("")
 		if _, err := admin.Exec(ctx, `GRANT `+pgx.Identifier{bypasser}.Sanitize()+` TO `+pgx.Identifier{member}.Sanitize()); err != nil {
 			t.Fatal(err)
 		}
 		expectProblem(t, connectAs(member), bypasser)
 	})
 	t.Run("membership through an intermediate role", func(t *testing.T) {
-		bypasser, middle, member := create("NOLOGIN BYPASSRLS"), create("NOLOGIN"), create("")
+		bypasser, middle, member := create("BYPASSRLS"), create(""), create("")
 		for _, grant := range []string{
 			`GRANT ` + pgx.Identifier{bypasser}.Sanitize() + ` TO ` + pgx.Identifier{middle}.Sanitize(),
 			`GRANT ` + pgx.Identifier{middle}.Sanitize() + ` TO ` + pgx.Identifier{member}.Sanitize(),
