@@ -62,10 +62,11 @@ async function setField(page, selector, value) {
   }, value);
 }
 
+// Interval polling, because animation frames do not fire in background tabs.
 const waitForText = (page, text, timeout = 15000) =>
-  page.waitForFunction((t) => document.body.innerText.includes(t), { timeout }, text);
+  page.waitForFunction((t) => document.body.innerText.includes(t), { timeout, polling: 200 }, text);
 const waitGone = (page, text, timeout = 15000) =>
-  page.waitForFunction((t) => !document.body.innerText.includes(t), { timeout }, text);
+  page.waitForFunction((t) => !document.body.innerText.includes(t), { timeout, polling: 200 }, text);
 const click = (page, label) => page.waitForSelector(`button[aria-label="${label}"]`).then((b) => b.click());
 const clickByText = (page, text) =>
   page.waitForFunction((t) => {
@@ -169,6 +170,9 @@ try {
   await click(member, 'Reactions');
   await click(member, 'Thumbs Up');
   await waitForText(host, '👍');
+  const stored = execFileSync('psql', [process.env.ADMIN_DATABASE_URL, '-tAc',
+    `SELECT count(*) FROM meeting_reactions x JOIN rooms r ON r.id = x.room_id WHERE r.public_code = '${code}'`]).toString().trim();
+  assert.equal(stored, '1', 'the reaction was not stored once');
 
   step('the host makes a co-host, and their controls appear');
   await clickByText(host, 'Make co-host');
