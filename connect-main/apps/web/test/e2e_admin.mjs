@@ -8,7 +8,11 @@ const WEB_URL = process.env.WEB_URL || 'http://localhost:3000';
 const API_URL = process.env.API_URL || 'http://localhost:8080';
 const stamp = Date.now();
 
-const step = (name) => console.log(`STEP ${name}`);
+let currentStep = 'setup';
+const step = (name) => {
+  currentStep = name;
+  console.log(`STEP ${name}`);
+};
 const sql = (query) => execFileSync('psql', [process.env.ADMIN_DATABASE_URL, '-v', 'ON_ERROR_STOP=1', '-At', '-c', query]).toString().trim().split('\n')[0];
 
 async function signup(name) {
@@ -103,7 +107,7 @@ try {
 
   console.log('E2E PASS admin');
 } catch (err) {
-  console.log(`E2E FAIL admin ${err.message.replace(/\s+/g, ' ').slice(0, 300)}`);
+  console.log(`E2E FAIL admin [${currentStep}] ${err.message.replace(/\s+/g, ' ').slice(0, 300)}`);
   process.exitCode = 1;
 } finally {
   await browser.close();

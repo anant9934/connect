@@ -8,7 +8,11 @@ const API_URL = process.env.API_URL || 'http://localhost:8080';
 const stamp = Date.now();
 const tag = `T${stamp}`;
 
-const step = (name) => console.log(`STEP ${name}`);
+let currentStep = 'setup';
+const step = (name) => {
+  currentStep = name;
+  console.log(`STEP ${name}`);
+};
 
 async function api(method, path, token, body) {
   const res = await fetch(`${API_URL}${path}`, {
@@ -49,7 +53,10 @@ const setDate = (page, selector, value) => page.$eval(selector, (el, v) => {
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
 }, value);
-const rows = (page) => page.$$eval('[data-testid="meeting-row"]', (els) => els.map((e) => e.innerText));
+const waitForOnlyRow = (page, text) => page.waitForFunction((t) => {
+  const found = [...document.querySelectorAll('[data-testid="meeting-row"]')];
+  return found.length === 1 && found[0].innerText.includes(t);
+}, { timeout: 15000, polling: 200 }, text);
 
 try {
   const [hostToken, memberToken, strangerToken] = await Promise.all([signup('Hostc'), signup('Memberc'), signup('Strangerc')]);
@@ -75,27 +82,23 @@ try {
   await host.goto(`${WEB_URL}/history`, { waitUntil: 'networkidle2' });
   await host.waitForSelector('#history-search');
   await typeSearch(host, `${tag} alpha`);
-  await waitForText(host, '1 meeting');
-  assert.ok((await rows(host))[0].includes(`${tag} Alpha`));
+  await waitForOnlyRow(host, `${tag} Alpha`);
   assert.ok(!(await host.evaluate(() => document.body.innerText.includes('Stranger'))), 'another person\'s meeting appeared');
 
   step('the host searches by meeting code');
   await typeSearch(host, alpha.publicCode.toLowerCase());
-  await waitForText(host, '1 meeting');
-  assert.ok((await rows(host))[0].includes('Alpha'));
+  await waitForOnlyRow(host, 'Alpha');
 
   step('status and date filters narrow the results');
   await typeSearch(host, tag);
-  await waitForText(host, '2 meetings');
+  await host.waitForFunction(() => document.querySelectorAll('[data-testid="meeting-row"]').length === 2, { timeout: 15000, polling: 200 });
   await host.select('#history-status', 'ended');
-  await waitForText(host, '1 meeting');
-  assert.ok((await rows(host))[0].includes('Beta'));
+  await waitForOnlyRow(host, 'Beta');
   await host.select('#history-status', '');
   await waitForText(host, '2 meetings');
   const day = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
   await setDate(host, '#history-from', day(15));
-  await waitForText(host, '1 meeting');
-  assert.ok((await rows(host))[0].includes('Beta'));
+  await waitForOnlyRow(host, 'Beta');
   await setDate(host, '#history-to', day(16));
   await waitForText(host, 'No meetings match this search');
   await setDate(host, '#history-from', '');
@@ -129,8 +132,7 @@ try {
   await member.goto(`${WEB_URL}/history`, { waitUntil: 'networkidle2' });
   await member.waitForSelector('#history-search');
   await typeSearch(member, tag);
-  await waitForText(member, '1 meeting');
-  assert.ok((await rows(member))[0].includes('Beta'));
+  await waitForOnlyRow(member, 'Beta');
 
   step('someone else cannot open it');
   const stranger = await person(strangerToken);
@@ -145,7 +147,7 @@ try {
 
   console.log('E2E PASS history');
 } catch (err) {
-  console.log(`E2E FAIL history ${err.message.replace(/\s+/g, ' ').slice(0, 300)}`);
+  console.log(`E2E FAIL history [${currentStep}] ${err.message.replace(/\s+/g, ' ').slice(0, 300)}`);
   process.exitCode = 1;
 } finally {
   await browser.close();
