@@ -15,6 +15,7 @@ services:
         value: 8080
       - key: LOG_LEVEL
         value: info
+      # Must log in as connect_app. The server refuses to start otherwise.
       - key: DATABASE_URL
         sync: false
       - key: DB_MAX_OPEN_CONNS
@@ -60,6 +61,9 @@ services:
       # In-Process Background Worker (Zero-Cost Free Tier Architecture)
       - key: WORKER_ENABLED
         value: "true"
+      # Must log in as connect_worker. There is no fallback to DATABASE_URL.
+      - key: WORKER_DATABASE_URL
+        sync: false
       - key: WORKER_CONCURRENCY
         value: "1"
       - key: WORKER_BATCH_SIZE

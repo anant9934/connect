@@ -1,4 +1,7 @@
 #!/bin/bash
+# Creates the optional standalone Render worker. Production normally runs the in-process worker.
+# The worker's database credential comes from the operator and is never copied from the API.
+# Do not run this without owner approval: the Render worker plan is paid.
 set -euo pipefail
 
 RENDER_API_KEY="${RENDER_API_KEY:-${RENDER_API_TOKEN:-}}"
@@ -6,6 +9,22 @@ if [ -z "${RENDER_API_KEY}" ]; then
   echo "ERROR: RENDER_API_KEY or RENDER_API_TOKEN environment variable is required."
   exit 1
 fi
+if [ -z "${WORKER_DATABASE_URL:-}" ]; then
+  echo "ERROR: WORKER_DATABASE_URL is required. It must log in as connect_worker."
+  exit 1
+fi
+case "${WORKER_DATABASE_URL}" in
+  postgres://connect_worker:*|postgresql://connect_worker:*) ;;
+  *)
+    echo "ERROR: WORKER_DATABASE_URL does not log in as connect_worker. The value is not shown."
+    exit 1
+    ;;
+esac
+if [ "${CONFIRM_PAID_WORKER_PLAN:-}" != "yes" ]; then
+  echo "ERROR: this creates a paid Render service. Set CONFIRM_PAID_WORKER_PLAN=yes only with owner approval."
+  exit 1
+fi
+
 EXISTING_SERVICE_ID="srv-dbj507nlk1mc73897go0"
 OWNER_ID="tea-dbib05ss728c73cra4pg"
 REPO="https://github.com/anant9934/connect"
@@ -26,49 +45,27 @@ if [ -n "${EXISTING_WORKER}" ]; then
   echo "==> Worker service '${SERVICE_NAME}' already exists (ID: ${EXISTING_WORKER})."
   WORKER_ID="${EXISTING_WORKER}"
 else
-  echo "==> 2. Fetching environment configuration from API service (${EXISTING_SERVICE_ID})..."
-  API_ENV_JSON=$(curl -s -H "Authorization: Bearer ${RENDER_API_KEY}" "https://api.render.com/v1/services/${EXISTING_SERVICE_ID}/env-vars?limit=50")
-
-  DATABASE_URL=$(echo "${API_ENV_JSON}" | jq -r '.[] | select(.envVar.key=="DATABASE_URL") | .envVar.value')
-  R2_ENDPOINT=$(echo "${API_ENV_JSON}" | jq -r '.[] | select(.envVar.key=="R2_ENDPOINT") | .envVar.value')
-  R2_BUCKET=$(echo "${API_ENV_JSON}" | jq -r '.[] | select(.envVar.key=="R2_BUCKET") | .envVar.value')
-  R2_ACCESS_KEY_ID=$(echo "${API_ENV_JSON}" | jq -r '.[] | select(.envVar.key=="R2_ACCESS_KEY_ID") | .envVar.value')
-  R2_SECRET_ACCESS_KEY=$(echo "${API_ENV_JSON}" | jq -r '.[] | select(.envVar.key=="R2_SECRET_ACCESS_KEY") | .envVar.value')
-
-  if [ -z "${DATABASE_URL}" ] || [ "${DATABASE_URL}" == "null" ]; then
-    echo "ERROR: DATABASE_URL not found on API service."
-    exit 1
-  fi
-  echo "==> Extracted required database and object storage configuration (values protected)."
+  echo "==> 2. Reading object storage settings from the API service (${EXISTING_SERVICE_ID})..."
+  API_ENV_JSON=$(curl -s -H "Authorization: Bearer ${RENDER_API_KEY}" "https://api.render.com/v1/services/${EXISTING_SERVICE_ID}/env-vars?limit=100")
+  api_env() { echo "${API_ENV_JSON}" | jq -r --arg key "$1" '.[] | select(.envVar.key==$key) | .envVar.value'; }
+  R2_ENDPOINT=$(api_env R2_ENDPOINT)
+  R2_BUCKET=$(api_env R2_BUCKET)
+  R2_ACCESS_KEY_ID=$(api_env R2_ACCESS_KEY_ID)
+  R2_SECRET_ACCESS_KEY=$(api_env R2_SECRET_ACCESS_KEY)
+  echo "==> Read object storage configuration (values protected)."
 
   echo "==> 3. Creating background worker service on Render..."
-  CREATE_PAYLOAD=$(cat <<EOF
-{
-  "ownerId": "${OWNER_ID}",
-  "type": "background_worker",
-  "name": "${SERVICE_NAME}",
-  "repo": "${REPO}",
-  "branch": "${BRANCH}",
-  "rootDir": "${ROOT_DIR}",
-  "autoDeploy": "yes",
-  "serviceDetails": {
-    "env": "docker",
-    "plan": "${PLAN}",
-    "region": "${REGION}",
-    "envSpecificDetails": {
-      "dockerCommand": "/app/worker",
-      "dockerContext": ".",
-      "dockerfilePath": "./Dockerfile"
-    }
-  }
-}
-EOF
-)
+  CREATE_PAYLOAD=$(jq -n --arg owner "${OWNER_ID}" --arg name "${SERVICE_NAME}" --arg repo "${REPO}" --arg branch "${BRANCH}" \
+    --arg root "${ROOT_DIR}" --arg plan "${PLAN}" --arg region "${REGION}" '{
+      ownerId: $owner, type: "background_worker", name: $name, repo: $repo, branch: $branch, rootDir: $root, autoDeploy: "yes",
+      serviceDetails: { env: "docker", plan: $plan, region: $region,
+        envSpecificDetails: { dockerCommand: "/app/worker", dockerContext: ".", dockerfilePath: "./Dockerfile" } }
+    }')
 
-  CREATE_RESP=$(curl -s -X POST \
+  CREATE_RESP=$(printf '%s' "${CREATE_PAYLOAD}" | curl -s -X POST \
     -H "Authorization: Bearer ${RENDER_API_KEY}" \
     -H "Content-Type: application/json" \
-    -d "${CREATE_PAYLOAD}" \
+    --data @- \
     "https://api.render.com/v1/services")
 
   WORKER_ID=$(echo "${CREATE_RESP}" | jq -r '.id // empty')
@@ -76,36 +73,32 @@ EOF
   if [ -z "${WORKER_ID}" ]; then
     ERR_MSG=$(echo "${CREATE_RESP}" | jq -r '.message // "Unknown error"')
     echo "FAILED to create service: ${ERR_MSG}"
-    echo "${CREATE_RESP}" | jq .
     exit 2
   fi
 
   echo "==> Service created successfully! Service ID: ${WORKER_ID}"
 
   echo "==> 4. Setting worker environment variables..."
-  ENV_VARS_PAYLOAD=$(cat <<EOF
-[
-  {"key": "APP_ENV", "value": "production"},
-  {"key": "DATABASE_URL", "value": "${DATABASE_URL}"},
-  {"key": "LOG_LEVEL", "value": "info"},
-  {"key": "WORKER_CONCURRENCY", "value": "5"},
-  {"key": "WORKER_BATCH_SIZE", "value": "10"},
-  {"key": "WORKER_POLL_INTERVAL", "value": "1s"},
-  {"key": "WORKER_LEASE_TTL", "value": "30s"},
-  {"key": "STORAGE_PROVIDER", "value": "r2"},
-  {"key": "R2_ENDPOINT", "value": "${R2_ENDPOINT}"},
-  {"key": "R2_BUCKET", "value": "${R2_BUCKET}"},
-  {"key": "R2_ACCESS_KEY_ID", "value": "${R2_ACCESS_KEY_ID}"},
-  {"key": "R2_SECRET_ACCESS_KEY", "value": "${R2_SECRET_ACCESS_KEY}"},
-  {"key": "R2_REGION", "value": "auto"}
-]
-EOF
-)
-
-  curl -s -X PUT \
+  # Sent on stdin so secrets never appear in a process listing. DATABASE_URL is deliberately absent.
+  jq -n --arg db "${WORKER_DATABASE_URL}" --arg endpoint "${R2_ENDPOINT}" --arg bucket "${R2_BUCKET}" \
+    --arg key "${R2_ACCESS_KEY_ID}" --arg secret "${R2_SECRET_ACCESS_KEY}" '[
+      {key: "APP_ENV", value: "production"},
+      {key: "WORKER_DATABASE_URL", value: $db},
+      {key: "LOG_LEVEL", value: "info"},
+      {key: "WORKER_CONCURRENCY", value: "5"},
+      {key: "WORKER_BATCH_SIZE", value: "10"},
+      {key: "WORKER_POLL_INTERVAL", value: "1s"},
+      {key: "WORKER_LEASE_TTL", value: "30s"},
+      {key: "STORAGE_PROVIDER", value: "r2"},
+      {key: "R2_ENDPOINT", value: $endpoint},
+      {key: "R2_BUCKET", value: $bucket},
+      {key: "R2_ACCESS_KEY_ID", value: $key},
+      {key: "R2_SECRET_ACCESS_KEY", value: $secret},
+      {key: "R2_REGION", value: "auto"}
+    ]' | curl -s -X PUT \
     -H "Authorization: Bearer ${RENDER_API_KEY}" \
     -H "Content-Type: application/json" \
-    -d "${ENV_VARS_PAYLOAD}" \
+    --data @- \
     "https://api.render.com/v1/services/${WORKER_ID}/env-vars" > /dev/null
 
   echo "==> Environment variables applied securely."
