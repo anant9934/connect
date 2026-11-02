@@ -174,5 +174,7 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "private, max-age=3600")
+	// Pages on the same site show this image, and the API default would make browsers refuse it.
+	w.Header().Set("Cross-Origin-Resource-Policy", "same-site")
 	_, _ = w.Write(data)
 }
