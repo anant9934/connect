@@ -289,6 +289,8 @@ jobs:
           sleep 61
           node test/e2e_admin.mjs >> /tmp/e2e.txt 2>&1 || status=1
           sleep 61
+          node test/e2e_attendance.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          sleep 61
           node test/e2e_admin.mjs >> /tmp/e2e.txt 2>&1 || status=1
           node test/e2e_institution.mjs >> /tmp/e2e.txt 2>&1 || status=1
           cat /tmp/e2e.txt

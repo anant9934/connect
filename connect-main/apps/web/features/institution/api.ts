@@ -1,4 +1,5 @@
 import { apiFetch } from '@/lib/api/client';
+import { AttendanceCalculation } from '@/features/rooms/meetings';
 
 export interface Organization { id: string; slug: string; name: string; role: string }
 export interface Member { userId: string; displayName: string; email: string; role: string; status: string }
@@ -27,8 +28,76 @@ export interface AttendanceRow {
   originalStatus?: string | null;
   overruleReason?: string | null;
   policyVersion?: number | null;
+  joinedLate?: boolean;
+  leftEarly?: boolean;
+  durationRatio?: number | null;
+  engagementRatio?: number | null;
+  browserRatio?: number | null;
+  score?: number | null;
+  calculation?: AttendanceCalculation | null;
 }
-export interface AttendancePolicy { version: number; minPresentRatio: number; minPartialRatio: number; lateGraceSeconds: number | null }
+export interface AttendancePolicy {
+  version: number;
+  minPresentRatio: number;
+  minPartialRatio: number;
+  lateGraceSeconds: number | null;
+  earlyLeaveGraceSeconds: number | null;
+  durationWeight: number;
+  engagementWeight: number;
+  browserWeight: number;
+  engagementTarget: number;
+}
+export interface NewPolicy {
+  minPresentRatio: number;
+  minPartialRatio: number;
+  lateGraceSeconds: number;
+  earlyLeaveGraceSeconds?: number;
+  durationWeight: number;
+  engagementWeight: number;
+  browserWeight: number;
+  engagementTarget: number;
+}
+export interface StudentSummary {
+  studentUserId: string;
+  sessions: number;
+  present: number;
+  late: number;
+  partial: number;
+  absent: number;
+  connectedSeconds: number;
+  joinedLate: number;
+  leftEarly: number;
+  corrected: number;
+  durationRatio: number | null;
+  engagementRatio: number | null;
+  browserRatio: number | null;
+}
+export interface ClassSummary {
+  id: string;
+  title: string;
+  start: string;
+  status: string;
+  attendanceFinalized: boolean;
+  present: number;
+  late: number;
+  partial: number;
+  absent: number;
+  durationRatio: number | null;
+  engagementRatio: number | null;
+  browserRatio: number | null;
+}
+export interface EngagementRow {
+  userId: string;
+  displayName: string;
+  messages: number;
+  reactions: number;
+  hands: number;
+  pollAnswers: number;
+  doubts: number;
+  visibleSeconds: number;
+  hiddenSeconds: number;
+  reported: boolean;
+}
 
 const orgPath = (org: string, rest: string) => `/api/v1/organizations/${encodeURIComponent(org)}${rest}`;
 const post = <T,>(path: string, body?: unknown) =>
@@ -70,8 +139,13 @@ export const overruleAttendance = (org: string, session: string, student: string
 export const attendanceCsvPath = (org: string, session: string) => orgPath(org, `/sessions/${session}/attendance.csv`);
 export const listPolicies = async (org: string) =>
   (await apiFetch<{ policies: AttendancePolicy[] }>(orgPath(org, '/attendance-policies'), { method: 'GET' })).policies;
-export const createPolicy = (org: string, minPresentRatio: number, minPartialRatio: number, lateGraceSeconds: number) =>
-  post(orgPath(org, '/attendance-policies'), { minPresentRatio, minPartialRatio, lateGraceSeconds });
+export const createPolicy = (org: string, policy: NewPolicy) => post(orgPath(org, '/attendance-policies'), policy);
+export const getStudentSummaries = async (org: string, batchId: string) =>
+  (await apiFetch<{ students: StudentSummary[] }>(orgPath(org, `/attendance/summary?batchId=${encodeURIComponent(batchId)}`), { method: 'GET' })).students;
+export const getClassSummaries = async (org: string, batchId: string) =>
+  (await apiFetch<{ classes: ClassSummary[] }>(orgPath(org, `/attendance/classes?batchId=${encodeURIComponent(batchId)}`), { method: 'GET' })).classes;
+export const getEngagement = async (org: string, session: string) =>
+  (await apiFetch<{ people: EngagementRow[] }>(orgPath(org, `/sessions/${encodeURIComponent(session)}/engagement`), { method: 'GET' })).people;
 
 export interface OrgOverview {
   people: { active: number; suspended: number; revoked: number; faculty: number; students: number; administrators: number };

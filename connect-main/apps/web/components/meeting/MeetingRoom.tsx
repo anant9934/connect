@@ -35,6 +35,7 @@ import { MeetingStage } from './MeetingStage';
 import { Loader2, AlertCircle, UserX, Clock, Volume2, X } from 'lucide-react';
 import { ChatMessage } from '@/features/chat/types';
 import { useMeetingInteraction } from '@/features/chat/useMeetingInteraction';
+import { useBrowserActivity } from '@/features/chat/useBrowserActivity';
 import { webDiagnostics } from '@/features/meeting/diagnostics';
 import { AdmissionRequest } from '@/features/rooms/types';
 import {
@@ -155,6 +156,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     setScreenShareParticipant(null);
     setIsScreenSharing(false);
   }, []);
+
+  const activityRecorded = useBrowserActivity(roomCode, Boolean(initialIdentity?.startsWith('user:')));
 
   const interaction = useMeetingInteraction(
     roomCode,
@@ -952,6 +955,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         </div>
       )}
 
+      {activityRecorded && (
+        <p data-testid="activity-notice" className="px-3 py-1 text-xs text-center text-[#404040] bg-[#F3F0FF]">This class records how long this tab is visible, as one attendance signal. Nothing else about your browser is recorded.</p>
+      )}
       <MeetingStage
         roomCode={roomCode}
         connectionState={connectionState}

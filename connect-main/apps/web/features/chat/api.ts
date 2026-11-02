@@ -39,3 +39,9 @@ export const setHand = (code: string, raised: boolean) =>
 
 export const lowerParticipantHand = (code: string, identity: string) =>
   apiFetch(roomPath(code, `/participants/${encodeURIComponent(identity)}/hand`), { method: 'DELETE' });
+
+export const reportActivity = (code: string, visibleSeconds: number, hiddenSeconds: number) =>
+  apiFetch<{ recorded: boolean }>(`/api/v1/rooms/${encodeURIComponent(code)}/activity`, {
+    method: 'POST',
+    body: JSON.stringify({ visibleSeconds, hiddenSeconds }),
+  });

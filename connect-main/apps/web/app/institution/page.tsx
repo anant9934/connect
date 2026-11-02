@@ -374,6 +374,7 @@ export default function InstitutionPage() {
                   )}
                 </div>
               )}
+              <Link href="/attendance" className="text-sm font-semibold text-[#7258E8] underline inline-flex items-center min-h-[44px]">Open the attendance dashboard</Link>
               <p className="text-xs text-[#686868]">Attendance reflects time connected to the class. It does not show whether someone was paying attention.</p>
             </div>
 
@@ -386,13 +387,27 @@ export default function InstitutionPage() {
               {isAdmin && (
                 <form
                   className="grid sm:grid-cols-3 gap-3 items-end"
-                  onSubmit={submit((form) => api.createPolicy(orgId, Number(text(form, 'present')) / 100, Number(text(form, 'partial')) / 100, Number(text(form, 'grace'))))}
+                  onSubmit={submit((form) => api.createPolicy(orgId, {
+                    minPresentRatio: Number(text(form, 'present')) / 100,
+                    minPartialRatio: Number(text(form, 'partial')) / 100,
+                    lateGraceSeconds: Number(text(form, 'grace')),
+                    earlyLeaveGraceSeconds: text(form, 'early').trim() === '' ? undefined : Number(text(form, 'early')),
+                    durationWeight: Number(text(form, 'durationWeight')) / 100,
+                    engagementWeight: Number(text(form, 'engagementWeight')) / 100,
+                    browserWeight: Number(text(form, 'browserWeight')) / 100,
+                    engagementTarget: Number(text(form, 'engagementTarget')),
+                  }))}
                 >
                   <Field id="policy-present" label="Present at (%)"><input id="policy-present" name="present" type="number" min="0" max="100" required className={inputClass} /></Field>
                   <Field id="policy-partial" label="Partial at (%)"><input id="policy-partial" name="partial" type="number" min="0" max="100" required className={inputClass} /></Field>
                   <Field id="policy-grace" label="Late after (seconds)"><input id="policy-grace" name="grace" type="number" min="0" required className={inputClass} /></Field>
+                  <Field id="policy-early" label="Leaving early, seconds before the end (optional)"><input id="policy-early" name="early" type="number" min="0" className={inputClass} /></Field>
+                  <Field id="policy-duration-weight" label="Time connected weight (%)"><input id="policy-duration-weight" name="durationWeight" type="number" min="0" max="100" defaultValue="100" required className={inputClass} /></Field>
+                  <Field id="policy-engagement-weight" label="Engagement weight (%)"><input id="policy-engagement-weight" name="engagementWeight" type="number" min="0" max="100" defaultValue="0" required className={inputClass} /></Field>
+                  <Field id="policy-browser-weight" label="Tab visible weight (%)"><input id="policy-browser-weight" name="browserWeight" type="number" min="0" max="100" defaultValue="0" required className={inputClass} /></Field>
+                  <Field id="policy-engagement-target" label="Actions for full engagement"><input id="policy-engagement-target" name="engagementTarget" type="number" min="1" max="1000" defaultValue="3" required className={inputClass} /></Field>
                   <button type="submit" className={buttonClass}>Add new version</button>
-                  <p className="text-xs text-[#686868] sm:col-span-3">Classes already evaluated keep the rules they were evaluated with.</p>
+                  <p className="text-xs text-[#686868] sm:col-span-3">Weights must add up to 100%. Tab visibility is reported by each browser and can be switched off or blocked, so it is left out for anyone who has no report. Classes already evaluated keep the rules they were evaluated with.</p>
                 </form>
               )}
             </div>

@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, Download, Loader2 } from 'lucide-react';
 import { ApiError } from '@/lib/api/client';
-import { getMeeting, MeetingDetail } from '@/features/rooms/meetings';
+import { AttendanceExplanation } from '@/components/attendance/AttendanceExplanation';
+import { getMeeting, MeetingDetail, MyAttendance } from '@/features/rooms/meetings';
 import { getNotes } from '@/features/notes/api';
 import { getDownloadUrl, listFiles } from '@/features/files/api';
 import { MeetingNote } from '@/features/notes/types';
@@ -17,6 +18,7 @@ export default function MeetingDetailPage() {
   const params = useParams();
   const id = typeof params.id === 'string' ? params.id : '';
   const [meeting, setMeeting] = useState<MeetingDetail | null>(null);
+  const [attendance, setAttendance] = useState<MyAttendance | null>(null);
   const [notes, setNotes] = useState<MeetingNote | null>(null);
   const [files, setFiles] = useState<MeetingFile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,9 +28,10 @@ export default function MeetingDetailPage() {
     let isMounted = true;
     async function load() {
       try {
-        const detail = await getMeeting(id);
+        const { meeting: detail, attendance: mine } = await getMeeting(id);
         if (!isMounted) return;
         setMeeting(detail);
+        setAttendance(mine);
         // Notes and files keep their own access rules, so a refusal simply hides them.
         const [noteData, fileData] = await Promise.all([
           getNotes(detail.publicCode).catch(() => null),
@@ -99,12 +102,10 @@ export default function MeetingDetailPage() {
           )}
         </header>
 
-        {meeting.myAttendance && (
-          <section className="p-4 rounded-2xl border border-[#E9E9E5] bg-white">
+        {attendance && (
+          <section className="p-4 rounded-2xl border border-[#E9E9E5] bg-white space-y-2">
             <h2 className="text-sm font-semibold text-[#171717]">Your attendance</h2>
-            <p className="text-sm text-[#404040]">
-              {meeting.myAttendance.status} · {Math.round(meeting.myAttendance.connectedSeconds / 60)} minutes connected
-            </p>
+            <AttendanceExplanation attendance={attendance} />
           </section>
         )}
 

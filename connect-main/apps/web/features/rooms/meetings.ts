@@ -31,6 +31,35 @@ export interface MeetingDetail {
   attendanceSummary: Record<string, number> | null;
 }
 
+export interface AttendanceCalculation {
+  sessionSeconds: number;
+  connectedSeconds: number;
+  actions: number;
+  engagementTarget: number;
+  durationRatio: number;
+  engagementRatio: number;
+  browserRatio: number | null;
+  durationWeight: number;
+  engagementWeight: number;
+  browserWeight: number;
+  score: number;
+  minPresent: number;
+  minPartial: number;
+  rules: string[];
+}
+
+export interface MyAttendance {
+  status: string;
+  connectedSeconds: number;
+  joinedLate: boolean;
+  leftEarly: boolean;
+  policyVersion: number | null;
+  calculation: AttendanceCalculation | null;
+  isOverruled: boolean;
+  originalStatus: string | null;
+  overruleReason: string | null;
+}
+
 export interface MeetingSearch {
   q?: string;
   status?: string;
@@ -50,4 +79,4 @@ export async function searchMeetings(search: MeetingSearch) {
 }
 
 export const getMeeting = async (id: string) =>
-  (await apiFetch<{ meeting: MeetingDetail }>(`/api/v1/meetings/${encodeURIComponent(id)}`, { method: 'GET' })).meeting;
+  apiFetch<{ meeting: MeetingDetail; attendance: MyAttendance | null }>(`/api/v1/meetings/${encodeURIComponent(id)}`, { method: 'GET' });
