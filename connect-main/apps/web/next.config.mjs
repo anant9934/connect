@@ -3,19 +3,6 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
-  redirects: async () => [
-    {
-      source: '/:path*',
-      has: [
-        {
-          type: 'host',
-          value: 'connect-mauve-nine.vercel.app',
-        },
-      ],
-      destination: 'https://connect.aitathastu.com/:path*',
-      permanent: true,
-    },
-  ],
   rewrites: async () => [
     {
       source: '/api/v1/:path*',

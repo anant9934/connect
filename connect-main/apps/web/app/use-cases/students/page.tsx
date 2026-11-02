@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     title: 'Video Conferencing for Students & Universities | Tathastu Meet',
     description:
       'Free, browser-based video meetings for students, study groups, and university project teams. No sign-ups required to join, fast screen sharing, and mobile support.',
-    url: 'https://connect.aitathastu.com/use-cases/students',
+    url: 'https://connect-mauve-nine.vercel.app/use-cases/students',
   },
 };
 
@@ -29,19 +29,19 @@ export default function StudentsUseCasePage() {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: 'https://connect.aitathastu.com',
+        item: 'https://connect-mauve-nine.vercel.app',
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: 'Use Cases',
-        item: 'https://connect.aitathastu.com/use-cases/students',
+        item: 'https://connect-mauve-nine.vercel.app/use-cases/students',
       },
       {
         '@type': 'ListItem',
         position: 3,
         name: 'Students & Universities',
-        item: 'https://connect.aitathastu.com/use-cases/students',
+        item: 'https://connect-mauve-nine.vercel.app/use-cases/students',
       },
     ],
   };

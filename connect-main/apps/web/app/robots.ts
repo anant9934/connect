@@ -1,7 +1,7 @@
 import type { MetadataRoute } from 'next';
 
 export default function robots(): MetadataRoute.Robots {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_ORIGIN || 'https://connect.aitathastu.com';
+  const baseUrl = process.env.NEXT_PUBLIC_APP_ORIGIN || 'https://connect-mauve-nine.vercel.app';
 
   return {
     rules: [

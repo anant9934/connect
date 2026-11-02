@@ -1,16 +1,16 @@
 /**
  * Canonical domain utilities for Tathastu Meet.
- * Enforces https://connect.aitathastu.com as the canonical public origin in production,
+ * Enforces https://connect-mauve-nine.vercel.app as the canonical public origin in production,
  * while preserving local development (localhost / 127.0.0.1).
  */
 
-export const CANONICAL_ORIGIN = 'https://connect.aitathastu.com';
+export const CANONICAL_ORIGIN = 'https://connect-mauve-nine.vercel.app';
 export const LEGACY_ORIGIN = 'https://connect-mauve-nine.vercel.app';
 
 /**
  * Returns the canonical public origin for the application.
  * In development (localhost or 127.0.0.1), preserves the active development origin.
- * In production or preview deployments, defaults to the canonical domain https://connect.aitathastu.com.
+ * In production or preview deployments, defaults to the canonical domain https://connect-mauve-nine.vercel.app.
  */
 export function getCanonicalOrigin(): string {
   // 1. Explicit override if specified in environment

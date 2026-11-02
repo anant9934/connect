@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     title: 'Google Meet Alternative for Independent Teams & Research | Tathastu Meet',
     description:
       'An independent alternative to Google Meet. Join without mandatory Google workspace accounts, customize your room format, and experience focused video collaboration.',
-    url: 'https://connect.aitathastu.com/compare/google-meet-alternative',
+    url: 'https://connect-mauve-nine.vercel.app/compare/google-meet-alternative',
   },
 };
 
@@ -29,19 +29,19 @@ export default function GoogleMeetAlternativePage() {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: 'https://connect.aitathastu.com',
+        item: 'https://connect-mauve-nine.vercel.app',
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: 'Compare',
-        item: 'https://connect.aitathastu.com/compare/google-meet-alternative',
+        item: 'https://connect-mauve-nine.vercel.app/compare/google-meet-alternative',
       },
       {
         '@type': 'ListItem',
         position: 3,
         name: 'Google Meet Alternative',
-        item: 'https://connect.aitathastu.com/compare/google-meet-alternative',
+        item: 'https://connect-mauve-nine.vercel.app/compare/google-meet-alternative',
       },
     ],
   };

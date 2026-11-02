@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     title: 'Research Rooms for Academic & Lab Collaboration | Tathastu Meet',
     description:
       'Dedicated video collaboration for research labs, AI researchers, and academic groups. High-fidelity document sharing, clear voice, and distraction-free roundtable discussions.',
-    url: 'https://connect.aitathastu.com/rooms/research',
+    url: 'https://connect-mauve-nine.vercel.app/rooms/research',
   },
 };
 
@@ -29,19 +29,19 @@ export default function ResearchRoomPage() {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: 'https://connect.aitathastu.com',
+        item: 'https://connect-mauve-nine.vercel.app',
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: 'Rooms',
-        item: 'https://connect.aitathastu.com/rooms',
+        item: 'https://connect-mauve-nine.vercel.app/rooms',
       },
       {
         '@type': 'ListItem',
         position: 3,
         name: 'Research Room',
-        item: 'https://connect.aitathastu.com/rooms/research',
+        item: 'https://connect-mauve-nine.vercel.app/rooms/research',
       },
     ],
   };

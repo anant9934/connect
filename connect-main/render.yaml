@@ -34,9 +34,9 @@ services:
       - key: RATE_LIMIT_BURST
         value: 200
       - key: CORS_ALLOWED_ORIGINS
-        sync: false # e.g. https://connect.aitathastu.com,https://connect-mauve-nine.vercel.app
+        sync: false # e.g. https://connect-mauve-nine.vercel.app
       - key: PUBLIC_APP_ORIGIN
-        sync: false # e.g. https://connect.aitathastu.com
+        sync: false # e.g. https://connect-mauve-nine.vercel.app
       - key: LIVEKIT_URL
         sync: false # wss://tathastu-connect-htzr4167.livekit.cloud
       - key: LIVEKIT_API_KEY
