@@ -1,13 +1,7 @@
 name: Android Emulator
 
+# Deferred: run by hand only, until Android development is authorized again.
 on:
-  push:
-    branches: ['feat/**']
-    paths:
-      - 'connect-main/apps/mobile/**'
-      - 'connect-main/services/api/**'
-      - 'connect-main/migrations/**'
-      - '.github/workflows/android-emulator.yml'
   workflow_dispatch:
 
 concurrency:
