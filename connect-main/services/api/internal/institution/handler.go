@@ -311,9 +311,9 @@ func (h *Handler) updateMember(w http.ResponseWriter, r *http.Request) {
 			return &userError{status: http.StatusConflict, code: "SELF_CHANGE", msg: "You cannot change your own membership."}
 		}
 		tag, err := tx.Exec(r.Context(), `
-			UPDATE organization_memberships SET role = $1, status = $2, updated_at = clock_timestamp(),
-			       revoked_at = CASE WHEN $2::text = 'revoked' THEN clock_timestamp() END,
-			       revoked_by = CASE WHEN $2::text = 'revoked' THEN $3::uuid END
+			UPDATE organization_memberships SET role = $1, status = $2::varchar, updated_at = clock_timestamp(),
+			       revoked_at = CASE WHEN $2::varchar = 'revoked' THEN clock_timestamp() END,
+			       revoked_by = CASE WHEN $2::varchar = 'revoked' THEN $3::uuid END
 			WHERE organization_id = $4 AND user_id = $5
 		`, req.Role, req.Status, auth.UserID, chi.URLParam(r, "org"), target)
 		if err != nil {

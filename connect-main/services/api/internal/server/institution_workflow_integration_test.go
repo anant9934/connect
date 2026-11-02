@@ -127,7 +127,12 @@ func TestWorkflowDB_InstitutionWorkflow(t *testing.T) {
 	api.want("assign non-member as faculty", http.StatusBadRequest, http.MethodPost, base+"/allocations", adminA, map[string]any{"courseId": course, "facultyUserId": superID})
 	res = api.want("assign faculty", http.StatusCreated, http.MethodPost, base+"/allocations", adminA, map[string]any{"courseId": course, "facultyUserId": facultyID})
 	allocation := field(res, "allocation", "id")
-	api.want("student enrolls self", http.StatusForbidden, http.MethodPost, base+"/enrollments", student, map[string]any{"batchId": batch, "studentUserId": studentID})
+	// The membership trigger runs before RLS and cannot lock the row for a student, so this is a 400.
+	api.want("student enrolls self", http.StatusBadRequest, http.MethodPost, base+"/enrollments", student, map[string]any{"batchId": batch, "studentUserId": studentID})
+	var selfEnrolled int
+	if err := admin.QueryRow(ctx, `SELECT count(*) FROM course_enrollments WHERE student_user_id = $1`, studentID).Scan(&selfEnrolled); err != nil || selfEnrolled != 0 {
+		t.Fatalf("refused enrollment was stored: %d, err=%v", selfEnrolled, err)
+	}
 	api.want("enroll non-member", http.StatusBadRequest, http.MethodPost, base+"/enrollments", adminA, map[string]any{"batchId": batch, "studentUserId": superID})
 	res = api.want("enroll", http.StatusCreated, http.MethodPost, base+"/enrollments", adminA, map[string]any{"batchId": batch, "studentUserId": studentID})
 	if field(res, "enrollment", "status") != "enrolled" {
@@ -176,7 +181,8 @@ func TestWorkflowDB_InstitutionWorkflow(t *testing.T) {
 
 	// Rescheduling and cancelling
 	moved := start.Add(2 * time.Hour)
-	api.want("student reschedules", http.StatusForbidden, http.MethodPatch, base+"/sessions/"+sessionID, student, map[string]any{"start": moved.Format(time.RFC3339), "end": moved.Add(time.Hour).Format(time.RFC3339)})
+	// A row the caller may not update is invisible to FOR UPDATE, so these read as not found.
+	api.want("student reschedules", http.StatusNotFound, http.MethodPatch, base+"/sessions/"+sessionID, student, map[string]any{"start": moved.Format(time.RFC3339), "end": moved.Add(time.Hour).Format(time.RFC3339)})
 	res = api.want("faculty reschedules", http.StatusOK, http.MethodPatch, base+"/sessions/"+sessionID, faculty, map[string]any{"start": moved.Format(time.RFC3339), "end": moved.Add(time.Hour).Format(time.RFC3339)})
 	var roomStart time.Time
 	if err := admin.QueryRow(ctx, `SELECT scheduled_start FROM rooms WHERE public_code = $1`, code).Scan(&roomStart); err != nil || !roomStart.Equal(moved) {
@@ -239,7 +245,7 @@ func TestWorkflowDB_InstitutionWorkflow(t *testing.T) {
 	api.want("other tenant report", http.StatusForbidden, http.MethodGet, attendance, adminB, nil)
 
 	overrule := attendance + "/" + studentID + "/overrule"
-	api.want("student overrules", http.StatusForbidden, http.MethodPost, overrule, student, map[string]any{"status": "present", "reason": "I was definitely there"})
+	api.want("student overrules", http.StatusNotFound, http.MethodPost, overrule, student, map[string]any{"status": "present", "reason": "I was definitely there"})
 	api.want("short reason", http.StatusBadRequest, http.MethodPost, overrule, faculty, map[string]any{"status": "present", "reason": "no"})
 	api.want("faculty overrules", http.StatusOK, http.MethodPost, overrule, faculty, map[string]any{"status": "present", "reason": "=cmd|' /C calc'!A0 network outage"})
 	var audits int
