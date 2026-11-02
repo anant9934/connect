@@ -53,11 +53,13 @@ const nextConfig = {
           key: 'Content-Security-Policy',
           value: [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline'", // Next.js hydration bootstrap scripts
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com", // Next.js hydration & WebAssembly runtime
+            "worker-src 'self' blob:",
+            "frame-src 'self' blob: data:",
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com",
             "font-src 'self' https://fonts.gstatic.com data:",
             "img-src 'self' data: blob: https: http://localhost:8080",
-            "connect-src 'self' http://localhost:8080 ws://localhost:8080 http://localhost:7880 ws://localhost:7880 wss://localhost:7880 https: wss:",
+            "connect-src 'self' http://localhost:8080 ws://localhost:8080 http://localhost:7880 ws://localhost:7880 wss://localhost:7880 https: wss: data: blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
             "frame-ancestors 'none'",
             "object-src 'none'",
             "base-uri 'self'",
