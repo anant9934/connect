@@ -24,7 +24,7 @@ const getApiBase = (): string => {
     // In browser: prefer explicit NEXT_PUBLIC_API_URL if configured; otherwise use same-origin relative URLs to leverage Next.js rewrites proxy
     return process.env.NEXT_PUBLIC_API_URL || '';
   }
-  return process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  return process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || (process.env.VERCEL ? 'https://connect-a2fi.onrender.com' : 'http://localhost:8080');
 };
 
 export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {

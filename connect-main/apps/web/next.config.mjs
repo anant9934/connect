@@ -1,3 +1,7 @@
+// Vercel builds use the live API unless told otherwise. Pointing at localhost there makes every
+// proxied request fail with DNS_HOSTNAME_RESOLVED_PRIVATE.
+const apiOrigin = process.env.INTERNAL_API_URL || (process.env.VERCEL ? 'https://connect-a2fi.onrender.com' : 'http://localhost:8080');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -6,11 +10,11 @@ const nextConfig = {
   rewrites: async () => [
     {
       source: '/api/v1/:path*',
-      destination: `${process.env.INTERNAL_API_URL || 'http://localhost:8080'}/api/v1/:path*`,
+      destination: `${apiOrigin}/api/v1/:path*`,
     },
     {
       source: '/health/:path*',
-      destination: `${process.env.INTERNAL_API_URL || 'http://localhost:8080'}/health/:path*`,
+      destination: `${apiOrigin}/health/:path*`,
     },
   ],
   headers: async () => [

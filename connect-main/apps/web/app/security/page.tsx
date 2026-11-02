@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     title: 'Security & Privacy Practices | Tathastu Meet',
     description:
       'Learn how Tathastu Meet secures video meetings: cryptographic token verification, ephemeral media relays, host admission gates, and zero third-party telemetry tracking.',
-    url: 'https://connect-mauve-nine.vercel.app/security',
+    url: 'https://connect-alpha-seven.vercel.app/security',
   },
 };
 
@@ -86,13 +86,13 @@ export default function SecurityPage() {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: 'https://connect-mauve-nine.vercel.app',
+        item: 'https://connect-alpha-seven.vercel.app',
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: 'Security',
-        item: 'https://connect-mauve-nine.vercel.app/security',
+        item: 'https://connect-alpha-seven.vercel.app/security',
       },
     ],
   };

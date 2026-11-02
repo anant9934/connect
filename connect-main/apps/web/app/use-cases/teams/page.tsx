@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     title: 'Video Conferencing for Remote Teams & Agile Sprints | Tathastu Meet',
     description:
       'Lightweight video collaboration platform for distributed engineering, product, and operations teams. Browser-based, low latency, and zero installation barrier.',
-    url: 'https://connect-mauve-nine.vercel.app/use-cases/teams',
+    url: 'https://connect-alpha-seven.vercel.app/use-cases/teams',
   },
 };
 
@@ -29,19 +29,19 @@ export default function TeamsUseCasePage() {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: 'https://connect-mauve-nine.vercel.app',
+        item: 'https://connect-alpha-seven.vercel.app',
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: 'Use Cases',
-        item: 'https://connect-mauve-nine.vercel.app/use-cases/teams',
+        item: 'https://connect-alpha-seven.vercel.app/use-cases/teams',
       },
       {
         '@type': 'ListItem',
         position: 3,
         name: 'Remote Teams',
-        item: 'https://connect-mauve-nine.vercel.app/use-cases/teams',
+        item: 'https://connect-alpha-seven.vercel.app/use-cases/teams',
       },
     ],
   };
