@@ -300,6 +300,33 @@ func BuildRouter(
 					if interactionHandler != nil {
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/messages", interactionHandler.ListMessages)
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/live-state", interactionHandler.LiveState)
+						roomDetail.With(appmw.OptionalAuth(authService)).Get("/classroom", interactionHandler.GetClassroom)
+						roomDetail.With(appmw.OptionalAuth(authService)).Get("/board", interactionHandler.ListStrokes)
+						roomDetail.With(appmw.OptionalAuth(authService)).Get("/breakouts", interactionHandler.GetBreakouts)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Post("/breakouts", interactionHandler.OpenBreakouts)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Post("/breakouts/assign", interactionHandler.AssignBreakout)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Post("/breakouts/close", interactionHandler.CloseBreakouts)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Patch("/classroom", interactionHandler.UpdateClassroom)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Post("/board/strokes", interactionHandler.PostStroke)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Post("/board/remove", interactionHandler.RemoveStrokes)
 						roomDetail.With(
 							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
 							appmw.OptionalAuth(authService),
