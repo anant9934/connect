@@ -21,6 +21,7 @@ import (
 	"github.com/tathastu/connect/services/api/internal/handlers"
 	"github.com/tathastu/connect/services/api/internal/institution"
 	"github.com/tathastu/connect/services/api/internal/interaction"
+	"github.com/tathastu/connect/services/api/internal/lab"
 	"github.com/tathastu/connect/services/api/internal/livekit"
 	"github.com/tathastu/connect/services/api/internal/meeting/p2p"
 	"github.com/tathastu/connect/services/api/internal/meetings"
@@ -241,13 +242,15 @@ func main() {
 	var interactionHandler *interaction.Handler
 	var notificationsHandler *notifications.Handler
 	var meetingsHandler *meetings.Handler
+	var labHandler *lab.Handler
 	if db != nil {
 		institutionHandler = institution.NewHandler(db.Pool, auditService)
 		interactionHandler = interaction.NewHandler(db.Pool, roomService, limiter, auditService)
 		notificationsHandler = notifications.NewHandler(db.Pool)
 		meetingsHandler = meetings.NewHandler(db.Pool, cfg.PublicAppOrigin)
+		labHandler = lab.NewHandler(db.Pool, auditService)
 	}
-	router := server.BuildRouter(cfg, logger, limiter, healthHandler, systemHandler, assertionHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler, livekitWebhook, institutionHandler, interactionHandler, notificationsHandler, meetingsHandler, avatars.NewHandler(authService, filesStorage))
+	router := server.BuildRouter(cfg, logger, limiter, healthHandler, systemHandler, assertionHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler, livekitWebhook, institutionHandler, interactionHandler, notificationsHandler, meetingsHandler, avatars.NewHandler(authService, filesStorage), labHandler)
 	srv := server.New(cfg, logger, router)
 
 	// 7. Initialize In-Process Background Worker (if enabled)

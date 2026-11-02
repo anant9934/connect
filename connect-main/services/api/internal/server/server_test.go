@@ -97,7 +97,7 @@ func setupTestRouter(t *testing.T, dbErr, redisErr error) http.Handler {
 	p2pHub := p2p.NewHub(logger)
 	p2pHandler := p2p.NewHandler(cfg, logger, p2pHub, roomService, authService)
 
-	return server.BuildRouter(cfg, logger, limiter, hHandler, sHandler, aHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler, nil, nil, nil, nil, nil, nil)
+	return server.BuildRouter(cfg, logger, limiter, hHandler, sHandler, aHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler, nil, nil, nil, nil, nil, nil, nil)
 }
 
 // 1. Test Health Liveness probe
