@@ -297,6 +297,24 @@ func BuildRouter(
 							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
 							appmw.RequireAuth(authService),
 						).Delete("/participants/{identity}/hand", interactionHandler.LowerHand)
+
+						roomDetail.With(appmw.OptionalAuth(authService)).Get("/polls", interactionHandler.ListPolls)
+						roomDetail.With(appmw.OptionalAuth(authService)).Get("/doubts", interactionHandler.ListDoubts)
+						roomDetail.With(appmw.OptionalAuth(authService)).Get("/polls/{id}/scores", interactionHandler.PollScores)
+						for path, handler := range map[string]http.HandlerFunc{
+							"/polls":               interactionHandler.CreatePoll,
+							"/polls/{id}/respond":  interactionHandler.RespondPoll,
+							"/polls/{id}/close":    interactionHandler.ClosePoll,
+							"/doubts":              interactionHandler.AskDoubt,
+							"/doubts/{id}/assign":  interactionHandler.AssignDoubt,
+							"/doubts/{id}/answer":  interactionHandler.AnswerDoubt,
+							"/doubts/{id}/resolve": interactionHandler.ResolveDoubt,
+						} {
+							roomDetail.With(
+								appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+								appmw.OptionalAuth(authService),
+							).Post(path, handler)
+						}
 					}
 
 					// Notes routes
