@@ -301,6 +301,11 @@ jobs:
           node test/e2e_breakouts.mjs >> /tmp/e2e.txt 2>&1 || status=1
           sleep 61
           node test/e2e_institution.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          sleep 61
+          node test/e2e_account_and_network.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          node test/e2e_lifecycle.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          sleep 61
+          node test/e2e_responsive.mjs >> /tmp/e2e.txt 2>&1 || status=1
           cat /tmp/e2e.txt
           [ $status -eq 0 ] || tail -20 /tmp/api.log
           grep -E 'E2E FAIL' /tmp/e2e.txt | cut -c1-400 | head -6 | while IFS= read -r line; do
