@@ -17,6 +17,7 @@ import { InviteDialog } from './InviteDialog';
 import { ChatPanel } from './ChatPanel';
 import { ParticipantsPanel } from './ParticipantsPanel';
 import { NotesPanel } from './NotesPanel';
+import { ClassroomPanel } from './ClassroomPanel';
 import { FilesPanel } from './FilesPanel';
 import { TransportDiagnostics } from './TransportDiagnostics';
 import { ChatMessage } from '@/features/chat/types';
@@ -41,6 +42,8 @@ interface MeetingStageProps {
     loadingOlder: boolean;
     onLoadOlder: () => void;
     onRetry: (message: ChatMessage) => void;
+    syncTick: number;
+    sendHint: () => void;
   };
   isLocked: boolean;
   isMicMuted: boolean;
@@ -50,7 +53,7 @@ interface MeetingStageProps {
   onRequestDeviceHelp?: (device: 'camera' | 'microphone') => void;
   transport?: MediaTransport | null;
   isScreenSharing: boolean;
-  activePanel: 'chat' | 'participants' | 'notes' | 'files' | null;
+  activePanel: 'chat' | 'participants' | 'notes' | 'files' | 'classroom' | null;
   unreadChatCount: number;
   chatMessages: ChatMessage[];
   pendingAdmissions: AdmissionRequest[];
@@ -66,7 +69,7 @@ interface MeetingStageProps {
   onSendMessage: (text: string, kind: 'chat' | 'announcement') => void;
   onSendReaction: (emoji: string) => void;
   onToggleHandRaise: () => void;
-  onTogglePanel: (panel: 'chat' | 'participants' | 'notes' | 'files') => void;
+  onTogglePanel: (panel: 'chat' | 'participants' | 'notes' | 'files' | 'classroom') => void;
   onClosePanel: () => void;
   onToggleMic: () => void;
   onToggleVideo: () => void;
@@ -374,6 +377,18 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
         )}
 
         {/* Notes Panel (Single Right Drawer) */}
+        {activePanel === 'classroom' && (
+          <aside className="absolute inset-0 sm:relative sm:inset-auto w-full sm:w-80 md:w-96 bg-white border-l border-[#E5E5E3] flex flex-col shrink-0 z-30 shadow-lg animate-in slide-in-from-right duration-150">
+            <ClassroomPanel
+              roomCode={roomCode}
+              selfIdentity={localParticipant?.identity || ''}
+              syncTick={interaction.syncTick}
+              onChanged={interaction.sendHint}
+              onClose={onClosePanel}
+            />
+          </aside>
+        )}
+
         {activePanel === 'notes' && (
           <aside className="absolute inset-0 sm:relative sm:inset-auto w-full sm:w-80 md:w-96 bg-white border-l border-[#E5E5E3] flex flex-col shrink-0 z-30 shadow-lg animate-in slide-in-from-right duration-150">
             <NotesPanel

@@ -106,10 +106,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [moderationError, setModerationError] = useState<string | null>(null);
 
   // Phase 3 & 4 States: Panels, Chat, Reactions, Notes, Files, Host Moderation
-  const [activePanel, setActivePanel] = useState<'chat' | 'participants' | 'notes' | 'files' | null>(null);
+  const [activePanel, setActivePanel] = useState<'chat' | 'participants' | 'notes' | 'files' | 'classroom' | null>(null);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [latestAnnouncement, setLatestAnnouncement] = useState<ChatMessage | null>(null);
   const [myRole, setMyRole] = useState('participant');
+  const [syncTick, setSyncTick] = useState(0);
   const [pendingAdmissions, setPendingAdmissions] = useState<AdmissionRequest[]>([]);
   const [externalNotesRevision, setExternalNotesRevision] = useState<number>(1);
   const [externalFileEvent, setExternalFileEvent] = useState<{ action: string; fileId: string; filename: string } | undefined>(undefined);
@@ -122,7 +123,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const roomRef = useRef<LiveKitRoom | null>(null);
   const transportRef = useRef<MediaTransport | null>(null);
   const [activeTransport, setActiveTransport] = useState<MediaTransport | null>(null);
-  const activePanelRef = useRef<'chat' | 'participants' | 'notes' | 'files' | null>(null);
+  const activePanelRef = useRef<'chat' | 'participants' | 'notes' | 'files' | 'classroom' | null>(null);
   activePanelRef.current = activePanel;
 
   // Sync active screen share publication across all participants
@@ -185,6 +186,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       // Never trusted as content: it only says the stored state may have changed.
       if (topic === 'tc-sync') {
         refreshInteractionRef.current();
+        setSyncTick((tick) => tick + 1);
       } else if (topic === 'tc-notes') {
         if (typeof data.revision === 'number') {
           setExternalNotesRevision(data.revision);
@@ -800,7 +802,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  const handleTogglePanel = (panel: 'chat' | 'participants' | 'notes' | 'files') => {
+  const handleTogglePanel = (panel: 'chat' | 'participants' | 'notes' | 'files' | 'classroom') => {
     if (activePanel === panel) {
       setActivePanel(null);
     } else {
@@ -964,6 +966,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           loadingOlder: interaction.loadingOlder,
           onLoadOlder: interaction.loadOlder,
           onRetry: interaction.retryMessage,
+          syncTick,
+          sendHint: () => {
+            transportRef.current?.sendData('tc-sync', {}).catch(() => {
+              // Others catch up on their next poll.
+            });
+          },
         }}
         isLocked={isLocked}
         isMicMuted={isMicMuted}
