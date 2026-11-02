@@ -38,6 +38,8 @@ function screen() {
   return nodes;
 }
 
+class AppStalled extends Error {}
+
 const matches = (node, wanted) => node.label === wanted || node.text === wanted || node.label.includes(wanted) || node.text.includes(wanted);
 
 async function find(wanted, timeout = 30000) {
@@ -46,9 +48,20 @@ async function find(wanted, timeout = 30000) {
   while (Date.now() < deadline) {
     try {
       last = screen();
+      // A slow emulator's launcher can stall. Our own app stalling is a failure, never dismissed.
+      const stalled = last.find((node) => node.text.includes("isn't responding"));
+      if (stalled) {
+        if (/Tathastu|connect/i.test(stalled.text)) throw new AppStalled(stalled.text);
+        const wait = last.find((node) => node.text === 'Wait');
+        if (wait) adb('shell', 'input', 'tap', String(Math.round(wait.x)), String(Math.round(wait.y)));
+        console.log(`NOTE dismissed system dialog: ${stalled.text}`);
+        await sleep(2000);
+        continue;
+      }
       const hit = last.find((node) => matches(node, wanted));
       if (hit) return hit;
-    } catch {
+    } catch (err) {
+      if (err instanceof AppStalled) throw err;
       // The screen is changing; uiautomator cannot dump mid-transition.
     }
     await sleep(1000);
@@ -137,6 +150,8 @@ try {
     }
   }
 
+  // Let a freshly booted emulator finish its own startup work first.
+  await sleep(30000);
   const host = await signup('androidhost');
 
   step('a guest joins a meeting from the app');
