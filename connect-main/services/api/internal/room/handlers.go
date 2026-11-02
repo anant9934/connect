@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -189,7 +190,7 @@ func (h *Handlers) setCoHost(w http.ResponseWriter, r *http.Request, grant bool)
 	if user == nil {
 		return
 	}
-	if err := h.service.SetCoHost(r.Context(), chi.URLParam(r, "code"), user, chi.URLParam(r, "identity"), grant, extractIP(r), getRequestID(r)); err != nil {
+	if err := h.service.SetCoHost(r.Context(), chi.URLParam(r, "code"), user, IdentityParam(r), grant, extractIP(r), getRequestID(r)); err != nil {
 		sendRoleError(w, r, err)
 		return
 	}
@@ -208,7 +209,7 @@ func (h *Handlers) TransferHost(w http.ResponseWriter, r *http.Request) {
 	if user == nil {
 		return
 	}
-	if err := h.service.TransferHost(r.Context(), chi.URLParam(r, "code"), user, chi.URLParam(r, "identity"), extractIP(r), getRequestID(r)); err != nil {
+	if err := h.service.TransferHost(r.Context(), chi.URLParam(r, "code"), user, IdentityParam(r), extractIP(r), getRequestID(r)); err != nil {
 		sendRoleError(w, r, err)
 		return
 	}
@@ -421,6 +422,16 @@ func callerIdentity(r *http.Request, normCode string) (string, *http.Request) {
 		return "", r
 	}
 	return identity, r.WithContext(database.WithGuestIdentity(r.Context(), identity))
+}
+
+// IdentityParam reads a participant identity from the path. Clients percent-encode the colon in
+// user:<id>, and the router leaves path parameters encoded when the raw path differs.
+func IdentityParam(r *http.Request) string {
+	raw := chi.URLParam(r, "identity")
+	if decoded, err := url.PathUnescape(raw); err == nil {
+		return decoded
+	}
+	return raw
 }
 
 // CallerIdentity exposes callerIdentity to other room-scoped modules.
@@ -941,7 +952,7 @@ func (h *Handlers) DecideAdmission(w http.ResponseWriter, r *http.Request) {
 // RemoveParticipant handles POST /api/v1/rooms/{code}/participants/{identity}/remove
 func (h *Handlers) RemoveParticipant(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
-	targetIdentity := chi.URLParam(r, "identity")
+	targetIdentity := IdentityParam(r)
 	user, ok := middleware.UserFromContext(r.Context())
 	if !ok || user == nil {
 		model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication required")
@@ -969,7 +980,7 @@ func (h *Handlers) RemoveParticipant(w http.ResponseWriter, r *http.Request) {
 // MuteParticipant handles POST /api/v1/rooms/{code}/participants/{identity}/mute
 func (h *Handlers) MuteParticipant(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
-	targetIdentity := chi.URLParam(r, "identity")
+	targetIdentity := IdentityParam(r)
 	user, ok := middleware.UserFromContext(r.Context())
 	if !ok || user == nil {
 		model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication required")
@@ -1001,7 +1012,7 @@ func (h *Handlers) MuteParticipant(w http.ResponseWriter, r *http.Request) {
 // PromoteSpeaker handles POST /api/v1/rooms/{code}/participants/{identity}/promote-speaker
 func (h *Handlers) PromoteSpeaker(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
-	targetIdentity := chi.URLParam(r, "identity")
+	targetIdentity := IdentityParam(r)
 	user, ok := middleware.UserFromContext(r.Context())
 	if !ok || user == nil {
 		model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication required")
@@ -1036,7 +1047,7 @@ func (h *Handlers) PromoteSpeaker(w http.ResponseWriter, r *http.Request) {
 // DemoteSpeaker handles POST /api/v1/rooms/{code}/participants/{identity}/demote-speaker
 func (h *Handlers) DemoteSpeaker(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
-	targetIdentity := chi.URLParam(r, "identity")
+	targetIdentity := IdentityParam(r)
 	user, ok := middleware.UserFromContext(r.Context())
 	if !ok || user == nil {
 		model.SendJSONError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication required")

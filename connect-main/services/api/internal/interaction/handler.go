@@ -383,7 +383,7 @@ func (h *Handler) LowerHand(w http.ResponseWriter, r *http.Request) {
 		model.SendJSONError(w, c.r, http.StatusForbidden, "FORBIDDEN", "You do not have permission to lower hands.")
 		return
 	}
-	target := chi.URLParam(r, "identity")
+	target := room.IdentityParam(r)
 	err := database.InCallerContext(c.r.Context(), h.pool, c.roomID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(c.r.Context(), `
 			UPDATE meeting_hand_raises SET lowered_at = clock_timestamp(), lowered_by = connect_auth.current_room_identity()

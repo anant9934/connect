@@ -309,7 +309,7 @@ func TestWorkflowDB_APITenantIsolation(t *testing.T) {
 		api.want("guest token", http.StatusOK, http.MethodPost, roomPath(code)+"/token", caller{guest: guestToken}, map[string]any{"guestDisplayName": "Guest One"})
 
 		// Removal is enforced at the database as well as the service.
-		api.want("host removes guest", http.StatusOK, http.MethodPost, roomPath(code)+"/participants/"+guestIdentity+"/remove", host, nil)
+		api.want("host removes guest", http.StatusOK, http.MethodPost, roomPath(code)+"/participants/"+strings.Replace(guestIdentity, ":", "%3A", 1)+"/remove", host, nil)
 		api.want("removed guest", http.StatusForbidden, http.MethodGet, roomPath(code)+"/participants", caller{guest: guestToken}, nil)
 
 		api.want("host ends", http.StatusOK, http.MethodPost, roomPath(code)+"/end", host, nil)
@@ -492,6 +492,10 @@ func TestWorkflowDB_APITenantIsolation(t *testing.T) {
 		if err := admin.QueryRow(ctx, `SELECT rp.role FROM room_participants rp JOIN rooms r ON r.id = rp.room_id WHERE r.public_code = $1 AND rp.identity = $2`, code, "user:"+coID).Scan(&coRole); err != nil || coRole != "participant" {
 			t.Errorf("removed co-host kept role %q, err=%v", coRole, err)
 		}
+
+		// Browsers percent-encode the colon, as encodeURIComponent does.
+		api.want("promote with an encoded identity", http.StatusOK, http.MethodPost, base+"/participants/user%3A"+plainID+"/cohost", host, nil)
+		api.want("revoke with an encoded identity", http.StatusOK, http.MethodDelete, base+"/participants/user%3A"+plainID+"/cohost", host, nil)
 
 		// Revocation
 		api.want("promote second", http.StatusOK, http.MethodPost, people(secondID)+"/cohost", host, nil)
