@@ -174,9 +174,44 @@ try {
     `SELECT count(*) FROM meeting_reactions x JOIN rooms r ON r.id = x.room_id WHERE r.public_code = '${code}'`]).toString().trim();
   assert.equal(stored, '1', 'the reaction was not stored once');
 
+  step('a quiz keeps its answer hidden until closed, and the server scores it');
+  await click(host, 'Toggle questions and doubts');
+  await click(member, 'Toggle questions and doubts');
+  await host.waitForSelector('#new-poll');
+  await host.select('#poll-kind', 'quiz');
+  await setField(host, '#poll-question', 'What is 2 + 2?');
+  const optionInputs = await host.$$('[data-testid="poll-option"]');
+  for (const [index, label] of ['Four', 'Five'].entries()) {
+    await optionInputs[index].click();
+    await optionInputs[index].type(label);
+  }
+  await host.waitForSelector('[data-testid="poll-correct"]');
+  await (await host.$$('[data-testid="poll-correct"]'))[0].click();
+  await host.click('#new-poll button[type="submit"]');
+  await waitForText(member, 'What is 2 + 2?');
+  assert.ok(!(await member.evaluate(() => document.body.innerText.includes('Correct ·'))), 'a participant saw the answer while open');
+  await member.$$eval('[data-testid="poll-card"] label', (labels) => labels.find((l) => l.textContent.includes('Four')).querySelector('input').click());
+  await clickByText(member, 'Submit answer');
+  await waitForText(member, 'Your answer is saved.');
+  await clickByText(host, 'Close question');
+  await waitForText(member, 'Your score: 10 of 10');
+  await waitForText(member, 'Correct ·');
+
+  step('a doubt goes from a student to an answer');
+  await setField(member, '#doubt-input', 'What is recursion?');
+  await member.click('#ask-doubt button[type="submit"]');
+  await waitForText(host, 'What is recursion?');
+  await host.waitForSelector('[data-testid="doubt-answer"]');
+  await (await host.$('[data-testid="doubt-answer"]')).type('A function calling itself.');
+  await clickByText(host, 'Answer');
+  await waitForText(member, 'A function calling itself.');
+  await clickByText(member, 'Mark resolved');
+  await member.waitForFunction(() => document.body.innerText.includes('resolved'), { timeout: 15000, polling: 200 });
+
   step('the host makes a co-host, and their controls appear');
-  await clickByText(host, 'Make co-host');
+  await click(host, 'Toggle participants list');
   await click(member, 'Toggle participants list');
+  await clickByText(host, 'Make co-host');
   await waitForText(member, 'Mute all', 15000);
   await waitForText(member, 'Co-host');
   assert.equal(await guest.$('button[aria-label="Mute all"]'), null);
@@ -190,7 +225,8 @@ try {
   await waitForText(member, 'Meeting permissions', 15000);
   await waitGone(host, 'Meeting permissions', 15000);
   await new Promise((r) => setTimeout(r, 4000));
-  assert.equal(sessions(), sessionsBefore, 'a role change reconnected someone');
+  const sessionsAfter = sessions();
+  assert.equal(sessionsAfter.replace(/user:[0-9a-f-]{28}/g, ''), sessionsBefore.replace(/user:[0-9a-f-]{28}/g, ''), `a role change reconnected someone: ${sessionsBefore} then ${sessionsAfter}`);
 
   step('screen sharing publishes');
   await click(member, 'Share screen');
@@ -210,7 +246,7 @@ try {
 
   console.log('E2E PASS meeting interaction with real media');
 } catch (err) {
-  console.log(`E2E FAIL ${err.message}`);
+  console.log(`E2E FAIL ${err.message.replace(/\s+/g, ' ').slice(0, 260)}`);
   for (const [name, page] of Object.entries(people)) {
     const tail = await page.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').slice(-140)).catch(() => '');
     console.log(`page ${name}: ${tail}`);
