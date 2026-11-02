@@ -266,7 +266,6 @@ jobs:
             { echo "==== server log $version ===="; docker logs livekit 2>&1 | grep -E 'starting|participant closing|Version|version|negotiat|ICE' | cut -c1-220 | tail -25; } >> /tmp/media_trace.txt
           done
           echo "runner: $(nproc) cpus, load $(cut -d' ' -f1-3 /proc/loadavg)" >> /tmp/media_trace.txt
-          python3 -c "import urllib.parse,sys; s=open('/tmp/media_trace.txt').read()[-58000:]; print('::notice title=RLS trace::'+s.replace('%','%25').replace('\r','').replace('\n','%0A'))"
           start_livekit v1.9.0
           node test/e2e_schedule_passcode.mjs >> /tmp/e2e.txt 2>&1 || status=1
           node test/e2e_institution.mjs >> /tmp/e2e.txt 2>&1 || status=1
@@ -287,3 +286,23 @@ jobs:
           done
           kill %1 %2 2>/dev/null || true
           exit $status
+
+      - name: Report Media Trace
+        if: ${{ !cancelled() }}
+        run: |
+          python3 - <<'PY'
+          import os
+          if os.path.exists('/tmp/media_trace.txt'):
+              lines = open('/tmp/media_trace.txt').read().splitlines()
+              keep = [l for l in lines if not any(n in l for n in ('DataReceived', 'added ICE', 'ice candidate', 'trickle'))]
+              chunks, current = [], ''
+              for line in keep:
+                  if len(current) + len(line) > 3800:
+                      chunks.append(current)
+                      current = ''
+                  current += line[:190] + '\n'
+              chunks.append(current)
+              # GitHub keeps 10 annotations per step, so show the end of the trace, in order.
+              for i, chunk in enumerate(chunks[-10:]):
+                  print(f'::notice title=RLS trace {i:02d}::' + chunk.replace('%', '%25').replace('\r', '').replace('\n', '%0A'))
+          PY
