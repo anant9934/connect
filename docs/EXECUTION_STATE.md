@@ -12,7 +12,7 @@ Compact checkpoint. Resume from here. Budget: free tier only.
 | Runtime DB role | `neondb_owner` through the pooler, not `connect_app`. Owner reports `rolbypassrls=true`, so RLS does not apply |
 | Vercel | Project `connect`, root `connect-main/apps/web`, production branch `main` |
 
-## Verified on disposable Postgres 16 (CI run 41376757634, commit `d72b46a`: database tests pass, real-media browser journey FAILS intermittently)
+## Verified on disposable Postgres 16 (CI run 41380290532, commit `f6c8f91`: all database tests and browser journeys pass)
 
 - Migrations 000001-000021, SQL security suites, rollback and re-apply of 000010-000021.
 - `TestWorkflowDB_APITenantIsolation`: the full router with auth, room, notes and files all on `connect_app`:
@@ -53,16 +53,18 @@ procedure would fail the deploy.
 
 P1-08 and P3-07 are built and pass at API level. See `FEATURE_REGISTER.md`.
 
-**Open defect, investigate first:** in `e2e_meeting_interaction.mjs`, clients log `negotiation timed out` and each user
-collects 4-5 LiveKit sessions within minutes, so peers intermittently vanish. Some runs get through video, chat, reload,
-announcements, hands, reactions, quizzes, doubts and co-host; the latest failed earlier, at reactions. Not yet known whether
-this is CI load or a product bug. A transfer also added a session after connections had been stable for 12 seconds. Commit
-`d72b46a` aligned permissions as a suspected fix, but no run has reached that check since, so it is unverified.
-To separate them: reduce to two browsers without video, then read LiveKit's close reason, now reported in the annotations.
+**Reconnect defect, resolved.** Cause: CI pinned `livekit-server:v1.9.0`, which `livekit-client` 2.22 cannot complete
+negotiation with. The client hit its 15s `peerConnectionTimeout`, then did a full reconnect, for a new session each time.
+Same test, same runner, load 0.89 on 4 CPUs: v1.9.0 gave 7 sessions per user in 100s; 1.13.11 gave 1, through camera and
+transfer. The app created one Room per page load. It was not a product lifecycle defect, and `d72b46a` was not the fix.
+Self-hosted LiveKit must be a compatible version. **LiveKit Cloud itself remains unverified.**
+
+Regressions in `e2e_media_stability.mjs`, repeated 3 times in each CI run: stable media, role changes, transfer after a stable
+connection, duplicate connects, a real server outage with recovery, reload, leave and rejoin, unmount cleanup.
 
 ## Next action
 
-1. Resolve the defect above and get the browser journey reliably green.
+1. Android meeting, waiting room and role tests against a real backend, in a CI emulator job.
 2. Android: the release APK builds and launches on the emulator (`Medium_Phone_API_37.0`), but it has no local backend to
    reach. Running meeting screens needs a local Postgres and API, which CI has but this machine does not. Android has no
    polls or doubts screen yet.
