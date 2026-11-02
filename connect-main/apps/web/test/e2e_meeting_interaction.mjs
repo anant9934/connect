@@ -101,10 +101,11 @@ try {
     () => [...document.querySelectorAll('video')].some((v) => v.videoWidth > 0 && v.readyState >= 2),
     { timeout: 30000 }
   );
-  const before = await member.$$eval('video', (videos) => Math.max(...videos.map((v) => v.currentTime)));
-  await new Promise((r) => setTimeout(r, 2000));
-  const after = await member.$$eval('video', (videos) => Math.max(...videos.map((v) => v.currentTime)));
-  assert.ok(after > before, `remote video did not advance: ${before} then ${after}`);
+  // Playback advancing means frames keep arriving, not just that one was decoded.
+  await member.waitForFunction(
+    () => [...document.querySelectorAll('video')].some((v) => v.videoWidth > 0 && v.currentTime > 2 && !v.paused),
+    { timeout: 30000 }
+  );
 
   step('microphone publishes');
   await click(member, 'Unmute microphone');
@@ -159,10 +160,16 @@ try {
   await waitForText(member, 'Co-host');
   assert.equal(await guest.$('button[aria-label="Mute all"]'), null);
 
-  step('the host transfers the meeting');
+  const sessions = () => execFileSync('psql', [process.env.ADMIN_DATABASE_URL, '-tAc',
+    `SELECT m.identity || ':' || count(*) FROM participant_media_sessions m JOIN rooms r ON r.id = m.room_id WHERE r.public_code = '${code}' AND m.identity LIKE 'user:%' GROUP BY m.identity ORDER BY 1`]).toString().trim();
+
+  step('the host transfers the meeting, and nobody is disconnected');
+  const sessionsBefore = sessions();
   await clickByText(host, 'Make host');
   await waitForText(member, 'Meeting permissions', 15000);
   await waitGone(host, 'Meeting permissions', 15000);
+  await new Promise((r) => setTimeout(r, 4000));
+  assert.equal(sessions(), sessionsBefore, 'a role change reconnected someone');
 
   step('screen sharing publishes');
   await click(member, 'Share screen');

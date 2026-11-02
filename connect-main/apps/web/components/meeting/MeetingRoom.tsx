@@ -367,8 +367,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           if (transportRef.current?.type === 'p2p') {
             const oldP2P = transportRef.current;
             const fallback = new LiveKitTransport();
-            const userIdent = initialIdentity || (isHost ? 'user:host' : `guest:${Date.now()}`);
-            const userDisp = initialDisplayName || (isHost ? 'Host' : 'Guest');
+            const userIdent = initialIdentity || (initialIsHost ? 'user:host' : `guest:${Date.now()}`);
+            const userDisp = initialDisplayName || (initialIsHost ? 'Host' : 'Guest');
 
             const room = fallback.getLiveKitRoom();
             if (room) {
@@ -387,7 +387,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 livekitUrl,
                 identity: userIdent,
                 displayName: userDisp,
-                isHost,
+                isHost: initialIsHost,
                 initialAudioEnabled: !isMicMutedRef.current,
                 initialVideoEnabled: !isVideoMutedRef.current,
                 audioDeviceId,
@@ -412,9 +412,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           roomCode,
           token,
           livekitUrl,
-          identity: initialIdentity || (isHost ? 'user:host' : `guest:${Date.now()}`),
-          displayName: initialDisplayName || (isHost ? 'Host' : 'Guest'),
-          isHost,
+          identity: initialIdentity || (initialIsHost ? 'user:host' : `guest:${Date.now()}`),
+          displayName: initialDisplayName || (initialIsHost ? 'Host' : 'Guest'),
+          isHost: initialIsHost,
           initialAudioEnabled: !isMicMutedRef.current,
           initialVideoEnabled: !isVideoMutedRef.current,
           audioDeviceId,
@@ -498,7 +498,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     videoDeviceId,
     updateScreenShareState,
     handleDataPayload,
-    isHost,
+    initialIsHost,
   ]);
 
   // Follow role changes made by the host, including transfers and succession
