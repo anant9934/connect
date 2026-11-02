@@ -88,7 +88,7 @@ describe('Phase 3 Architecture, Security & Light-First Verification', () => {
 
   test('Meeting History: User-scoped and indexed history queries without raw media retention', () => {
     const historyPage = fs.readFileSync(path.join(webRoot, 'app/history/page.tsx'), 'utf-8');
-    assert.ok(historyPage.includes('getMeetingHistory'), 'History page must invoke getMeetingHistory API');
+    assert.ok(historyPage.includes('searchMeetings'), 'History page must invoke getMeetingHistory API');
     assert.ok(historyPage.includes('Authentication Required'), 'History page must prompt unauthenticated users');
   });
 });

@@ -279,6 +279,7 @@ jobs:
           { echo "==== server log ===="; docker logs livekit 2>&1 | grep -E 'negotiat|participant closing' | tail -6 | cut -c1-200; } >> /tmp/media_trace.txt
           echo "runner: $(nproc) cpus, load $(cut -d' ' -f1-3 /proc/loadavg)" >> /tmp/media_trace.txt
           node test/e2e_schedule_passcode.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          node test/e2e_history.mjs >> /tmp/e2e.txt 2>&1 || status=1
           node test/e2e_institution.mjs >> /tmp/e2e.txt 2>&1 || status=1
           cat /tmp/e2e.txt
           [ $status -eq 0 ] || tail -20 /tmp/api.log
