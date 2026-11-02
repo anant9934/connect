@@ -30,7 +30,7 @@ func RequireJSONContentType(next http.Handler) http.Handler {
 			// If there is content, content-type must be application/json (except file uploads)
 			if r.ContentLength > 0 {
 				ct := r.Header.Get("Content-Type")
-				if strings.HasSuffix(r.URL.Path, "/files/upload") && strings.HasPrefix(ct, "multipart/form-data") {
+				if (strings.HasSuffix(r.URL.Path, "/files/upload") || strings.HasSuffix(r.URL.Path, "/users/me/avatar")) && strings.HasPrefix(ct, "multipart/form-data") {
 					next.ServeHTTP(w, r)
 					return
 				}

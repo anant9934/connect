@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tathastu/connect/services/api/internal/auth"
+	"github.com/tathastu/connect/services/api/internal/avatars"
 	"github.com/tathastu/connect/services/api/internal/config"
 	"github.com/tathastu/connect/services/api/internal/files"
 	"github.com/tathastu/connect/services/api/internal/handlers"
@@ -48,6 +49,7 @@ func BuildRouter(
 	interactionHandler *interaction.Handler,
 	notificationsHandler *notifications.Handler,
 	meetingsHandler *meetings.Handler,
+	avatarsHandler *avatars.Handler,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -115,7 +117,14 @@ func BuildRouter(
 					meRouter.With(appmw.CSRFProtection(cfg.CORSAllowedOrigins)).Post("/change-password", authHandler.ChangePassword)
 					meRouter.With(appmw.CSRFProtection(cfg.CORSAllowedOrigins)).Post("/preferences", authHandler.UpdatePreferences)
 					meRouter.With(appmw.CSRFProtection(cfg.CORSAllowedOrigins)).Post("/link-google", authHandler.LinkGoogle)
+					if avatarsHandler != nil {
+						meRouter.With(appmw.CSRFProtection(cfg.CORSAllowedOrigins)).Post("/avatar", avatarsHandler.Upload)
+						meRouter.With(appmw.CSRFProtection(cfg.CORSAllowedOrigins)).Delete("/avatar", avatarsHandler.Remove)
+					}
 				})
+				if avatarsHandler != nil {
+					usersRouter.With(appmw.RequireAuth(authService)).Get("/{id}/avatar", avatarsHandler.Serve)
+				}
 			}
 		})
 
