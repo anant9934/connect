@@ -2,13 +2,18 @@ package server_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tathastu/connect/services/api/internal/auth"
+	"github.com/tathastu/connect/services/api/internal/database"
 	"github.com/tathastu/connect/services/api/internal/room"
 )
 
@@ -57,6 +62,35 @@ func TestWorkflowDB_BreakoutRooms(t *testing.T) {
 		t.Helper()
 		api.want(name, want, http.MethodPost, path+"/breakouts/assign", who, map[string]any{"identity": identity, "roomId": roomID})
 	}
+
+	// The API refuses these people first, so this calls the database directly, to prove it refuses too.
+	t.Run("the database refuses someone with no role in the room", func(t *testing.T) {
+		for name, query := range map[string]string{
+			"open groups":      `SELECT connect_auth.breakout_open($1::UUID, ARRAY['X'], ARRAY['ZZZZ-ZZZZ-ZZ'])`,
+			"assign":           `SELECT connect_auth.breakout_assign($1::UUID, 'user:00000000-0000-4000-8000-000000000000', NULL)`,
+			"close groups":     `SELECT * FROM connect_auth.breakout_close($1::UUID)`,
+			"read groups":      `SELECT connect_auth.breakout_state($1::UUID)`,
+			"change classroom": `SELECT connect_auth.classroom_update($1::UUID, true, NULL, NULL, NULL, false)`,
+			"clear a board":    `SELECT connect_auth.board_remove($1::UUID, 'whiteboard', true)`,
+			"undo on a board":  `SELECT connect_auth.board_remove($1::UUID, 'whiteboard', false)`,
+		} {
+			err := database.WithAuthContext(ctx, app, auth.HashSessionToken(outsiderToken), nil, func(tx pgx.Tx, _ *database.AuthContext) error {
+				_, err := tx.Exec(ctx, query, mainID)
+				return err
+			})
+			var pgErr *pgconn.PgError
+			if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+				t.Errorf("%s: expected a refusal, got %v", name, err)
+			}
+		}
+		var yes bool
+		err := database.WithAuthContext(ctx, app, auth.HashSessionToken(outsiderToken), nil, func(tx pgx.Tx, _ *database.AuthContext) error {
+			return tx.QueryRow(ctx, `SELECT connect_auth.can_use_room($1::UUID) OR connect_auth.can_announce($1::UUID) OR connect_auth.can_draw($1::UUID)`, mainID).Scan(&yes)
+		})
+		if err != nil || yes {
+			t.Errorf("checks must say no, and never NULL: yes=%v err=%v", yes, err)
+		}
+	})
 
 	t.Run("only moderators open groups", func(t *testing.T) {
 		names := map[string]any{"names": []string{"Group 1", "Group 2"}}
