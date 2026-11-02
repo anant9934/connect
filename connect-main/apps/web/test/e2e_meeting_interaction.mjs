@@ -162,6 +162,9 @@ try {
   await click(host, "Lower Guesta's hand");
   await host.waitForFunction(() => !document.querySelector('button[aria-label^="Lower Guesta"]'), { timeout: 15000 });
 
+  step('peers are still connected');
+  await host.waitForFunction(() => document.querySelectorAll('[data-testid="participant-tile"]').length >= 3, { timeout: 30000 });
+
   step('a reaction reaches others');
   await click(member, 'Reactions');
   await click(member, 'Thumbs Up');

@@ -243,7 +243,7 @@ jobs:
           ADMIN_DATABASE_URL: "postgres://connect_admin:connect_disposable_ci_password_456@localhost:5432/connect_test_ci_runner?sslmode=disable"
         run: |
           # A local media server. This proves our integration, not the LiveKit Cloud account.
-          docker run -d --name livekit --network host -e LIVEKIT_CONFIG="$(printf 'port: 7880\nrtc:\n  tcp_port: 7881\n  udp_port: 7882\n  use_external_ip: false\nkeys:\n  %s: %s\nwebhook:\n  api_key: %s\n  urls:\n    - http://localhost:8080/api/v1/livekit/webhook\n' "$LIVEKIT_API_KEY" "$LIVEKIT_API_SECRET" "$LIVEKIT_API_KEY")" livekit/livekit-server:v1.9.0 > /dev/null
+          docker run -d --name livekit --network host -e LIVEKIT_CONFIG="$(printf 'port: 7880\nrtc:\n  tcp_port: 7881\n  udp_port: 7882\n  use_external_ip: false\nkeys:\n  %s: %s\nwebhook:\n  api_key: %s\n  urls:\n    - http://localhost:8080/api/v1/livekit/webhook\n' "$LIVEKIT_API_KEY" "$LIVEKIT_API_SECRET" "$LIVEKIT_API_KEY")" livekit/livekit-server:v1.9.0 --node-ip 127.0.0.1 > /dev/null
           (cd connect-main/services/api && go build -o /tmp/connect-api ./cmd/server)
           /tmp/connect-api > /tmp/api.log 2>&1 &
           cd connect-main/apps/web
