@@ -18,6 +18,8 @@ import { ChatPanel } from './ChatPanel';
 import { ParticipantsPanel } from './ParticipantsPanel';
 import { NotesPanel } from './NotesPanel';
 import { ClassroomPanel } from './ClassroomPanel';
+import { ClassroomBoard } from './ClassroomBoard';
+import { BreakoutControl } from './BreakoutControl';
 import { FilesPanel } from './FilesPanel';
 import { TransportDiagnostics } from './TransportDiagnostics';
 import { ChatMessage } from '@/features/chat/types';
@@ -54,6 +56,7 @@ interface MeetingStageProps {
   transport?: MediaTransport | null;
   isScreenSharing: boolean;
   activePanel: 'chat' | 'participants' | 'notes' | 'files' | 'classroom' | null;
+  onMainCode: (code: string | null) => void;
   unreadChatCount: number;
   chatMessages: ChatMessage[];
   pendingAdmissions: AdmissionRequest[];
@@ -102,6 +105,7 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
   transport = null,
   isScreenSharing,
   activePanel,
+  onMainCode,
   unreadChatCount,
   chatMessages,
   pendingAdmissions,
@@ -331,6 +335,19 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
               />
             </div>
           )}
+
+          <BreakoutControl
+            roomCode={roomCode}
+            syncTick={interaction.syncTick}
+            onChanged={interaction.sendHint}
+            onMainCode={onMainCode}
+          />
+          <ClassroomBoard
+            roomCode={roomCode}
+            selfIdentity={localParticipant?.identity || ''}
+            syncTick={interaction.syncTick}
+            onChanged={interaction.sendHint}
+          />
         </div>
 
         {/* Right-Side Panel: Shared Drawer (Chat / Participants) */}

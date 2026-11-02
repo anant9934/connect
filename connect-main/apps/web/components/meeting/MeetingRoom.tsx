@@ -157,6 +157,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     setIsScreenSharing(false);
   }, []);
 
+  // Set inside a breakout: leaving or an ended group goes back to the main meeting.
+  const [mainCode, setMainCode] = useState<string | null>(null);
   const activityRecorded = useBrowserActivity(roomCode, Boolean(initialIdentity?.startsWith('user:')));
 
   const interaction = useMeetingInteraction(
@@ -708,7 +710,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       await leaveRoom(roomCode, localParticipant.identity);
       await transport.disconnect();
     }
-    router.push('/');
+    router.push(mainCode ? `/room/${mainCode}/preview` : '/');
   };
 
   const handleEndMeetingForEveryone = async () => {
@@ -846,7 +848,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           </div>
           <div className="pt-2">
             <Link
-              href="/"
+              href={mainCode ? `/room/${mainCode}/preview` : '/'}
               className="inline-block w-full py-3 px-4 rounded-2xl bg-[#7658E8] hover:bg-[#6045D8] text-white text-xs font-semibold transition-colors shadow-xs"
             >
               Return to Home
@@ -959,6 +961,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         <p data-testid="activity-notice" className="px-3 py-1 text-xs text-center text-[#404040] bg-[#F3F0FF]">This class records how long this tab is visible, as one attendance signal. Nothing else about your browser is recorded.</p>
       )}
       <MeetingStage
+        onMainCode={setMainCode}
         roomCode={roomCode}
         connectionState={connectionState}
         localParticipant={localParticipant}

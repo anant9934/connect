@@ -50,3 +50,64 @@ export const askDoubt = (code: string, question: string) => post(roomPath(code, 
 export const answerDoubt = (code: string, id: string, answer: string) =>
   post(roomPath(code, `/doubts/${id}/answer`), { answer });
 export const resolveDoubt = (code: string, id: string) => post(roomPath(code, `/doubts/${id}/resolve`));
+
+export interface ClassroomState {
+  studentsCanDraw: boolean;
+  canDraw: boolean;
+  canManage: boolean;
+  fileId: string | null;
+  fileName: string | null;
+  fileType: string | null;
+  page: number;
+  pages: number;
+  presenter: string | null;
+  version: number;
+}
+export interface Stroke {
+  id: string;
+  seq: number;
+  authorIdentity: string;
+  tool: 'pen' | 'highlighter';
+  color: string;
+  width: number;
+  points: [number, number][];
+}
+export interface NewStroke {
+  clientStrokeId: string;
+  board: string;
+  tool: 'pen' | 'highlighter';
+  color: string;
+  width: number;
+  points: [number, number][];
+}
+
+
+export const getClassroom = (code: string) => apiFetch<ClassroomState>(roomPath(code, '/classroom'), { method: 'GET' });
+export const updateClassroom = (
+  code: string,
+  change: { studentsCanDraw?: boolean; fileId?: string; pages?: number; page?: number; stop?: boolean }
+) => apiFetch(roomPath(code, '/classroom'), { method: 'PATCH', body: JSON.stringify(change) });
+export const listStrokes = async (code: string, board: string, afterSeq: number) =>
+  (await apiFetch<{ strokes: Stroke[] }>(roomPath(code, `/board?board=${encodeURIComponent(board)}&afterSeq=${afterSeq}`), { method: 'GET' })).strokes;
+export const postStroke = (code: string, stroke: NewStroke) =>
+  apiFetch<{ seq: number }>(roomPath(code, '/board/strokes'), { method: 'POST', body: JSON.stringify(stroke) });
+export const removeStrokes = (code: string, board: string, all: boolean) =>
+  apiFetch<{ removed: number }>(roomPath(code, '/board/remove'), { method: 'POST', body: JSON.stringify({ board, all }) });
+
+export interface BreakoutRoom { id: string; code: string; name: string }
+export interface BreakoutState {
+  canManage: boolean;
+  isBreakout: boolean;
+  ended: boolean;
+  mainCode: string;
+  myRoom: BreakoutRoom | null;
+  rooms: BreakoutRoom[];
+  people: { identity: string; displayName: string; isGuest: boolean; breakoutId: string | null }[];
+}
+
+export const getBreakouts = (code: string) => apiFetch<BreakoutState>(roomPath(code, '/breakouts'), { method: 'GET' });
+export const openBreakouts = (code: string, names: string[]) =>
+  apiFetch(roomPath(code, '/breakouts'), { method: 'POST', body: JSON.stringify({ names }) });
+export const assignBreakout = (code: string, identity: string, roomId: string | null) =>
+  apiFetch(roomPath(code, '/breakouts/assign'), { method: 'POST', body: JSON.stringify({ identity, roomId }) });
+export const closeBreakouts = (code: string) => apiFetch(roomPath(code, '/breakouts/close'), { method: 'POST', body: '{}' });
