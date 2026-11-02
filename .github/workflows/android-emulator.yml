@@ -95,8 +95,8 @@ jobs:
           NODE_ENV=development npm ci --no-audit --no-fund > /tmp/npm.log 2>&1 || { tail -20 /tmp/npm.log; exit 1; }
           cd apps/mobile/android
           keytool -genkeypair -storetype JKS -keystore app/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" > /dev/null 2>&1
-          bash gradlew assembleDebug --no-daemon -q -Pconnect.bundleDebug=true -PreactNativeArchitectures=x86_64 > /tmp/gradle.log 2>&1 || { tail -30 /tmp/gradle.log; echo "::notice title=Android::build failed: $(grep -m1 -E 'went wrong' -A2 /tmp/gradle.log | tr '\n' ' ' | cut -c1-300)"; exit 1; }
-          ls -la app/build/outputs/apk/debug/
+          bash gradlew assembleRelease --no-daemon -q -Pconnect.allowCleartext=true -PreactNativeArchitectures=x86_64 > /tmp/gradle.log 2>&1 || { tail -30 /tmp/gradle.log; echo "::notice title=Android::build failed: $(grep -m1 -E 'went wrong' -A2 /tmp/gradle.log | tr '\n' ' ' | cut -c1-300)"; exit 1; }
+          ls -la app/build/outputs/apk/release/
 
       - name: Enable KVM
         run: |
