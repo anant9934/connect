@@ -135,13 +135,13 @@ export const OOPSVisualizer: React.FC = () => {
 
             <div className="p-3 rounded-xl bg-[#FFF4D1] border border-[#FFC93C] space-y-1">
               <div className="text-[10px] text-[#6B4E00]">Slot 1: virtual double area()</div>
-              <div className="font-bold text-[#17151F]">-> &amp;Circle::area (0x001040)</div>
+              <div className="font-bold text-[#17151F]">&rarr; &amp;Circle::area (0x001040)</div>
               <div className="text-[10px] text-[#5E5A50]">Overrides Shape::area</div>
             </div>
 
             <div className="p-3 rounded-xl bg-[#FFF4D1] border border-[#FFC93C] space-y-1">
               <div className="text-[10px] text-[#6B4E00]">Slot 2: virtual ~Shape()</div>
-              <div className="font-bold text-[#17151F]">-> &amp;Circle::~Circle (0x001080)</div>
+              <div className="font-bold text-[#17151F]">&rarr; &amp;Circle::~Circle (0x001080)</div>
               <div className="text-[10px] text-[#5E5A50]">Virtual destructor prevents memory leaks</div>
             </div>
           </div>
@@ -156,15 +156,15 @@ export const OOPSVisualizer: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs font-mono">
           <div className="p-3 rounded-xl bg-[#FFFFFF] border border-[#E4E2DB] space-y-1">
             <div className="font-bold text-[#7444E8]">Step 1: Dereference ptr</div>
-            <div className="text-[#5E5A50]">Read stack variable 0x7FFEE4B30 -> points to heap 0x00B2A0.</div>
+            <div className="text-[#5E5A50]">Read stack variable 0x7FFEE4B30 &rarr; points to heap 0x00B2A0.</div>
           </div>
           <div className="p-3 rounded-xl bg-[#FFFFFF] border border-[#E4E2DB] space-y-1">
             <div className="font-bold text-[#7444E8]">Step 2: Read vptr</div>
-            <div className="text-[#5E5A50]">Extract first 8 bytes of object instance -> Circle::vtable at 0x00F8C0.</div>
+            <div className="text-[#5E5A50]">Extract first 8 bytes of object instance &rarr; Circle::vtable at 0x00F8C0.</div>
           </div>
           <div className="p-3 rounded-xl bg-[#FFFFFF] border border-[#E4E2DB] space-y-1">
             <div className="font-bold text-[#7444E8]">Step 3: Index Slot 1</div>
-            <div className="text-[#5E5A50]">Look up offset for area() -> function address 0x001040.</div>
+            <div className="text-[#5E5A50]">Look up offset for area() &rarr; function address 0x001040.</div>
           </div>
           <div className="p-3 rounded-xl bg-[#FFFFFF] border border-[#E4E2DB] space-y-1">
             <div className="font-bold text-[#2DBE74]">Step 4: Dispatch</div>
