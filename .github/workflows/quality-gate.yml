@@ -244,8 +244,6 @@ jobs:
           API_URL: "http://localhost:8080"
           ADMIN_DATABASE_URL: "postgres://connect_admin:connect_disposable_ci_password_456@localhost:5432/connect_test_ci_runner?sslmode=disable"
         run: |
-          # A local media server. This proves our integration, not the LiveKit Cloud account.
-          docker run -d --name livekit --network host -e LIVEKIT_CONFIG="$(printf 'port: 7880\nrtc:\n  tcp_port: 7881\n  udp_port: 7882\n  use_external_ip: false\nkeys:\n  %s: %s\nwebhook:\n  api_key: %s\n  urls:\n    - http://localhost:8080/api/v1/livekit/webhook\n' "$LIVEKIT_API_KEY" "$LIVEKIT_API_SECRET" "$LIVEKIT_API_KEY")" livekit/livekit-server:v1.9.0 --node-ip 127.0.0.1 > /dev/null
           (cd connect-main/services/api && go build -o /tmp/connect-api ./cmd/server)
           /tmp/connect-api > /tmp/api.log 2>&1 &
           cd connect-main/apps/web
@@ -255,12 +253,27 @@ jobs:
           for _ in $(seq 1 60); do curl -sf http://localhost:8080/health/live >/dev/null && curl -sf http://localhost:3000 >/dev/null && break; sleep 1; done
           export CHROME_PATH="$(which google-chrome)"
           status=0
-          node test/e2e_schedule_passcode.mjs > /tmp/e2e.txt 2>&1 || status=1
+          # A local media server. This proves our integration, not the LiveKit Cloud account.
+          start_livekit() {
+            docker rm -f livekit > /dev/null 2>&1 || true
+            docker run -d --name livekit --network host -e LIVEKIT_CONFIG="$(printf 'port: 7880\nlogging:\n  level: info\nrtc:\n  tcp_port: 7881\n  udp_port: 7882\n  use_external_ip: false\nkeys:\n  %s: %s\nwebhook:\n  api_key: %s\n  urls:\n    - http://localhost:8080/api/v1/livekit/webhook\n' "$LIVEKIT_API_KEY" "$LIVEKIT_API_SECRET" "$LIVEKIT_API_KEY")" "livekit/livekit-server:$1" --node-ip 127.0.0.1 > /dev/null
+            sleep 3
+          }
+          : > /tmp/media_trace.txt
+          for version in v1.9.0 latest; do
+            start_livekit "$version"
+            MEDIA_TRACE_LABEL="server-$version" node test/e2e_media_stability.mjs >> /tmp/e2e.txt 2>&1 || true
+            { echo "==== server log $version ===="; docker logs livekit 2>&1 | grep -E 'starting|participant closing|Version|version|negotiat|ICE' | cut -c1-220 | tail -25; } >> /tmp/media_trace.txt
+          done
+          echo "runner: $(nproc) cpus, load $(cut -d' ' -f1-3 /proc/loadavg)" >> /tmp/media_trace.txt
+          python3 -c "import urllib.parse,sys; s=open('/tmp/media_trace.txt').read()[-58000:]; print('::notice title=RLS trace::'+s.replace('%','%25').replace('\r','').replace('\n','%0A'))"
+          start_livekit v1.9.0
+          node test/e2e_schedule_passcode.mjs >> /tmp/e2e.txt 2>&1 || status=1
           node test/e2e_institution.mjs >> /tmp/e2e.txt 2>&1 || status=1
           node test/e2e_meeting_interaction.mjs >> /tmp/e2e.txt 2>&1 || status=1
           cat /tmp/e2e.txt
           [ $status -eq 0 ] || tail -20 /tmp/api.log
-          grep -E 'E2E|^page ' /tmp/e2e.txt | tail -9 | while IFS= read -r line; do
+          grep -E 'E2E|^page ' /tmp/e2e.txt | tail -7 | while IFS= read -r line; do
             echo "::notice title=RLS browser::$line"
           done
           grep -E '^STEP' /tmp/e2e.txt | tail -1 | while IFS= read -r line; do

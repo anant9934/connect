@@ -35,6 +35,7 @@ import { MeetingStage } from './MeetingStage';
 import { Loader2, AlertCircle, UserX, Clock, Volume2, X } from 'lucide-react';
 import { ChatMessage } from '@/features/chat/types';
 import { useMeetingInteraction } from '@/features/chat/useMeetingInteraction';
+import { webDiagnostics } from '@/features/meeting/diagnostics';
 import { AdmissionRequest } from '@/features/rooms/types';
 import {
   MediaTransportFactory,
@@ -209,6 +210,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   useEffect(() => {
     let isCancelled = false;
     const hasBeenConnectedRef = { current: false };
+    webDiagnostics.log('room', 'ConnectionEffectStarted');
 
     async function init() {
       try {
@@ -478,6 +480,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }, 2000);
 
     return () => {
+      webDiagnostics.log('room', 'ConnectionEffectCleanup');
       isCancelled = true;
       clearInterval(statusInterval);
       if (typeof window !== 'undefined') {

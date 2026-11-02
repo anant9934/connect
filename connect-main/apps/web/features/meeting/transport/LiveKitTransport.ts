@@ -6,6 +6,7 @@ import {
   TrackPublication,
   Participant,
   LocalParticipant,
+  setLogLevel,
 } from 'livekit-client';
 import { LIVEKIT_ROOM_OPTIONS } from '../livekit';
 import {
@@ -107,8 +108,12 @@ export class LiveKitTransport implements MediaTransport {
   }
 
   private initRoom(): void {
+    if (typeof window !== 'undefined' && (window as any).__TC_ENABLE_TEST_DIAGNOSTICS) {
+      setLogLevel('debug');
+    }
     const room = new LiveKitRoom(LIVEKIT_ROOM_OPTIONS);
     this.room = room;
+    webDiagnostics.log('room', 'RoomCreated');
 
     room
       .on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
@@ -126,8 +131,14 @@ export class LiveKitTransport implements MediaTransport {
         this.updateScreenShareState();
         this.emit('participants_changed');
       })
-      .on(RoomEvent.Disconnected, () => {
-        webDiagnostics.log('room', 'Disconnected');
+      .on(RoomEvent.SignalReconnecting, () => {
+        webDiagnostics.log('room', 'SignalReconnecting');
+      })
+      .on(RoomEvent.ParticipantPermissionsChanged, () => {
+        webDiagnostics.log('room', 'PermissionsChanged');
+      })
+      .on(RoomEvent.Disconnected, (reason?: unknown) => {
+        webDiagnostics.log('room', 'Disconnected', { details: { reason } });
         this.emit('participants_changed');
       })
       .on(RoomEvent.Reconnecting, () => {
@@ -296,7 +307,9 @@ export class LiveKitTransport implements MediaTransport {
       this.initRoom();
     }
 
+    webDiagnostics.log('room', 'ConnectStarted');
     await this.room!.connect(options.livekitUrl, options.token);
+    webDiagnostics.log('room', 'ConnectFinished', { details: { sid: this.room!.localParticipant?.sid } });
 
     if (typeof window !== 'undefined') {
       const allowDiagnostics =
