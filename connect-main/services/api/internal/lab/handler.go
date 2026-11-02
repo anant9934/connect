@@ -92,6 +92,9 @@ func (h *Handler) listCourses(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if courses == nil {
+			courses = []LabCourse{}
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"courses": courses})
 		return nil
 	})
@@ -189,6 +192,9 @@ func (h *Handler) listAssignments(w http.ResponseWriter, r *http.Request) {
 		assignments, err := h.repo.ListLabAssignments(r.Context(), tx, orgID, courseID, isStudent)
 		if err != nil {
 			return err
+		}
+		if assignments == nil {
+			assignments = []LabAssignment{}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"assignments": assignments})
 		return nil
@@ -615,6 +621,9 @@ func (h *Handler) getProgress(w http.ResponseWriter, r *http.Request) {
 		progress, err := h.repo.GetStudentProgress(r.Context(), tx, orgID, studentID)
 		if err != nil {
 			return err
+		}
+		if progress == nil {
+			progress = []LabStudentProgress{}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"progress": progress})
 		return nil

@@ -36,7 +36,7 @@ func (r *Repository) ListLabCourses(ctx context.Context, tx pgx.Tx, orgID uuid.U
 	}
 	defer rows.Close()
 
-	var courses []LabCourse
+	courses := []LabCourse{}
 	for rows.Next() {
 		var c LabCourse
 		var starterCodeRaw []byte
@@ -205,30 +205,47 @@ func (r *Repository) GetLabExercise(ctx context.Context, tx pgx.Tx, orgID, exerc
 	return &ex, nil
 }
 
-// ListLabAssignments returns assignments for a course.
+// ListLabAssignments returns assignments for a course (or all courses in tenant if labCourseID is uuid.Nil).
 func (r *Repository) ListLabAssignments(ctx context.Context, tx pgx.Tx, orgID, labCourseID uuid.UUID, isStudent bool) ([]LabAssignment, error) {
-	query := `
-		SELECT
-			la.id, la.organization_id, la.lab_course_id, la.created_by_user_id,
-			u.display_name, la.title, la.description, la.allowed_languages,
-			la.starter_code, la.due_at, la.max_score, la.status, la.created_at, la.updated_at,
-			(SELECT COUNT(*) FROM lab_submissions ls WHERE ls.assignment_id = la.id) as submission_count
-		FROM lab_assignments la
-		JOIN users u ON u.id = la.created_by_user_id
-		WHERE la.organization_id = $1 AND la.lab_course_id = $2
-	`
+	var query string
+	var args []any
+	if labCourseID != uuid.Nil {
+		query = `
+			SELECT
+				la.id, la.organization_id, la.lab_course_id, la.created_by_user_id,
+				COALESCE((SELECT display_name FROM connect_auth.auth_user_by_id(la.created_by_user_id)), 'Faculty') as author_name,
+				la.title, la.description, la.allowed_languages,
+				la.starter_code, la.due_at, la.max_score, la.status, la.created_at, la.updated_at,
+				(SELECT COUNT(*) FROM lab_submissions ls WHERE ls.assignment_id = la.id) as submission_count
+			FROM lab_assignments la
+			WHERE la.organization_id = $1 AND la.lab_course_id = $2
+		`
+		args = []any{orgID, labCourseID}
+	} else {
+		query = `
+			SELECT
+				la.id, la.organization_id, la.lab_course_id, la.created_by_user_id,
+				COALESCE((SELECT display_name FROM connect_auth.auth_user_by_id(la.created_by_user_id)), 'Faculty') as author_name,
+				la.title, la.description, la.allowed_languages,
+				la.starter_code, la.due_at, la.max_score, la.status, la.created_at, la.updated_at,
+				(SELECT COUNT(*) FROM lab_submissions ls WHERE ls.assignment_id = la.id) as submission_count
+			FROM lab_assignments la
+			WHERE la.organization_id = $1
+		`
+		args = []any{orgID}
+	}
 	if isStudent {
 		query += " AND la.status = 'published'"
 	}
 	query += " ORDER BY la.due_at ASC;"
 
-	rows, err := tx.Query(ctx, query, orgID, labCourseID)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list lab assignments: %w", err)
 	}
 	defer rows.Close()
 
-	var assignments []LabAssignment
+	assignments := []LabAssignment{}
 	for rows.Next() {
 		var a LabAssignment
 		var starterCodeRaw []byte
@@ -251,10 +268,10 @@ func (r *Repository) GetLabAssignment(ctx context.Context, tx pgx.Tx, orgID, ass
 	query := `
 		SELECT
 			la.id, la.organization_id, la.lab_course_id, la.created_by_user_id,
-			u.display_name, la.title, la.description, la.allowed_languages,
+			COALESCE((SELECT display_name FROM connect_auth.auth_user_by_id(la.created_by_user_id)), 'Faculty') as author_name,
+			la.title, la.description, la.allowed_languages,
 			la.starter_code, la.due_at, la.max_score, la.status, la.created_at, la.updated_at
 		FROM lab_assignments la
-		JOIN users u ON u.id = la.created_by_user_id
 		WHERE la.organization_id = $1 AND la.id = $2;
 	`
 	var a LabAssignment
@@ -446,11 +463,11 @@ func (r *Repository) ListSubmissions(ctx context.Context, tx pgx.Tx, orgID uuid.
 	query := `
 		SELECT
 			ls.id, ls.organization_id, ls.assignment_id, ls.exercise_id, ls.student_user_id,
-			u.display_name, ls.language, ls.source_code, ls.status, ls.score,
+			COALESCE((SELECT display_name FROM connect_auth.auth_user_by_id(ls.student_user_id)), 'Student') as student_name,
+			ls.language, ls.source_code, ls.status, ls.score,
 			ls.passed_count, ls.total_count, ls.execution_duration_ms, ls.stdout, ls.stderr,
 			ls.test_results, ls.faculty_feedback, ls.graded_by_user_id, ls.graded_at, ls.created_at
 		FROM lab_submissions ls
-		JOIN users u ON u.id = ls.student_user_id
 		WHERE ls.organization_id = $1
 		  AND ($2::uuid IS NULL OR ls.assignment_id = $2)
 		  AND ($3::uuid IS NULL OR ls.student_user_id = $3)
@@ -462,7 +479,7 @@ func (r *Repository) ListSubmissions(ctx context.Context, tx pgx.Tx, orgID uuid.
 	}
 	defer rows.Close()
 
-	var submissions []LabSubmission
+	submissions := []LabSubmission{}
 	for rows.Next() {
 		var s LabSubmission
 		var testResultsRaw []byte
@@ -570,7 +587,7 @@ func (r *Repository) GetStudentProgress(ctx context.Context, tx pgx.Tx, orgID, s
 	}
 	defer rows.Close()
 
-	var list []LabStudentProgress
+	list := []LabStudentProgress{}
 	for rows.Next() {
 		var p LabStudentProgress
 		if err := rows.Scan(
