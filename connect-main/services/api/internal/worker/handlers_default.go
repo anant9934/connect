@@ -489,4 +489,6 @@ func RegisterDefaultHandlers(r *Registry, pool *pgxpool.Pool, storage StorageDel
 	r.RegisterFunc(TypeAttendanceReconcile, NewAttendanceReconcileHandler(pool, logger))
 	r.RegisterFunc(TypeFilePurge, NewFilePurgeHandler(storage, logger))
 	r.RegisterFunc(TypeRoomHostSuccession, NewHostSuccessionHandler(pool, logger))
+	r.RegisterFunc(TypeNotifySession, NewNotifySessionHandler(pool, logger))
+	r.RegisterFunc(TypeNotifyUser, NewNotifyUserHandler(pool))
 }

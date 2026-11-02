@@ -378,3 +378,19 @@ func EnqueueJobWriteOnly(ctx context.Context, tx pgx.Tx, queue, idempotencyKey s
 	_, err = tx.Exec(ctx, `SELECT connect_auth.enqueue_job($1, $2, $3::jsonb)`, queue, idempotencyKey, payloadBytes)
 	return err
 }
+
+// EnqueueJobWriteOnlyAt is EnqueueJobWriteOnly for a job that should run at a later time.
+func EnqueueJobWriteOnlyAt(ctx context.Context, tx pgx.Tx, queue, idempotencyKey string, payload any, at time.Time) error {
+	if idempotencyKey == "" {
+		return fmt.Errorf("idempotency key is required for transactional job enqueue")
+	}
+	if queue == "" {
+		queue = DefaultQueue
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal job payload: %w", err)
+	}
+	_, err = tx.Exec(ctx, `SELECT connect_auth.enqueue_job_at($1, $2, $3::jsonb, $4)`, queue, idempotencyKey, payloadBytes, at)
+	return err
+}

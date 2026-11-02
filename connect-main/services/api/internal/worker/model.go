@@ -38,6 +38,8 @@ const (
 	TypeAttendanceReconcile = "attendance.reconcile"
 	TypeFilePurge           = "file.purge"
 	TypeRoomHostSuccession  = "room.host_succession"
+	TypeNotifySession       = "notify.session"
+	TypeNotifyUser          = "notify.user"
 )
 
 // Job represents a durable background task stored in the outbox.

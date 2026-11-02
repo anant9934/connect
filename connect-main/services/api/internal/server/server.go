@@ -17,6 +17,7 @@ import (
 	"github.com/tathastu/connect/services/api/internal/meeting/p2p"
 	appmw "github.com/tathastu/connect/services/api/internal/middleware"
 	"github.com/tathastu/connect/services/api/internal/notes"
+	"github.com/tathastu/connect/services/api/internal/notifications"
 	"github.com/tathastu/connect/services/api/internal/ratelimit"
 	"github.com/tathastu/connect/services/api/internal/room"
 )
@@ -44,6 +45,7 @@ func BuildRouter(
 	livekitWebhook http.Handler,
 	institutionHandler *institution.Handler,
 	interactionHandler *interaction.Handler,
+	notificationsHandler *notifications.Handler,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -121,6 +123,14 @@ func BuildRouter(
 				g.Use(appmw.CSRFProtection(cfg.CORSAllowedOrigins))
 				g.Use(appmw.RequireAuth(authService))
 				institutionHandler.RegisterRoutes(g)
+			})
+		}
+
+		if notificationsHandler != nil && authService != nil {
+			api.Group(func(g chi.Router) {
+				g.Use(appmw.CSRFProtection(cfg.CORSAllowedOrigins))
+				g.Use(appmw.RequireAuth(authService))
+				notificationsHandler.RegisterRoutes(g)
 			})
 		}
 

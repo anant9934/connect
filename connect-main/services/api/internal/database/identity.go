@@ -17,7 +17,7 @@ const (
 )
 
 // RequiredMigration is the newest migration this build needs. Update it with each migration.
-const RequiredMigration = "000021_polls_quizzes_doubts"
+const RequiredMigration = "000022_notifications"
 
 // rlsExemptTables holds no tenant or user data.
 var rlsExemptTables = map[string]bool{"schema_metadata": true}
@@ -44,6 +44,7 @@ var rolePermissions = map[string]struct {
 			"connect_auth.room_by_code(text)",
 			"connect_auth.resolve_room_access(text,text)",
 			"connect_auth.enqueue_job(text,text,jsonb)",
+			"connect_auth.enqueue_job_at(text,text,jsonb,timestamp with time zone)",
 			"connect_auth.transfer_room_host(uuid,text)",
 		},
 		emptyWithoutContext: []string{"users", "sessions", "rooms", "room_participants", "background_jobs", "security_audit_events", "organizations"},

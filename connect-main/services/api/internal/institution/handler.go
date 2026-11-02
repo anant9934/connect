@@ -7,6 +7,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"github.com/tathastu/connect/services/api/internal/middleware"
 	"github.com/tathastu/connect/services/api/internal/model"
 	"github.com/tathastu/connect/services/api/internal/room"
+	"github.com/tathastu/connect/services/api/internal/worker"
 )
 
 // Handler serves the institution routes.
@@ -511,6 +513,32 @@ func (h *Handler) dropEnrollment(w http.ResponseWriter, r *http.Request) {
 
 // --- Class sessions ---
 
+// enqueueSessionNotice queues a notice in the same transaction as the change, so a rolled-back
+// change never notifies anyone and a committed one always does.
+func enqueueSessionNotice(ctx context.Context, tx pgx.Tx, sessionID, event string, startsAt time.Time, count int) error {
+	data, err := json.Marshal(worker.NotifySessionData{SessionID: sessionID, Event: event, StartsAt: startsAt.UTC(), Count: count})
+	if err != nil {
+		return err
+	}
+	key := fmt.Sprintf("notify-session-%s-%s-%d", sessionID, event, startsAt.Unix())
+	return worker.EnqueueJobWriteOnly(ctx, tx, worker.QueueDefault, key, worker.JobPayload{Type: worker.TypeNotifySession, Data: data, CreatedAt: time.Now().UTC()})
+}
+
+// enqueueReminder schedules a reminder. The job checks the start time again when it runs, so one
+// left behind by a reschedule does nothing.
+func enqueueReminder(ctx context.Context, tx pgx.Tx, sessionID string, startsAt time.Time) error {
+	data, err := json.Marshal(worker.NotifySessionData{SessionID: sessionID, Event: worker.NotifySessionReminder, StartsAt: startsAt.UTC()})
+	if err != nil {
+		return err
+	}
+	at := startsAt.Add(-worker.ReminderLead)
+	if now := time.Now(); at.Before(now) {
+		at = now
+	}
+	key := fmt.Sprintf("notify-session-%s-%s-%d", sessionID, worker.NotifySessionReminder, startsAt.Unix())
+	return worker.EnqueueJobWriteOnlyAt(ctx, tx, worker.QueueDefault, key, worker.JobPayload{Type: worker.TypeNotifySession, Data: data, CreatedAt: time.Now().UTC()}, at)
+}
+
 const sessionColumns = `cs.id, cs.course_id AS "courseId", cs.batch_id AS "batchId", cs.faculty_allocation_id AS "facultyAllocationId",
 	cs.series_id AS "seriesId", cs.title, cs.scheduled_start AS "scheduledStart", cs.scheduled_end AS "scheduledEnd", cs.time_zone AS "timeZone", cs.status,
 	(SELECT r.public_code FROM rooms r WHERE r.class_session_id = cs.id LIMIT 1) AS "roomCode"`
@@ -586,7 +614,14 @@ func (h *Handler) createSessions(w http.ResponseWriter, r *http.Request) {
 			if _, err := tx.Exec(r.Context(), `SELECT connect_auth.create_session_room($1::UUID, $2)`, id, code); err != nil {
 				return err
 			}
+			if err := enqueueReminder(r.Context(), tx, id, o.Start); err != nil {
+				return err
+			}
 			ids = append(ids, id)
+		}
+		// One notice for a whole series, not one per class.
+		if err := enqueueSessionNotice(r.Context(), tx, ids[0], worker.NotifySessionScheduled, occurrences[0].Start, len(ids)); err != nil {
+			return err
 		}
 		var qErr error
 		raw, qErr = queryJSON(r.Context(), tx, `SELECT `+sessionColumns+` FROM class_sessions cs WHERE cs.id = ANY($1::uuid[]) ORDER BY cs.scheduled_start`, ids)
@@ -653,6 +688,12 @@ func (h *Handler) rescheduleSession(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(r.Context(), `SELECT connect_auth.sync_session_room($1::UUID)`, id); err != nil {
 			return err
 		}
+		if err := enqueueSessionNotice(r.Context(), tx, id, worker.NotifySessionRescheduled, req.Start, 0); err != nil {
+			return err
+		}
+		if err := enqueueReminder(r.Context(), tx, id, req.Start); err != nil {
+			return err
+		}
 		var qErr error
 		raw, qErr = insertJSON(r.Context(), tx, `SELECT `+sessionColumns+` FROM class_sessions cs WHERE cs.id = $1`, id)
 		return qErr
@@ -697,6 +738,9 @@ func (h *Handler) cancelSession(w http.ResponseWriter, r *http.Request) {
 				return errNotPermitted
 			}
 			if _, err := tx.Exec(r.Context(), `SELECT connect_auth.sync_session_room($1::UUID)`, sessionID); err != nil {
+				return err
+			}
+			if err := enqueueSessionNotice(r.Context(), tx, sessionID, worker.NotifySessionCancelled, time.Now(), 0); err != nil {
 				return err
 			}
 		}
@@ -823,7 +867,19 @@ func (h *Handler) overruleAttendance(w http.ResponseWriter, r *http.Request) {
 			INSERT INTO attendance_overrule_audit_log (organization_id, attendance_record_id, class_session_id, student_user_id, prior_status, new_status, prior_connected_seconds, new_connected_seconds, overruled_by, overrule_reason)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9)
 		`, org, recordID, session, student, prior, req.Status, seconds, auth.UserID, req.Reason)
-		return err
+		if err != nil {
+			return err
+		}
+		key := fmt.Sprintf("attendance:%s:%d", recordID, time.Now().UnixNano())
+		data, err := json.Marshal(worker.NotifyUserData{
+			UserID: student, OrganizationID: org, Kind: "attendance_corrected",
+			Title: "Your attendance was corrected", Body: "Your attendance for a class is now marked " + req.Status + ".",
+			Link: "/institution", DedupeKey: key,
+		})
+		if err != nil {
+			return err
+		}
+		return worker.EnqueueJobWriteOnly(r.Context(), tx, worker.QueueDefault, "notify-user-"+key, worker.JobPayload{Type: worker.TypeNotifyUser, Data: data, CreatedAt: time.Now().UTC()})
 	})
 	if err != nil {
 		sendError(w, r, err)
