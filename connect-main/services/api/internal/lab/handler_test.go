@@ -246,3 +246,32 @@ func TestHandler_DeadlineAndLanguageEnforcementLogic(t *testing.T) {
 		t.Errorf("expected cpp to NOT be allowed when restricted to python, javascript")
 	}
 }
+
+func TestHandler_GradeSubmissionValidation(t *testing.T) {
+	h := &Handler{}
+
+	t.Run("fails on invalid submission id", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/test/lab/submissions/not-a-uuid/grade", nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "not-a-uuid")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		rec := httptest.NewRecorder()
+		h.gradeSubmission(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", rec.Code)
+		}
+	})
+
+	t.Run("fails on invalid body json", func(t *testing.T) {
+		subID := uuid.NewString()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/test/lab/submissions/"+subID+"/grade", strings.NewReader("bad-json"))
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", subID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		rec := httptest.NewRecorder()
+		h.gradeSubmission(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", rec.Code)
+		}
+	})
+}

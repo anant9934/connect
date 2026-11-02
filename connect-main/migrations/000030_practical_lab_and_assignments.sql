@@ -444,18 +444,14 @@ CREATE POLICY rls_lab_submissions_update ON lab_submissions
     AS PERMISSIVE FOR UPDATE
     USING (
         connect_auth.is_super_admin() OR (
-            organization_id = connect_auth.current_org_id() AND (
-                student_user_id = connect_auth.current_user_id() OR
-                connect_auth.current_role() IN ('institution_admin', 'department_coordinator', 'faculty')
-            )
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'department_coordinator', 'faculty')
         )
     )
     WITH CHECK (
         connect_auth.is_super_admin() OR (
-            organization_id = connect_auth.current_org_id() AND (
-                student_user_id = connect_auth.current_user_id() OR
-                connect_auth.current_role() IN ('institution_admin', 'department_coordinator', 'faculty')
-            )
+            organization_id = connect_auth.current_org_id() AND
+            connect_auth.current_role() IN ('institution_admin', 'department_coordinator', 'faculty')
         )
     );
 

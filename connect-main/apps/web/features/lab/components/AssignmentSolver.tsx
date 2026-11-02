@@ -171,7 +171,7 @@ export const AssignmentSolver: React.FC<AssignmentSolverProps> = ({ assignment, 
             <span className="px-3 py-1 text-xs font-semibold rounded-full bg-[#E4F8EB] text-[#1F6B3B]">
               {assignment.max_score} Marks
             </span>
-            <span className="px-3 py-1 text-xs font-medium rounded-full bg-[#F1EBFF] text-[#7444E8] flex items-center gap-1">
+            <span className="px-3 py-1 text-xs font-medium rounded-full bg-[#F1EBFF] text-[#7444E8] flex items-center gap-1" suppressHydrationWarning>
               <Clock className="w-3 h-3" /> Due: {new Date(assignment.due_at).toLocaleDateString()}
             </span>
           </div>
@@ -182,14 +182,25 @@ export const AssignmentSolver: React.FC<AssignmentSolverProps> = ({ assignment, 
 
         {/* Score Badge if submitted */}
         {submissionOutcome && (
-          <div className="p-4 rounded-2xl bg-[#FAF9FC] border border-[#E4E2DB] shrink-0 text-center min-w-[160px]">
-            <div className="text-xs font-semibold text-[#5E5A50]">Graded Score</div>
+          <div className="p-4 rounded-2xl bg-[#FAF9FC] border border-[#E4E2DB] shrink-0 text-center min-w-[180px]">
+            <div className="text-xs font-semibold text-[#5E5A50]">
+              {submissionOutcome.status === 'graded' ? 'Official Grade' : 'Status: Pending Faculty Review'}
+            </div>
             <div className="text-3xl font-extrabold text-[#7444E8]">
-              {submissionOutcome.score} / {assignment.max_score}
+              {submissionOutcome.status === 'graded'
+                ? `${submissionOutcome.score} / ${assignment.max_score}`
+                : 'Pending'}
             </div>
-            <div className="text-[11px] font-bold text-[#2DBE74] mt-1">
-              {submissionOutcome.passedCount} of {submissionOutcome.totalCount} Tests Passed
+            <div className="text-[11px] font-bold text-[#5E5A50] mt-1">
+              {submissionOutcome.status === 'graded'
+                ? `${submissionOutcome.passedCount} of ${submissionOutcome.totalCount} Verified`
+                : `${submissionOutcome.passedCount} of ${submissionOutcome.totalCount} Self-Checks Passed`}
             </div>
+            {assignment.user_submission?.faculty_feedback && (
+              <div className="mt-2 text-left text-xs bg-[#FFFFFF] p-2 rounded-xl border border-[#E4E2DB] text-[#17151F]">
+                <span className="font-bold text-[#7444E8]">Faculty Feedback:</span> {assignment.user_submission.faculty_feedback}
+              </div>
+            )}
           </div>
         )}
       </div>

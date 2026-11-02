@@ -53,8 +53,8 @@ func EvaluateSubmissionAgainstTestCases(
 		totalWeight += weight
 
 		tcIDStr := tc.ID.String()
-		actualOut := outputs[tcIDStr]
-		errOut := errors[tcIDStr]
+		actualOut, hasOut := outputs[tcIDStr]
+		errOut, hasErr := errors[tcIDStr]
 		dur := durations[tcIDStr]
 		if dur == 0 {
 			dur = 5 // default nominal execution ms
@@ -63,9 +63,11 @@ func EvaluateSubmissionAgainstTestCases(
 		passed := false
 		var errMsg string
 
-		if errOut != "" {
+		if !hasOut && !hasErr {
+			errMsg = "No execution output provided for test case"
+		} else if errOut != "" {
 			errMsg = errOut
-		} else if CompareOutputs(actualOut, tc.ExpectedOutput) {
+		} else if hasOut && CompareOutputs(actualOut, tc.ExpectedOutput) {
 			passed = true
 			passedCount++
 			passedWeight += weight

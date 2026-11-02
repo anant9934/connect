@@ -30,7 +30,7 @@ export default function FacultyPortalPage() {
           { test_case_id: 'tc-3', passed: true, execution_time_ms: 4, is_hidden: true },
         ],
         faculty_feedback: 'Clean solution with zero memory leaks.',
-        created_at: new Date().toISOString(),
+        created_at: '2026-11-02T10:00:00.000Z',
       },
       {
         id: 'sub-02',
@@ -52,7 +52,7 @@ export default function FacultyPortalPage() {
           { test_case_id: 'tc-3', passed: true, execution_time_ms: 7, is_hidden: true },
         ],
         faculty_feedback: 'Great use of Pythonic syntax.',
-        created_at: new Date(Date.now() - 3600000).toISOString(),
+        created_at: '2026-11-02T09:00:00.000Z',
       },
       {
         id: 'sub-03',
@@ -74,7 +74,7 @@ export default function FacultyPortalPage() {
           { test_case_id: 'tc-3', passed: false, execution_time_ms: 4, is_hidden: true },
         ],
         faculty_feedback: '',
-        created_at: new Date(Date.now() - 7200000).toISOString(),
+        created_at: '2026-11-02T08:00:00.000Z',
       },
     ],
     course_stats: [],

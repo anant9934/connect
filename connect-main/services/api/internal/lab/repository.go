@@ -480,6 +480,35 @@ func (r *Repository) ListSubmissions(ctx context.Context, tx pgx.Tx, orgID uuid.
 	return submissions, nil
 }
 
+// GetSubmission retrieves a single submission by its id within an organization.
+func (r *Repository) GetSubmission(ctx context.Context, tx pgx.Tx, orgID, subID uuid.UUID) (*LabSubmission, error) {
+	query := `
+		SELECT
+			id, organization_id, assignment_id, exercise_id, student_user_id,
+			language, source_code, status, score, passed_count, total_count,
+			execution_duration_ms, stdout, stderr, test_results, faculty_feedback,
+			graded_by_user_id, graded_at, created_at
+		FROM lab_submissions
+		WHERE organization_id = $1 AND id = $2;
+	`
+	var s LabSubmission
+	var resultsRaw []byte
+	err := tx.QueryRow(ctx, query, orgID, subID).Scan(
+		&s.ID, &s.OrganizationID, &s.AssignmentID, &s.ExerciseID, &s.StudentUserID,
+		&s.Language, &s.SourceCode, &s.Status, &s.Score, &s.PassedCount, &s.TotalCount,
+		&s.ExecutionDurationMS, &s.Stdout, &s.Stderr, &resultsRaw, &s.FacultyFeedback,
+		&s.GradedByUserID, &s.GradedAt, &s.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get submission: %w", err)
+	}
+	_ = json.Unmarshal(resultsRaw, &s.TestResults)
+	return &s, nil
+}
+
 // UpdateSubmissionGrade allows an instructor to override the score and leave comments.
 func (r *Repository) UpdateSubmissionGrade(ctx context.Context, tx pgx.Tx, orgID, subID, graderID uuid.UUID, score int, feedback string) error {
 	query := `
@@ -493,6 +522,32 @@ func (r *Repository) UpdateSubmissionGrade(ctx context.Context, tx pgx.Tx, orgID
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("submission not found")
+	}
+	return nil
+}
+
+// RecalculateStudentCoursePoints safely recalculates student points based on MAX(score) of graded submissions.
+func (r *Repository) RecalculateStudentCoursePoints(ctx context.Context, tx pgx.Tx, orgID, labCourseID, studentID uuid.UUID) error {
+	query := `
+		UPDATE lab_student_progress
+		SET total_points = COALESCE((
+			SELECT SUM(best_score) FROM (
+				SELECT MAX(score) as best_score
+				FROM lab_submissions s
+				JOIN lab_assignments a ON a.id = s.assignment_id
+				WHERE s.organization_id = $1
+				  AND s.student_user_id = $2
+				  AND s.status = 'graded'
+				  AND a.lab_course_id = $3
+				GROUP BY s.assignment_id
+			) best
+		), 0),
+		last_activity_at = clock_timestamp()
+		WHERE organization_id = $1 AND lab_course_id = $3 AND student_user_id = $2;
+	`
+	_, err := tx.Exec(ctx, query, orgID, studentID, labCourseID)
+	if err != nil {
+		return fmt.Errorf("failed to recalculate student course points: %w", err)
 	}
 	return nil
 }
@@ -550,7 +605,11 @@ func (r *Repository) RecordStudentActivity(ctx context.Context, tx pgx.Tx, orgID
 		)
 		ON CONFLICT (organization_id, lab_course_id, student_user_id) DO UPDATE SET
 			exercises_completed = lab_student_progress.exercises_completed + EXCLUDED.exercises_completed,
-			assignments_submitted = lab_student_progress.assignments_submitted + EXCLUDED.assignments_submitted,
+			assignments_submitted = (
+				SELECT count(DISTINCT assignment_id)
+				FROM lab_submissions
+				WHERE organization_id = $1 AND student_user_id = $3 AND assignment_id IS NOT NULL
+			),
 			total_points = lab_student_progress.total_points + EXCLUDED.total_points,
 			current_streak_days = CASE
 				WHEN DATE(lab_student_progress.last_activity_at) = CURRENT_DATE THEN lab_student_progress.current_streak_days

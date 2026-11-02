@@ -126,6 +126,20 @@ func TestEvaluateSubmissionAgainstTestCases(t *testing.T) {
 	if status3 != "pending" || score3 != 0 || passed3 != 0 || total3 != 3 {
 		t.Errorf("expected status 'pending' for blocked execution, got status=%s, score=%d", status3, score3)
 	}
+
+	// Case 4: Omitted test case output does NOT pass even if expected output is empty string
+	emptyExpectedTC := LabTestCase{
+		ID:             uuid.New(),
+		Input:          "",
+		ExpectedOutput: "",
+		Weight:         1,
+	}
+	score4, passed4, _, status4, _ := EvaluateSubmissionAgainstTestCases(
+		[]LabTestCase{emptyExpectedTC}, map[string]string{}, nil, nil, 100, true,
+	)
+	if passed4 != 0 || score4 != 0 || status4 != "failed" {
+		t.Errorf("expected omitted output to not pass empty expected output, got passed=%d, score=%d", passed4, score4)
+	}
 }
 
 func TestComputeStreak(t *testing.T) {

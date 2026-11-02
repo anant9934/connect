@@ -736,7 +736,7 @@ func TestWorkflowDB_APITenantIsolation(t *testing.T) {
 		// 5. Cross-tenant isolation: Student B from Org B cannot access Org A's assignment
 		api.want("cross tenant cannot access assignment", http.StatusForbidden, http.MethodGet, labPath(orgA)+"/assignments/"+assignID, studentB, nil)
 
-		// 6. Student A submits valid solution
+		// 6. Student A submits solution: must be queued as 'pending' with 0 score (non-authoritative client execution)
 		subRes := api.want("student submits solution", http.StatusOK, http.MethodPost, labPath(orgA)+"/assignments/"+assignID+"/submit", studentA, map[string]any{
 			"language":    "python",
 			"source_code": "def reverse(a): return a[::-1]",
@@ -747,6 +747,12 @@ func TestWorkflowDB_APITenantIsolation(t *testing.T) {
 		if subID == "" {
 			t.Fatalf("no submission id returned: %v", subRes)
 		}
+		if subObj["status"] != "pending" {
+			t.Errorf("expected submission status to be 'pending', got %v", subObj["status"])
+		}
+		if subScore, _ := subObj["score"].(float64); subScore != 0 {
+			t.Errorf("expected initial submission score to be 0, got %v", subScore)
+		}
 
 		// 7. Student A cannot grade their own submission (403)
 		api.want("student cannot grade submission", http.StatusForbidden, http.MethodPost, labPath(orgA)+"/submissions/"+subID+"/grade", studentA, map[string]any{
@@ -754,7 +760,17 @@ func TestWorkflowDB_APITenantIsolation(t *testing.T) {
 			"feedback": "Self awarded grade",
 		})
 
-		// 8. Faculty A grades submission
+		// 7b. Faculty cannot grade with out-of-bounds score (exceeding max_score 100 or negative)
+		api.want("faculty cannot exceed max score", http.StatusBadRequest, http.MethodPost, labPath(orgA)+"/submissions/"+subID+"/grade", facultyA, map[string]any{
+			"score":    150,
+			"feedback": "Invalid score above max",
+		})
+		api.want("faculty cannot submit negative score", http.StatusBadRequest, http.MethodPost, labPath(orgA)+"/submissions/"+subID+"/grade", facultyA, map[string]any{
+			"score":    -10,
+			"feedback": "Invalid negative score",
+		})
+
+		// 8. Faculty A grades submission within valid bounds (0..100)
 		api.want("faculty grades submission", http.StatusOK, http.MethodPost, labPath(orgA)+"/submissions/"+subID+"/grade", facultyA, map[string]any{
 			"score":    95,
 			"feedback": "Excellent clean implementation",

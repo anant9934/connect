@@ -385,7 +385,11 @@ func (h *Handler) submitAssignment(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		score, passedCount, totalCount, status, results := EvaluateSubmissionAgainstTestCases(
+		// In zero-trust architecture without server-side isolated microVM runners:
+		// Client-reported execution outputs are non-authoritative preview telemetry.
+		// Assignment submissions are queued in status 'pending' with official score 0
+		// until an authorized faculty member evaluates and assigns the grade.
+		_, passedCount, totalCount, _, results := EvaluateSubmissionAgainstTestCases(
 			testCases, req.Outputs, req.Errors, req.Durations, assignment.MaxScore, isStudent,
 		)
 
@@ -396,8 +400,8 @@ func (h *Handler) submitAssignment(w http.ResponseWriter, r *http.Request) {
 			StudentUserID:       studentID,
 			Language:            req.Language,
 			SourceCode:          req.SourceCode,
-			Status:              status,
-			Score:               score,
+			Status:              "pending",
+			Score:               0,
 			PassedCount:         passedCount,
 			TotalCount:          totalCount,
 			ExecutionDurationMS: req.ExecutionTimeMS,
@@ -410,13 +414,14 @@ func (h *Handler) submitAssignment(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		// Record student progress
-		_ = h.repo.RecordStudentActivity(r.Context(), tx, orgID, assignment.LabCourseID, studentID, score, true, false)
+		// Record student activity: 0 points awarded until faculty reviews and grades
+		_ = h.repo.RecordStudentActivity(r.Context(), tx, orgID, assignment.LabCourseID, studentID, 0, true, false)
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"submission": sub,
-			"score":      score,
-			"status":     status,
+			"score":      0,
+			"status":     "pending",
+			"message":    "Submission successfully queued for faculty review. Automated test results are preliminary self-checks.",
 		})
 		return nil
 	})
@@ -544,10 +549,56 @@ func (h *Handler) gradeSubmission(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return errors.New("invalid user id")
 		}
+
+		sub, err := h.repo.GetSubmission(r.Context(), tx, orgID, subID)
+		if err != nil || sub == nil {
+			writeError(w, http.StatusNotFound, "submission not found")
+			return nil
+		}
+
+		// Enforce score bounds against assignment max score
+		var courseID uuid.UUID
+		if sub.AssignmentID != nil {
+			assignment, err := h.repo.GetLabAssignment(r.Context(), tx, orgID, *sub.AssignmentID, false, uuid.Nil)
+			if err != nil || assignment == nil {
+				writeError(w, http.StatusNotFound, "associated assignment not found")
+				return nil
+			}
+			if req.Score < 0 || req.Score > assignment.MaxScore {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("score must be between 0 and %d", assignment.MaxScore))
+				return nil
+			}
+			courseID = assignment.LabCourseID
+		} else if req.Score < 0 {
+			writeError(w, http.StatusBadRequest, "score cannot be negative")
+			return nil
+		}
+
 		if err := h.repo.UpdateSubmissionGrade(r.Context(), tx, orgID, subID, graderID, req.Score, req.Feedback); err != nil {
 			return err
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"success": true})
+
+		// Recalculate student course progress points using MAX(score) of graded submissions
+		if courseID != uuid.Nil {
+			_ = h.repo.RecalculateStudentCoursePoints(r.Context(), tx, orgID, courseID, sub.StudentUserID)
+		}
+
+		// Audit faculty grading action
+		if h.audit != nil {
+			h.audit.Record(r.Context(), audit.AuditParams{
+				EventType: audit.EventType("lab.submission.graded"),
+				Severity:  "INFO",
+				ActorID:   graderID.String(),
+				Metadata: map[string]any{
+					"organization_id": orgID.String(),
+					"submission_id":   subID.String(),
+					"student_id":      sub.StudentUserID.String(),
+					"score":           req.Score,
+				},
+			})
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"success": true, "score": req.Score, "status": "graded"})
 		return nil
 	})
 	if err != nil {

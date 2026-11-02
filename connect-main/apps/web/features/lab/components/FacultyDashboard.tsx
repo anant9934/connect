@@ -126,8 +126,8 @@ export const FacultyDashboard: React.FC<FacultyDashboardProps> = ({ overview, or
                     <td className="px-4 py-3 font-bold text-[#17151F]">
                       {sub.score} marks ({sub.passed_count}/{sub.total_count} tests)
                     </td>
-                    <td className="px-4 py-3 text-[#5E5A50]">
-                      {new Date(sub.created_at || Date.now()).toLocaleDateString()}
+                    <td className="px-4 py-3 text-[#5E5A50]" suppressHydrationWarning>
+                      {new Date(sub.created_at || '2026-11-02T12:00:00.000Z').toLocaleDateString()}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button
