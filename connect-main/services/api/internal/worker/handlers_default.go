@@ -388,8 +388,12 @@ func loadAttendancePolicy(ctx context.Context, pool *pgxpool.Pool, orgID string)
 // loadRoomSignals reads what each signed-in person did in the room, for the attendance score.
 func loadRoomSignals(ctx context.Context, pool *pgxpool.Pool, roomID string) (map[string]attendance.Signals, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT user_id::text, (messages + reactions + hands + poll_answers + doubts)::int, visible_seconds, hidden_seconds, reported
-		FROM connect_auth.room_signals($1::uuid)
+		SELECT s.user_id::text, sum(s.messages + s.reactions + s.hands + s.poll_answers + s.doubts)::int,
+		       sum(s.visible_seconds)::int, sum(s.hidden_seconds)::int, bool_or(s.reported)
+		FROM rooms family
+		CROSS JOIN LATERAL connect_auth.room_signals(family.id) s
+		WHERE family.id = $1::uuid OR family.parent_room_id = $1::uuid
+		GROUP BY s.user_id
 	`, roomID)
 	if err != nil {
 		return nil, err
@@ -437,7 +441,7 @@ func loadConnectionIntervals(ctx context.Context, pool *pgxpool.Pool, roomID str
 	intervals, err := collect(`
 		SELECT user_id::text, joined_at, left_at
 		FROM participant_media_sessions
-		WHERE room_id = $1 AND user_id IS NOT NULL
+		WHERE user_id IS NOT NULL AND room_id IN (SELECT id FROM rooms WHERE id = $1 OR parent_room_id = $1)
 	`)
 	if err != nil || len(intervals) > 0 {
 		return intervals, err
@@ -445,7 +449,7 @@ func loadConnectionIntervals(ctx context.Context, pool *pgxpool.Pool, roomID str
 	return collect(`
 		SELECT user_id::text, joined_at, left_at
 		FROM room_participants
-		WHERE room_id = $1 AND user_id IS NOT NULL
+		WHERE user_id IS NOT NULL AND room_id IN (SELECT id FROM rooms WHERE id = $1 OR parent_room_id = $1)
 	`)
 }
 
@@ -536,5 +540,6 @@ func RegisterDefaultHandlers(r *Registry, pool *pgxpool.Pool, storage StorageDel
 	r.RegisterFunc(TypeFilePurge, NewFilePurgeHandler(storage, logger))
 	r.RegisterFunc(TypeRoomHostSuccession, NewHostSuccessionHandler(pool, logger))
 	r.RegisterFunc(TypeNotifySession, NewNotifySessionHandler(pool, logger))
+	r.RegisterFunc(TypeNotifyRoomReminder, NewNotifyRoomReminderHandler(pool, logger))
 	r.RegisterFunc(TypeNotifyUser, NewNotifyUserHandler(pool))
 }

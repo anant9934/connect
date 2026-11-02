@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Calendar, Check, Copy, Loader2, Lock } from 'lucide-react';
 import { getSession } from '@/features/auth/api';
+import { meetingCalendarUrl } from '@/features/rooms/meetings';
 import { cancelMeeting, getUpcomingMeetings, scheduleMeeting } from '@/features/rooms/api';
 import { Room } from '@/features/rooms/types';
 import { ApiError } from '@/lib/api/client';
@@ -177,6 +178,9 @@ export default function SchedulePage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Link href={`/room/${room.publicCode}/preview`} className="px-3 py-2 rounded-xl bg-[#7258E8] text-white text-xs font-semibold min-h-[44px] inline-flex items-center">Start</Link>
+                  <a href={meetingCalendarUrl(room.id)} download className="px-3 py-2 rounded-xl border border-[#E9E9E5] text-xs font-semibold text-[#171717] inline-flex items-center min-h-[44px]">
+                    Add to calendar
+                  </a>
                   <button type="button" onClick={() => handleCopy(room.publicCode)} className="px-3 py-2 rounded-xl border border-[#E9E9E5] text-xs font-semibold text-[#171717] min-h-[44px] inline-flex items-center gap-1.5">
                     {copiedCode === room.publicCode ? <Check className="w-3.5 h-3.5" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5" aria-hidden="true" />}
                     {copiedCode === room.publicCode ? 'Copied' : 'Copy link'}

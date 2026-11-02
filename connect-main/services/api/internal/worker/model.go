@@ -40,6 +40,7 @@ const (
 	TypeRoomHostSuccession  = "room.host_succession"
 	TypeNotifySession       = "notify.session"
 	TypeNotifyUser          = "notify.user"
+	TypeNotifyRoomReminder  = "notify.room_reminder"
 )
 
 // Job represents a durable background task stored in the outbox.

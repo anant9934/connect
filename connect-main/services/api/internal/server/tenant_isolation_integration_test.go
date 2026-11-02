@@ -142,7 +142,7 @@ func newRuntimeRouter(t *testing.T, app *pgxpool.Pool, configure func(*auth.Serv
 		institution.NewHandler(app, auditService),
 		interaction.NewHandler(app, roomService, limiter, auditService),
 		notifications.NewHandler(app),
-		meetings.NewHandler(app))
+		meetings.NewHandler(app, "http://localhost:3000"))
 }
 
 // TestWorkflowDB_APITenantIsolation runs the full router with every module on connect_app,

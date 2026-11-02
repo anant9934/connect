@@ -33,18 +33,21 @@ var (
 
 // Handler serves the routes.
 type Handler struct {
-	pool *pgxpool.Pool
+	pool         *pgxpool.Pool
+	publicOrigin string
 }
 
 // NewHandler constructs the handler.
-func NewHandler(pool *pgxpool.Pool) *Handler {
-	return &Handler{pool: pool}
+func NewHandler(pool *pgxpool.Pool, publicOrigin string) *Handler {
+	return &Handler{pool: pool, publicOrigin: publicOrigin}
 }
 
 // RegisterRoutes mounts the routes. The caller applies session authentication.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/meetings", h.search)
+	r.Get("/meetings/calendar.ics", h.calendarAll)
 	r.Get("/meetings/{id}", h.detail)
+	r.Get("/meetings/{id}/calendar.ics", h.calendar)
 }
 
 // Item is one row of search results.

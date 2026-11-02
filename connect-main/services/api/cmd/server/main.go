@@ -244,7 +244,7 @@ func main() {
 		institutionHandler = institution.NewHandler(db.Pool, auditService)
 		interactionHandler = interaction.NewHandler(db.Pool, roomService, limiter, auditService)
 		notificationsHandler = notifications.NewHandler(db.Pool)
-		meetingsHandler = meetings.NewHandler(db.Pool)
+		meetingsHandler = meetings.NewHandler(db.Pool, cfg.PublicAppOrigin)
 	}
 	router := server.BuildRouter(cfg, logger, limiter, healthHandler, systemHandler, assertionHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler, livekitWebhook, institutionHandler, interactionHandler, notificationsHandler, meetingsHandler)
 	srv := server.New(cfg, logger, router)

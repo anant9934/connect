@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import { ArrowLeft, Download, Loader2 } from 'lucide-react';
 import { ApiError } from '@/lib/api/client';
 import { AttendanceExplanation } from '@/components/attendance/AttendanceExplanation';
-import { getMeeting, MeetingDetail, MyAttendance } from '@/features/rooms/meetings';
+import { getMeeting, MeetingDetail, meetingCalendarUrl, MyAttendance } from '@/features/rooms/meetings';
 import { getNotes } from '@/features/notes/api';
 import { getDownloadUrl, listFiles } from '@/features/files/api';
 import { MeetingNote } from '@/features/notes/types';
@@ -95,11 +95,18 @@ export default function MeetingDetailPage() {
             {meeting.courseTitle ? ` · ${meeting.courseTitle}` : ''}
             {meeting.organizationName ? ` · ${meeting.organizationName}` : ''}
           </p>
-          {canOpen && (
-            <Link href={`/room/${meeting.publicCode}/preview`} className="inline-flex items-center px-4 rounded-xl bg-[#7258E8] text-white text-sm font-semibold min-h-[44px] mt-2">
-              Open meeting
-            </Link>
-          )}
+          <div className="flex flex-wrap gap-3 mt-2">
+            {canOpen && (
+              <Link href={`/room/${meeting.publicCode}/preview`} className="inline-flex items-center px-4 rounded-xl bg-[#7258E8] text-white text-sm font-semibold min-h-[44px]">
+                Open meeting
+              </Link>
+            )}
+            {meeting.status === 'scheduled' && (
+              <a href={meetingCalendarUrl(meeting.id)} download data-testid="calendar-one" className="inline-flex items-center px-4 rounded-xl border border-[#E9E9E5] text-sm font-semibold text-[#171717] min-h-[44px]">
+                Add to calendar
+              </a>
+            )}
+          </div>
         </header>
 
         {attendance && (

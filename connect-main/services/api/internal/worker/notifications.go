@@ -101,6 +101,61 @@ func NewNotifySessionHandler(pool *pgxpool.Pool, logger *slog.Logger) HandlerFun
 	}
 }
 
+// NotifyRoomReminderData names a personal meeting and the start this reminder was created for.
+type NotifyRoomReminderData struct {
+	RoomID   string    `json:"roomId"`
+	StartsAt time.Time `json:"startsAt"`
+}
+
+// NewNotifyRoomReminderHandler reminds a host of a personal meeting. The room is read again when
+// the job runs, so a reminder left behind by a reschedule or cancellation does nothing.
+func NewNotifyRoomReminderHandler(pool *pgxpool.Pool, logger *slog.Logger) HandlerFunc {
+	return func(ctx context.Context, job *Job) error {
+		payload, err := ParsePayload(job.Payload)
+		if err != nil {
+			return MarkPermanent(err)
+		}
+		var data NotifyRoomReminderData
+		if err := json.Unmarshal(payload.Data, &data); err != nil || data.RoomID == "" {
+			return MarkPermanent(fmt.Errorf("invalid room reminder payload: %w", err))
+		}
+		var host, code, status, zone string
+		var title *string
+		var start *time.Time
+		err = pool.QueryRow(ctx, `
+			SELECT host_user_id::text, public_code, title, status, COALESCE(time_zone, 'UTC'), scheduled_start FROM rooms WHERE id = $1
+		`, data.RoomID).Scan(&host, &code, &title, &status, &zone, &start)
+		if err == pgx.ErrNoRows {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("room lookup failed: %w", err)
+		}
+		if status != "scheduled" || start == nil || !start.Equal(data.StartsAt) {
+			logger.Info("room_reminder_skipped", slog.String("room_id", data.RoomID), slog.String("status", status))
+			return nil
+		}
+		name := "Meeting " + code
+		if title != nil && *title != "" {
+			name = *title
+		}
+		loc, err := time.LoadLocation(zone)
+		if err != nil {
+			loc = time.UTC
+		}
+		_, err = pool.Exec(ctx, `
+			INSERT INTO notifications (user_id, kind, title, body, link, dedupe_key)
+			VALUES ($1, 'meeting_reminder', 'Meeting starting soon', $2, $3, $4)
+			ON CONFLICT (user_id, dedupe_key) DO NOTHING
+		`, host, fmt.Sprintf("%s starts at %s.", name, start.In(loc).Format("Mon 2 Jan, 15:04 MST")), "/room/"+code+"/preview",
+			fmt.Sprintf("room:%s:reminder:%d", data.RoomID, data.StartsAt.Unix()))
+		if err != nil {
+			return fmt.Errorf("room reminder failed: %w", err)
+		}
+		return nil
+	}
+}
+
 // NewNotifyUserHandler delivers one person's notification.
 func NewNotifyUserHandler(pool *pgxpool.Pool) HandlerFunc {
 	return func(ctx context.Context, job *Job) error {

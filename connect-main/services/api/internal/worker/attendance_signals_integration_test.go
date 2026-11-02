@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tathastu/connect/services/api/internal/attendance"
 )
 
@@ -161,3 +165,67 @@ func TestWorkflowDB_AttendanceSignals(t *testing.T) {
 }
 
 func ptr(v float64) *float64 { return &v }
+
+// TestWorkflowDB_RoomReminder delivers a host's reminder as connect_worker, and does nothing for
+// a meeting that has moved or been cancelled.
+func TestWorkflowDB_RoomReminder(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	admin := workflowPool(t, ctx, "TEST_DATABASE_URL")
+	workerPool := workflowPool(t, ctx, "TEST_CONNECT_WORKER_URL")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := NewNotifyRoomReminderHandler(workerPool, logger)
+
+	host := uuid.NewString()
+	if _, err := admin.Exec(ctx, `INSERT INTO users (id, email_normalized, display_name, password_hash) VALUES ($1, $2, 'Host', 'x')`, host, host+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	var room string
+	if err := admin.QueryRow(ctx, `
+		INSERT INTO rooms (public_code, host_user_id, workspace_type, status, title, scheduled_start, scheduled_end, time_zone)
+		VALUES ($1, $2, 'personal_workspace', 'scheduled', 'Review', $3, $4, 'Asia/Kolkata') RETURNING id::text`,
+		"rem-"+host[:8], host, start, start.Add(time.Hour)).Scan(&room); err != nil {
+		t.Fatal(err)
+	}
+	run := func(startsAt time.Time) {
+		t.Helper()
+		data, _ := json.Marshal(NotifyRoomReminderData{RoomID: room, StartsAt: startsAt})
+		payload, _ := json.Marshal(JobPayload{Type: TypeNotifyRoomReminder, Data: data, CreatedAt: time.Now()})
+		if err := handler(ctx, &Job{ID: uuid.New(), Payload: payload}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := func() (n int) {
+		t.Helper()
+		if err := admin.QueryRow(ctx, `SELECT count(*) FROM notifications WHERE user_id = $1`, host).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	run(start.Add(-time.Hour))
+	if count() != 0 {
+		t.Error("a reminder for an old start was delivered")
+	}
+	run(start)
+	run(start)
+	if count() != 1 {
+		t.Errorf("expected one reminder after a retry, got %d", count())
+	}
+	var body string
+	if err := admin.QueryRow(ctx, `SELECT body FROM notifications WHERE user_id = $1`, host).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, "Review") || !strings.Contains(body, "IST") {
+		t.Errorf("body: %s", body)
+	}
+	moved := start.Add(2 * time.Hour)
+	if _, err := admin.Exec(ctx, `UPDATE rooms SET status = 'cancelled', scheduled_start = $2, scheduled_end = $3 WHERE id = $1`, room, moved, moved.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	run(moved)
+	if count() != 1 {
+		t.Error("a cancelled meeting sent a reminder")
+	}
+}

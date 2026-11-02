@@ -111,6 +111,15 @@ try {
   await host.select('#history-sort', 'newest');
   await host.waitForFunction(() => document.querySelector('[data-testid="meeting-row"]')?.innerText.includes('Beta'), { timeout: 15000, polling: 200 });
 
+  step('the host exports a scheduled meeting to a calendar');
+  const exported = await host.evaluate(async (url) => {
+    const res = await fetch(url, { credentials: 'include' });
+    return { status: res.status, type: res.headers.get('content-type'), text: await res.text() };
+  }, `${API_URL}/api/v1/meetings/${alpha.id}/calendar.ics`);
+  assert.equal(exported.status, 200);
+  assert.ok(exported.type.startsWith('text/calendar') && exported.text.includes(`${tag} Alpha`), exported.text.slice(0, 200));
+  assert.ok(await host.$('[data-testid="calendar-all"]'), 'export link is missing');
+
   step('phone width has no horizontal scroll');
   await host.setViewport({ width: 375, height: 800 });
   await new Promise((r) => setTimeout(r, 300));

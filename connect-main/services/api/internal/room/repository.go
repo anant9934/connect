@@ -122,6 +122,8 @@ type Repository interface {
 	IsParticipantRemoved(ctx context.Context, roomID, identity string) (bool, error)
 	GetMeetingHistory(ctx context.Context, userID string, limit, offset int) ([]*MeetingHistoryItem, int, error)
 	SetRoomStatus(ctx context.Context, roomID, status string) error
+	EnqueueRoomReminder(ctx context.Context, roomID string, start time.Time) error
+	ListBreakoutCodes(ctx context.Context, roomID string) ([]string, error)
 	UpdateRoomSchedule(ctx context.Context, roomID, title string, start, end time.Time, timeZone string) error
 	GetUpcomingRooms(ctx context.Context, hostUserID string, limit int) ([]*Room, error)
 	HasScheduleConflict(ctx context.Context, hostUserID, excludeRoomID string, start, end time.Time) (bool, error)
@@ -249,6 +251,37 @@ func (r *PgxRepository) SetRoomStatus(ctx context.Context, roomID, status string
 	return err
 }
 
+// EnqueueRoomReminder schedules the host's reminder. The key includes the start, so moving a
+// meeting schedules a new one and repeating the same time does not add another.
+func (r *PgxRepository) EnqueueRoomReminder(ctx context.Context, roomID string, start time.Time) error {
+	data, err := json.Marshal(worker.NotifyRoomReminderData{RoomID: roomID, StartsAt: start.UTC()})
+	if err != nil {
+		return err
+	}
+	at := start.Add(-worker.ReminderLead)
+	if now := time.Now(); at.Before(now) {
+		at = now
+	}
+	return r.inTx(ctx, roomID, func(tx pgx.Tx) error {
+		return worker.EnqueueJobWriteOnlyAt(ctx, tx, worker.QueueDefault, fmt.Sprintf("notify-room-%s-%d", roomID, start.Unix()),
+			worker.JobPayload{Type: worker.TypeNotifyRoomReminder, Data: data, CreatedAt: time.Now().UTC()}, at)
+	})
+}
+
+// ListBreakoutCodes returns the codes of a meeting's breakout rooms.
+func (r *PgxRepository) ListBreakoutCodes(ctx context.Context, roomID string) ([]string, error) {
+	var codes []string
+	err := r.inTx(ctx, roomID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT public_code FROM connect_auth.breakout_codes($1::UUID)`, roomID)
+		if err != nil {
+			return err
+		}
+		codes, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		return err
+	})
+	return codes, err
+}
+
 func (r *PgxRepository) UpdateRoomSchedule(ctx context.Context, roomID, title string, start, end time.Time, timeZone string) error {
 	_, err := r.exec(ctx, roomID, `
 		UPDATE rooms SET title = NULLIF($1, ''), scheduled_start = $2, scheduled_end = $3, time_zone = $4
@@ -371,6 +404,11 @@ func (r *PgxRepository) EndRoom(ctx context.Context, roomID string, endedAt time
 				return ErrRoomNotFound
 			}
 			return fmt.Errorf("failed to update room status: %w", err)
+		}
+
+		// Only a meeting that has just ended closes its breakouts, so this needs no second role check.
+		if _, err := tx.Exec(ctx, `SELECT connect_auth.breakout_close_ended($1::UUID)`, roomID); err != nil {
+			return fmt.Errorf("failed to close breakout rooms: %w", err)
 		}
 
 		var orgIDStr, classSessionIDStr string
@@ -984,6 +1022,16 @@ func (m *MemoryRepository) SetRoomStatus(_ context.Context, roomID, status strin
 		return ErrRoomNotFound
 	}
 	rm.Status = status
+	return nil
+}
+
+// ListBreakoutCodes has no breakouts in memory.
+func (m *MemoryRepository) ListBreakoutCodes(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
+// EnqueueRoomReminder has no queue to reach in memory.
+func (m *MemoryRepository) EnqueueRoomReminder(context.Context, string, time.Time) error {
 	return nil
 }
 

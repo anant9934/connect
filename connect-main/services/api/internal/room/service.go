@@ -235,6 +235,9 @@ func (s *Service) ScheduleRoom(ctx context.Context, host *auth.User, params Sche
 	if err := s.repo.CreateRoom(ctx, rm); err != nil {
 		return nil, fmt.Errorf("failed to persist scheduled room: %w", err)
 	}
+	if err := s.repo.EnqueueRoomReminder(ctx, rm.ID, start); err != nil {
+		return nil, fmt.Errorf("failed to schedule the reminder: %w", err)
+	}
 	if s.auditService != nil {
 		s.auditService.Record(ctx, audit.AuditParams{EventType: "room.scheduled", Severity: "INFO", ActorID: host.ID, RoomID: rm.ID, ClientIP: clientIP, RequestID: reqID})
 	}
@@ -266,6 +269,9 @@ func (s *Service) RescheduleRoom(ctx context.Context, code string, user *auth.Us
 	}
 	if err := s.repo.UpdateRoomSchedule(ctx, rm.ID, title, start.UTC(), end.UTC(), timeZone); err != nil {
 		return nil, err
+	}
+	if err := s.repo.EnqueueRoomReminder(ctx, rm.ID, start.UTC()); err != nil {
+		return nil, fmt.Errorf("failed to schedule the reminder: %w", err)
 	}
 	if s.auditService != nil {
 		s.auditService.Record(ctx, audit.AuditParams{EventType: "room.rescheduled", Severity: "INFO", ActorID: user.ID, RoomID: rm.ID, ClientIP: clientIP, RequestID: reqID})
@@ -813,6 +819,18 @@ func (s *Service) UnlockRoom(ctx context.Context, code string, user *auth.User, 
 	return nil
 }
 
+// TerminateLiveRooms disconnects everyone from rooms that have already ended in the database.
+// A failure leaves the rooms for the media server to time out once people drop off, which their
+// clients do on seeing the room has ended.
+func (s *Service) TerminateLiveRooms(ctx context.Context, codes []string) {
+	if s.roomManager == nil {
+		return
+	}
+	for _, code := range codes {
+		_ = s.roomManager.TerminateRoom(ctx, code)
+	}
+}
+
 // EndRoom closes the session permanently for all participants.
 func (s *Service) EndRoom(ctx context.Context, code string, user *auth.User, clientIP, reqID string) error {
 	normCode := NormalizeCode(code)
@@ -838,6 +856,9 @@ func (s *Service) EndRoom(ctx context.Context, code string, user *auth.User, cli
 	now := time.Now().UTC()
 	if err := s.repo.EndRoom(ctx, rm.ID, now); err != nil {
 		return err
+	}
+	if codes, err := s.repo.ListBreakoutCodes(ctx, rm.ID); err == nil {
+		s.TerminateLiveRooms(ctx, codes)
 	}
 
 	// Authoritatively terminate underlying LiveKit SFU room to immediately disconnect all participants

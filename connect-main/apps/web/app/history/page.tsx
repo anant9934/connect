@@ -6,7 +6,7 @@ import { ArrowLeft, Loader2, Search } from 'lucide-react';
 import { getSession } from '@/features/auth/api';
 import { User } from '@/features/auth/types';
 import { ApiError } from '@/lib/api/client';
-import { MeetingItem, searchMeetings } from '@/features/rooms/meetings';
+import { allMeetingsCalendarUrl, MeetingItem, searchMeetings } from '@/features/rooms/meetings';
 
 const PAGE_SIZE = 20;
 const SEARCH_DELAY_MS = 300;
@@ -131,9 +131,14 @@ export default function MeetingHistoryPage() {
           <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-[#686868] hover:text-[#171717] min-h-[44px]">
             <ArrowLeft className="w-4 h-4" aria-hidden="true" /> Home
           </Link>
-          <Link href="/schedule" className="text-sm font-semibold text-[#7258E8] underline inline-flex items-center min-h-[44px]">
-            Schedule a meeting
-          </Link>
+          <div className="flex flex-wrap gap-4">
+            <a href={allMeetingsCalendarUrl()} download data-testid="calendar-all" className="text-sm font-semibold text-[#7258E8] underline inline-flex items-center min-h-[44px]">
+              Export to calendar
+            </a>
+            <Link href="/schedule" className="text-sm font-semibold text-[#7258E8] underline inline-flex items-center min-h-[44px]">
+              Schedule a meeting
+            </Link>
+          </div>
         </div>
         <h1 className="text-xl font-bold text-[#171717]">Meeting history</h1>
 

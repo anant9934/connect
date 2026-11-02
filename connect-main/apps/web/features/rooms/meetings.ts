@@ -80,3 +80,7 @@ export async function searchMeetings(search: MeetingSearch) {
 
 export const getMeeting = async (id: string) =>
   apiFetch<{ meeting: MeetingDetail; attendance: MyAttendance | null }>(`/api/v1/meetings/${encodeURIComponent(id)}`, { method: 'GET' });
+
+const apiBase = () => process.env.NEXT_PUBLIC_API_URL || '';
+export const meetingCalendarUrl = (id: string) => `${apiBase()}/api/v1/meetings/${encodeURIComponent(id)}/calendar.ics`;
+export const allMeetingsCalendarUrl = () => `${apiBase()}/api/v1/meetings/calendar.ics`;

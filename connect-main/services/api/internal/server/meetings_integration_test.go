@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
@@ -291,6 +292,46 @@ func TestWorkflowDB_MeetingHistorySearch(t *testing.T) {
 		}
 		if rows, _ := search(otherAdmin, q("organization", orgA)); len(rows) != 0 {
 			t.Errorf("naming another organization revealed it: %v", rows)
+		}
+	})
+
+	t.Run("calendar export follows the same visibility", func(t *testing.T) {
+		get := func(who caller, path string) (int, string, string) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer "+who.token)
+			rec := httptest.NewRecorder()
+			api.router.ServeHTTP(rec, req)
+			return rec.Code, rec.Header().Get("Content-Type"), rec.Body.String()
+		}
+		code, kind, body := get(host, "/api/v1/meetings/"+alphaID+"/calendar.ics")
+		if code != http.StatusOK || !strings.HasPrefix(kind, "text/calendar") || !strings.Contains(strings.ReplaceAll(body, "\r\n ", ""), "SUMMARY:"+tag+" Alpha Algebra") {
+			t.Errorf("host export: %d %s %s", code, kind, body)
+		}
+		if !strings.Contains(body, "DTSTART:"+base.Format("20060102T150405Z")) {
+			t.Errorf("start: %s", body)
+		}
+		for _, who := range []caller{member, stranger} {
+			if code, _, _ := get(who, "/api/v1/meetings/"+alphaID+"/calendar.ics"); code != http.StatusNotFound {
+				t.Errorf("someone else exported it: %d", code)
+			}
+		}
+		if code, _, _ := get(caller{}, "/api/v1/meetings/calendar.ics"); code != http.StatusUnauthorized {
+			t.Errorf("anonymous: %d", code)
+		}
+		_, _, all := get(host, "/api/v1/meetings/calendar.ics")
+		if !strings.Contains(all, alphaID+"@connect") || strings.Contains(all, otherID+"@connect") {
+			t.Errorf("feed: %s", all)
+		}
+		// A cancelled meeting stays in the feed, so calendars can remove it.
+		_, gammaCode := schedule(host, tag+" Doomed", base.Add(9*time.Hour))
+		api.want("cancel", http.StatusOK, http.MethodPost, roomPath(gammaCode)+"/cancel", host, nil)
+		_, _, all = get(host, "/api/v1/meetings/calendar.ics")
+		if !strings.Contains(all, "STATUS:CANCELLED") {
+			t.Errorf("cancelled meeting missing: %s", all)
+		}
+		// Keeps the search count below unaffected.
+		if _, err := admin.Exec(ctx, `DELETE FROM rooms WHERE public_code = $1`, gammaCode); err != nil {
+			t.Fatal(err)
 		}
 	})
 
