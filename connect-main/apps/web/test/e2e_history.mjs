@@ -98,13 +98,17 @@ try {
   await host.select('#history-status', '');
   await waitForText(host, '2 meetings');
   const day = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+  step('a start date narrows the results');
   await setDate(host, '#history-from', day(15));
   await waitForOnlyRow(host, 'Beta');
+  step('a date range with nothing in it shows the empty state');
   await setDate(host, '#history-to', day(16));
   await waitForText(host, 'No meetings match this search');
-  await setDate(host, '#history-from', '');
-  await setDate(host, '#history-to', '');
-  await waitForText(host, '2 meetings');
+
+  step('clearing filters brings everything back');
+  await host.$$eval('button', (els) => els.find((b) => b.textContent.trim() === 'Clear filters').click());
+  await typeSearch(host, tag);
+  await host.waitForFunction(() => document.querySelectorAll('[data-testid="meeting-row"]').length === 2, { timeout: 15000, polling: 200 });
 
   step('sorting changes the order');
   await host.select('#history-sort', 'oldest');

@@ -119,7 +119,6 @@ try {
   await again.close();
 
   step('muting everyone silences a live microphone');
-  await member.waitForSelector('button[aria-label="Turn on microphone"], button[aria-label="Mute microphone"], button[aria-label="Turn off microphone"]', { timeout: 15000 });
   await member.evaluate(() => window.__livekitRoom.localParticipant.setMicrophoneEnabled(true));
   await member.waitForFunction(() => window.__livekitRoom.localParticipant.isMicrophoneEnabled, { timeout: 15000, polling: 200 });
   await host.waitForFunction(() => window.__tcDiagnostics.getRemoteTrackStats().some((p) => p.tracks.some((t) => t.kind === 'audio')), { timeout: 15000, polling: 200 });

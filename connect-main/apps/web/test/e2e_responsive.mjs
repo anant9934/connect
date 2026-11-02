@@ -39,12 +39,13 @@ const inspect = (page) => page.evaluate((minTarget) => {
   const small = [...document.querySelectorAll('a[href], button, input:not([type=hidden]), select')].filter((el) => {
     const rect = el.getBoundingClientRect();
     const style = getComputedStyle(el);
-    if (rect.width === 0 || rect.height === 0 || style.visibility === 'hidden') return false;
+    // Screen-reader-only controls such as the skip link are clipped to a pixel until focused.
+    if (rect.width <= 1 || rect.height <= 1 || style.visibility === 'hidden') return false;
     // Links inside running text are exempt, as WCAG 2.5.8 allows.
     if (el.tagName === 'A' && style.display === 'inline') return false;
     return Math.min(rect.width, rect.height) < minTarget && el.type !== 'checkbox' && el.type !== 'radio';
   });
-  if (small.length > 0) found.push(`${small.length} small targets, e.g. ${(small[0].innerText || small[0].getAttribute('aria-label') || small[0].tagName).trim().slice(0, 30)}`);
+  for (const el of small) found.push(`small target: ${(el.innerText || el.getAttribute('aria-label') || el.tagName).trim().slice(0, 30)}`);
   return found;
 }, MIN_TARGET);
 
@@ -81,7 +82,10 @@ try {
   for (const found of await inspect(home)) problems.push(`menu @375: ${found}`);
 
   if (problems.length > 0) {
-    console.log(`E2E FAIL responsive ${problems.length} problems: ${problems.slice(0, 12).join(' | ')}`);
+    // Layout breakage first, then each distinct small control once, so the report fits.
+    const serious = problems.filter((p) => !p.includes('small target'));
+    const small = [...new Set(problems.filter((p) => p.includes('small target')).map((p) => `${p.split(' ')[1]} ${p.split(': ').slice(1).join(': ')}`))];
+    console.log(`E2E FAIL responsive ${serious.length} serious: ${serious.slice(0, 15).join(' | ')} || ${small.length} small: ${small.slice(0, 30).join(' | ')}`);
     process.exitCode = 1;
   } else {
     console.log('E2E PASS responsive');

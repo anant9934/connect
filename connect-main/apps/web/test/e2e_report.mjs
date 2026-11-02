@@ -4,7 +4,8 @@ export async function describePages(browser) {
   for (const page of await browser.pages()) {
     if (page.url() === 'about:blank') continue;
     const text = await page.evaluate(() => document.body?.innerText ?? '').catch(() => '(page closed)');
-    lines.push(`PAGE ${page.url()} :: ${text.replace(/\s+/g, ' ').slice(0, 350)}`);
+    const fields = await page.$$eval('input:not([type=hidden]), select', (els) => els.filter((e) => e.id && e.value).map((e) => `${e.id}=${e.value}`).join(' ')).catch(() => '');
+    lines.push(`PAGE ${page.url()} :: ${text.replace(/\s+/g, ' ').slice(0, 350)} :: FIELDS ${fields.slice(0, 200)}`);
   }
   return lines;
 }
