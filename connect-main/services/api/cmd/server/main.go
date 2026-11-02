@@ -22,6 +22,7 @@ import (
 	"github.com/tathastu/connect/services/api/internal/interaction"
 	"github.com/tathastu/connect/services/api/internal/livekit"
 	"github.com/tathastu/connect/services/api/internal/meeting/p2p"
+	"github.com/tathastu/connect/services/api/internal/meetings"
 	"github.com/tathastu/connect/services/api/internal/notes"
 	"github.com/tathastu/connect/services/api/internal/notifications"
 	"github.com/tathastu/connect/services/api/internal/ratelimit"
@@ -238,12 +239,14 @@ func main() {
 	var institutionHandler *institution.Handler
 	var interactionHandler *interaction.Handler
 	var notificationsHandler *notifications.Handler
+	var meetingsHandler *meetings.Handler
 	if db != nil {
 		institutionHandler = institution.NewHandler(db.Pool, auditService)
 		interactionHandler = interaction.NewHandler(db.Pool, roomService, limiter, auditService)
 		notificationsHandler = notifications.NewHandler(db.Pool)
+		meetingsHandler = meetings.NewHandler(db.Pool)
 	}
-	router := server.BuildRouter(cfg, logger, limiter, healthHandler, systemHandler, assertionHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler, livekitWebhook, institutionHandler, interactionHandler, notificationsHandler)
+	router := server.BuildRouter(cfg, logger, limiter, healthHandler, systemHandler, assertionHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler, livekitWebhook, institutionHandler, interactionHandler, notificationsHandler, meetingsHandler)
 	srv := server.New(cfg, logger, router)
 
 	// 7. Initialize In-Process Background Worker (if enabled)

@@ -15,6 +15,7 @@ import (
 	"github.com/tathastu/connect/services/api/internal/institution"
 	"github.com/tathastu/connect/services/api/internal/interaction"
 	"github.com/tathastu/connect/services/api/internal/meeting/p2p"
+	"github.com/tathastu/connect/services/api/internal/meetings"
 	appmw "github.com/tathastu/connect/services/api/internal/middleware"
 	"github.com/tathastu/connect/services/api/internal/notes"
 	"github.com/tathastu/connect/services/api/internal/notifications"
@@ -46,6 +47,7 @@ func BuildRouter(
 	institutionHandler *institution.Handler,
 	interactionHandler *interaction.Handler,
 	notificationsHandler *notifications.Handler,
+	meetingsHandler *meetings.Handler,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -123,6 +125,13 @@ func BuildRouter(
 				g.Use(appmw.CSRFProtection(cfg.CORSAllowedOrigins))
 				g.Use(appmw.RequireAuth(authService))
 				institutionHandler.RegisterRoutes(g)
+			})
+		}
+
+		if meetingsHandler != nil && authService != nil {
+			api.Group(func(g chi.Router) {
+				g.Use(appmw.RequireAuth(authService))
+				meetingsHandler.RegisterRoutes(g)
 			})
 		}
 
