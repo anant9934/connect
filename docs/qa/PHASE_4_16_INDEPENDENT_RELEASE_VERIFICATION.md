@@ -220,3 +220,17 @@ If an unforeseen defect is detected, rollback can be executed within 3 minutes:
 2. **Absence of Headless Video Frame Decoders:** In headless Chromium, `RTC-MEAS-VIDEO-FLOW` showed 0 rendered frames due to the absence of a GPU display compositor, confirming that real hardware testing is strictly required before final user sign-off.
 3. **R2 Cloudflare Object Transfer:** End-to-end binary file upload and presigned URL download have not been tested with live user assets and remain marked as `UNVERIFIED`.
 4. **Native Mobile App Compilation:** React Native mobile source code remains preserved and uncommitted, requiring manual on-device verification.
+
+
+---
+
+## 10. Formal Addendum: Git SHA Correction & Parentage Verification (Phase 4.17 Audit)
+
+During the Phase 4.17 release audit, the Git commit chain was verified against `origin/main`:
+1. **Pre-Commit vs Post-Commit HEAD:** In Section 2.2 above, `Repository HEAD` was recorded as `87fd9d4` because `87fd9d4` was the active HEAD when the audit was performed. Staging and committing this Phase 4.16 report naturally created commit [`2767510cadbb92f2ebbc2b4b3832f3cbe1abfd0d`](https://github.com/anant9934/connect/commit/2767510), which is now the authoritative tip of `origin/main`.
+2. **Authoritative Parent Chain:**
+   - Commit `2767510` (Phase 4.16 Report) $\rightarrow$ Parent: `87fd9d4`
+   - Commit `87fd9d4` (Phase 4.15 Report) $\rightarrow$ Parent: `a5a6b66`
+   - Commit `a5a6b66` (Phase 4.14 Report) $\rightarrow$ Parent: `d089b8a`
+3. **Vercel Automatic Deployment:** Upon pushing commit `2767510`, Vercel automatically triggered and deployed `dpl_8BTZ8NbZpCnWyETdai4CabVWVTfi` on commit `2767510`.
+4. **Application Code Invariant:** Zero application code changes exist between `a5a6b66`, `87fd9d4`, and `2767510`. All three commits run identical application code.
