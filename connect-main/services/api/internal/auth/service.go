@@ -372,7 +372,11 @@ func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, n
 		return fmt.Errorf("failed to hash new password: %w", err)
 	}
 
-	return s.repo.UpdatePassword(ctx, userID, newHash)
+	if err := s.repo.UpdatePassword(ctx, userID, newHash); err != nil {
+		return err
+	}
+	// Whoever had the old password may still hold a session, so every session ends here.
+	return s.repo.RevokeAllUserSessions(ctx, userID)
 }
 
 // UpdatePreferences persists user device and application preferences

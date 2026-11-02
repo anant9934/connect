@@ -224,7 +224,13 @@ func (h *Handlers) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 
 	avatarURL := user.AvatarURL
 	if req.AvatarURL != nil {
-		avatarURL = *req.AvatarURL
+		// Pictures come through the upload route. An address from elsewhere would let any page
+		// showing this picture be used to track who views it.
+		if *req.AvatarURL != "" {
+			model.SendJSONError(w, r, http.StatusBadRequest, "VALIDATION_FAILED", "Upload a picture instead of giving an address.")
+			return
+		}
+		avatarURL = ""
 	}
 
 	updatedDTO, err := h.service.UpdateProfile(r.Context(), user.ID, displayName, avatarID, avatarURL)
@@ -283,6 +289,7 @@ func (h *Handlers) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ClearSessionCookie(w, h.isProduction)
 	model.SendJSON(w, http.StatusOK, map[string]any{
 		"success": true,
 		"message": "Password updated successfully",

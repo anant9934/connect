@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tathastu/connect/services/api/internal/audit"
 	"github.com/tathastu/connect/services/api/internal/auth"
+	"github.com/tathastu/connect/services/api/internal/avatars"
 	"github.com/tathastu/connect/services/api/internal/config"
 	"github.com/tathastu/connect/services/api/internal/files"
 	"github.com/tathastu/connect/services/api/internal/handlers"
@@ -142,7 +143,8 @@ func newRuntimeRouter(t *testing.T, app *pgxpool.Pool, configure func(*auth.Serv
 		institution.NewHandler(app, auditService),
 		interaction.NewHandler(app, roomService, limiter, auditService),
 		notifications.NewHandler(app),
-		meetings.NewHandler(app, "http://localhost:3000"))
+		meetings.NewHandler(app, "http://localhost:3000"),
+		avatars.NewHandler(authService, files.NewMemoryStorageProvider()))
 }
 
 // TestWorkflowDB_APITenantIsolation runs the full router with every module on connect_app,
@@ -237,6 +239,8 @@ func TestWorkflowDB_APITenantIsolation(t *testing.T) {
 		api.want("change password", http.StatusOK, http.MethodPost, "/api/v1/users/me/change-password", me, map[string]any{"currentPassword": "correct-horse-battery-9", "newPassword": "another-horse-battery-7"})
 		api.want("old password", http.StatusUnauthorized, http.MethodPost, "/api/v1/auth/login", caller{}, map[string]any{"email": email, "password": "correct-horse-battery-9"})
 		api.want("new password", http.StatusOK, http.MethodPost, "/api/v1/auth/login", caller{}, map[string]any{"email": email, "password": "another-horse-battery-7"})
+		api.want("a session from before the change has ended", http.StatusUnauthorized, http.MethodGet, "/api/v1/users/me/profile", me, nil)
+		api.want("an outside picture address", http.StatusBadRequest, http.MethodPatch, "/api/v1/users/me/profile", caller{token: otherToken}, map[string]any{"avatarUrl": "https://tracker.example/x.png"})
 	})
 
 	t.Run("google sign in refuses other apps and unverified addresses", func(t *testing.T) {
