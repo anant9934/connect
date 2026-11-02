@@ -437,10 +437,11 @@ func (h *Handlers) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientIP := extractIP(r)
-	// Rate limit room lookup by IP + room code (mitigate code enumeration)
+	// Rate limit room lookup by IP + room code. A whole class can share one campus address while
+	// its clients poll this, so the limit is per room and generous; the code's entropy stops guessing.
 	if h.limiter != nil {
 		rateKey := fmt.Sprintf("room_lookup:%s:%s", clientIP, NormalizeCode(code))
-		allowed, err := h.limiter.Allow(r.Context(), rateKey, 30, time.Minute)
+		allowed, err := h.limiter.Allow(r.Context(), rateKey, 3000, time.Minute)
 		if err != nil || !allowed {
 			w.Header().Set("Retry-After", "60")
 			model.SendJSONError(w, r, http.StatusTooManyRequests, "TOO_MANY_REQUESTS", "Too many requests. Please slow down.")
@@ -481,7 +482,7 @@ func (h *Handlers) Join(w http.ResponseWriter, r *http.Request) {
 	// Rate limit join attempts by IP + room code
 	if h.limiter != nil {
 		rateKey := fmt.Sprintf("room_join:%s:%s", clientIP, NormalizeCode(code))
-		allowed, err := h.limiter.Allow(r.Context(), rateKey, 15, time.Minute)
+		allowed, err := h.limiter.Allow(r.Context(), rateKey, 200, time.Minute)
 		if err != nil || !allowed {
 			w.Header().Set("Retry-After", "60")
 			model.SendJSONError(w, r, http.StatusTooManyRequests, "TOO_MANY_REQUESTS", "Too many join attempts. Please retry later.")
