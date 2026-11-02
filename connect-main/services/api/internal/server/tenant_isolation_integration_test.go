@@ -661,6 +661,105 @@ func TestWorkflowDB_APITenantIsolation(t *testing.T) {
 		api.want("suspended student notes", http.StatusForbidden, http.MethodGet, roomPath(code)+"/notes", student, nil)
 		api.want("suspended student token", http.StatusForbidden, http.MethodPost, roomPath(code)+"/token", student, nil)
 	})
+
+	t.Run("practical learning lab isolation, role boundaries and hidden test protection", func(t *testing.T) {
+		var orgA, orgB string
+		for _, dest := range []*string{&orgA, &orgB} {
+			if err := admin.QueryRow(ctx, `INSERT INTO organizations (slug, name) VALUES ($1, 'LabTenant') RETURNING id::text`, "lab-"+uuid.NewString()[:8]).Scan(dest); err != nil {
+				t.Fatal(err)
+			}
+		}
+		member := func(org, role string) (string, caller) {
+			t.Helper()
+			id, token := api.signup()
+			if _, err := admin.Exec(ctx, `INSERT INTO organization_memberships (organization_id, user_id, role) VALUES ($1, $2, $3)`, org, id, role); err != nil {
+				t.Fatal(err)
+			}
+			return id, caller{token: token}
+		}
+		_, facultyA := member(orgA, "faculty")
+		_, studentA := member(orgA, "student")
+		_, studentB := member(orgB, "student")
+
+		labPath := func(org string) string {
+			return "/api/v1/organizations/" + org + "/lab"
+		}
+
+		// 1. Faculty creates a course
+		resCourse := api.want("faculty creates lab course", http.StatusCreated, http.MethodPost, labPath(orgA)+"/courses", facultyA, map[string]any{
+			"slug":              "course-" + uuid.NewString()[:6],
+			"title":             "Data Structures",
+			"description":       "DSA Course",
+			"category":          "core",
+			"primary_language":  "python",
+			"allowed_languages": []string{"python"},
+		})
+		courseObj, _ := resCourse["course"].(map[string]any)
+		courseID, _ := courseObj["id"].(string)
+
+		// 2. Student cannot create an assignment (403)
+		api.want("student cannot create assignment", http.StatusForbidden, http.MethodPost, labPath(orgA)+"/assignments", studentA, map[string]any{
+			"title":         "Cheating Assignment",
+			"lab_course_id": courseID,
+		})
+
+		// 3. Faculty creates an assignment with 1 public and 1 hidden test case
+		resAssign := api.want("faculty creates assignment", http.StatusCreated, http.MethodPost, labPath(orgA)+"/assignments", facultyA, map[string]any{
+			"lab_course_id":     courseID,
+			"title":             "Reverse Array",
+			"description":       "Write code to reverse array",
+			"allowed_languages": []string{"python"},
+			"starter_code":      "def reverse(a): return a[::-1]",
+			"max_score":         100,
+			"test_cases": []map[string]any{
+				{"input": "[1,2,3]", "expected_output": "[3,2,1]", "is_hidden": false, "weight": 50, "time_limit_ms": 2000},
+				{"input": "[9,8,7,6]", "expected_output": "[6,7,8,9]", "is_hidden": true, "weight": 50, "time_limit_ms": 2000},
+			},
+		})
+		assignObj, _ := resAssign["assignment"].(map[string]any)
+		assignID, _ := assignObj["id"].(string)
+
+		// 4. Student A retrieves assignment: hidden test case must be stripped
+		studentView := api.want("student gets assignment", http.StatusOK, http.MethodGet, labPath(orgA)+"/assignments/"+assignID, studentA, nil)
+		studentAssign, _ := studentView["assignment"].(map[string]any)
+		testCases, _ := studentAssign["test_cases"].([]any)
+		if len(testCases) != 1 {
+			t.Errorf("expected student to see exactly 1 public test case, saw %d", len(testCases))
+		}
+		if len(testCases) > 0 {
+			tc, _ := testCases[0].(map[string]any)
+			if tc["is_hidden"] == true || tc["input"] == "[9,8,7,6]" {
+				t.Errorf("CRITICAL SECURITY LEAK: student saw hidden test case: %v", tc)
+			}
+		}
+
+		// 5. Cross-tenant isolation: Student B from Org B cannot access Org A's assignment
+		api.want("cross tenant cannot access assignment", http.StatusForbidden, http.MethodGet, labPath(orgA)+"/assignments/"+assignID, studentB, nil)
+
+		// 6. Student A submits valid solution
+		subRes := api.want("student submits solution", http.StatusOK, http.MethodPost, labPath(orgA)+"/assignments/"+assignID+"/submit", studentA, map[string]any{
+			"language":    "python",
+			"source_code": "def reverse(a): return a[::-1]",
+			"outputs":     map[string]string{},
+		})
+		subObj, _ := subRes["submission"].(map[string]any)
+		subID, _ := subObj["id"].(string)
+		if subID == "" {
+			t.Fatalf("no submission id returned: %v", subRes)
+		}
+
+		// 7. Student A cannot grade their own submission (403)
+		api.want("student cannot grade submission", http.StatusForbidden, http.MethodPost, labPath(orgA)+"/submissions/"+subID+"/grade", studentA, map[string]any{
+			"score":    100,
+			"feedback": "Self awarded grade",
+		})
+
+		// 8. Faculty A grades submission
+		api.want("faculty grades submission", http.StatusOK, http.MethodPost, labPath(orgA)+"/submissions/"+subID+"/grade", facultyA, map[string]any{
+			"score":    95,
+			"feedback": "Excellent clean implementation",
+		})
+	})
 }
 
 // TestWorkflowDB_EveryTableHasRLS fails when a table is added without row level security.

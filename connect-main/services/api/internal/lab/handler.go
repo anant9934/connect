@@ -248,6 +248,22 @@ func (h *Handler) createAssignment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "title and lab_course_id are required")
 		return
 	}
+	if len(req.Title) > 255 {
+		writeError(w, http.StatusBadRequest, "title cannot exceed 255 characters")
+		return
+	}
+	if len(req.Description) > 50000 {
+		writeError(w, http.StatusBadRequest, "description cannot exceed 50000 characters")
+		return
+	}
+	if len(req.StarterCode) > 65536 {
+		writeError(w, http.StatusBadRequest, "starter code exceeds maximum limit of 64KB")
+		return
+	}
+	if len(req.TestCases) > 50 {
+		writeError(w, http.StatusBadRequest, "cannot attach more than 50 test cases per assignment")
+		return
+	}
 	if req.MaxScore <= 0 {
 		req.MaxScore = 100
 	}
@@ -315,6 +331,18 @@ func (h *Handler) submitAssignment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if req.SourceCode == "" {
+		writeError(w, http.StatusBadRequest, "source_code is required")
+		return
+	}
+	if len(req.SourceCode) > 65536 {
+		writeError(w, http.StatusBadRequest, "source code exceeds maximum size limit of 64KB")
+		return
+	}
+	if req.Language == "" {
+		writeError(w, http.StatusBadRequest, "language is required")
+		return
+	}
 
 	err = h.inOrg(r, func(tx pgx.Tx, authCtx *database.AuthContext, orgID uuid.UUID) error {
 		studentID, err := uuid.Parse(authCtx.UserID)
@@ -335,8 +363,28 @@ func (h *Handler) submitAssignment(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		// Evaluate test cases safely
+		// Enforce deadline for students
 		isStudent := !h.isFacultyOrAdmin(authCtx.Role, authCtx.IsSuperAdmin)
+		if isStudent && !assignment.DueAt.IsZero() && time.Now().After(assignment.DueAt) {
+			writeError(w, http.StatusBadRequest, "assignment submission deadline has passed")
+			return nil
+		}
+
+		// Validate language against assignment allowed languages
+		if len(assignment.AllowedLanguages) > 0 {
+			allowed := false
+			for _, l := range assignment.AllowedLanguages {
+				if l == req.Language {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("language '%s' is not permitted for this assignment", req.Language))
+				return nil
+			}
+		}
+
 		score, passedCount, totalCount, status, results := EvaluateSubmissionAgainstTestCases(
 			testCases, req.Outputs, req.Errors, req.Durations, assignment.MaxScore, isStudent,
 		)
