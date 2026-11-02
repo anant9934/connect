@@ -312,6 +312,11 @@ func reconcileClassSession(ctx context.Context, pool *pgxpool.Pool, roomID, clas
 		return err
 	}
 
+	signals, err := loadRoomSignals(ctx, pool, roomID)
+	if err != nil {
+		return err
+	}
+
 	var policyVersion *int
 	if policy.Version > 0 {
 		policyVersion = &policy.Version
@@ -323,22 +328,39 @@ func reconcileClassSession(ctx context.Context, pool *pgxpool.Pool, roomID, clas
 	}
 	defer tx.Rollback(ctx)
 
-	for _, r := range attendance.EvaluateEnrollment(enrolled, intervals, policy, sessionStart, sessionEnd) {
+	for _, r := range attendance.EvaluateEnrollment(enrolled, intervals, signals, policy, sessionStart, sessionEnd) {
+		calculation, err := json.Marshal(r.Calculation)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO attendance_records (
 				organization_id, batch_id, class_session_id, student_user_id,
 				total_connected_seconds, attendance_status, is_overruled, policy_version,
+				first_joined_at, last_left_at, joined_late, left_early,
+				duration_ratio, engagement_ratio, browser_ratio, score, calculation,
 				evaluated_at, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, false, $7, NOW(), NOW())
+			) VALUES ($1, $2, $3, $4, $5, $6, false, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())
 			ON CONFLICT (organization_id, class_session_id, student_user_id)
 			DO UPDATE SET
 				total_connected_seconds = EXCLUDED.total_connected_seconds,
 				attendance_status = EXCLUDED.attendance_status,
 				policy_version = EXCLUDED.policy_version,
+				first_joined_at = EXCLUDED.first_joined_at,
+				last_left_at = EXCLUDED.last_left_at,
+				joined_late = EXCLUDED.joined_late,
+				left_early = EXCLUDED.left_early,
+				duration_ratio = EXCLUDED.duration_ratio,
+				engagement_ratio = EXCLUDED.engagement_ratio,
+				browser_ratio = EXCLUDED.browser_ratio,
+				score = EXCLUDED.score,
+				calculation = EXCLUDED.calculation,
 				evaluated_at = EXCLUDED.evaluated_at,
 				updated_at = EXCLUDED.updated_at
 			WHERE NOT attendance_records.is_overruled
-		`, orgID, batchID, classSessionID, r.StudentUserID, r.ConnectedSeconds, r.Status, policyVersion); err != nil {
+		`, orgID, batchID, classSessionID, r.StudentUserID, r.ConnectedSeconds, r.Status, policyVersion,
+			r.FirstJoinedAt, r.LastLeftAt, r.Calculation.JoinedLate, r.Calculation.LeftEarly,
+			r.Calculation.DurationRatio, r.Calculation.EngagementRatio, r.Calculation.BrowserRatio, r.Calculation.Score, calculation); err != nil {
 			return fmt.Errorf("student %s: %w", r.StudentUserID, err)
 		}
 	}
@@ -349,16 +371,40 @@ func reconcileClassSession(ctx context.Context, pool *pgxpool.Pool, roomID, clas
 func loadAttendancePolicy(ctx context.Context, pool *pgxpool.Pool, orgID string) (attendance.Policy, error) {
 	var p attendance.Policy
 	err := pool.QueryRow(ctx, `
-		SELECT version, min_present_ratio::float8, min_partial_ratio::float8, late_grace_seconds
+		SELECT version, min_present_ratio::float8, min_partial_ratio::float8, late_grace_seconds, early_leave_grace_seconds,
+		       duration_weight::float8, engagement_weight::float8, browser_weight::float8, engagement_target
 		FROM attendance_policies
 		WHERE organization_id = $1
 		ORDER BY version DESC
 		LIMIT 1
-	`, orgID).Scan(&p.Version, &p.MinPresentRatio, &p.MinPartialRatio, &p.LateGraceSeconds)
+	`, orgID).Scan(&p.Version, &p.MinPresentRatio, &p.MinPartialRatio, &p.LateGraceSeconds, &p.EarlyLeaveGraceSeconds,
+		&p.DurationWeight, &p.EngagementWeight, &p.BrowserWeight, &p.EngagementTarget)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return attendance.PlatformDefaultPolicy, nil
 	}
 	return p, err
+}
+
+// loadRoomSignals reads what each signed-in person did in the room, for the attendance score.
+func loadRoomSignals(ctx context.Context, pool *pgxpool.Pool, roomID string) (map[string]attendance.Signals, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT user_id::text, (messages + reactions + hands + poll_answers + doubts)::int, visible_seconds, hidden_seconds, reported
+		FROM connect_auth.room_signals($1::uuid)
+	`, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	signals := make(map[string]attendance.Signals)
+	for rows.Next() {
+		var id string
+		var s attendance.Signals
+		if err := rows.Scan(&id, &s.Actions, &s.VisibleSeconds, &s.HiddenSeconds, &s.Reported); err != nil {
+			return nil, err
+		}
+		signals[id] = s
+	}
+	return signals, rows.Err()
 }
 
 // loadConnectionIntervals prefers webhook-sourced sessions and falls back to API-recorded

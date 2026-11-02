@@ -33,7 +33,7 @@ func TestEvaluateEnrollment(t *testing.T) {
 	}
 
 	enrolled := []string{"reconnected", "late", "partial", "brief", "never"}
-	results := EvaluateEnrollment(enrolled, intervals, policy, start, end)
+	results := EvaluateEnrollment(enrolled, intervals, nil, policy, start, end)
 	if len(results) != len(enrolled) {
 		t.Fatalf("expected %d results, got %d", len(enrolled), len(results))
 	}
@@ -52,5 +52,71 @@ func TestEvaluateStudent_LateMarkingDisabledWithoutGrace(t *testing.T) {
 
 	if _, status := EvaluateStudent(ivs, PlatformDefaultPolicy, start, end); status != "present" {
 		t.Fatalf("expected present without a grace rule, got %s", status)
+	}
+}
+
+func TestEvaluate_RulesAndWeights(t *testing.T) {
+	start := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	at := func(m int) time.Time { return start.Add(time.Duration(m) * time.Minute) }
+	span := func(from, to int) []Interval { return []Interval{{Start: at(from), End: at(to)}} }
+	grace := func(s int) *int { return &s }
+	duration := Policy{MinPresentRatio: 0.75, MinPartialRatio: 0.4, DurationWeight: 1, EngagementTarget: 3}
+
+	cases := []struct {
+		name      string
+		intervals []Interval
+		signals   Signals
+		policy    func(Policy) Policy
+		status    string
+		score     float64
+	}{
+		{"full attendance", span(0, 60), Signals{}, nil, "present", 1},
+		{"exactly the present threshold", span(0, 45), Signals{}, nil, "present", 0.75},
+		{"just under present is partial", span(0, 44), Signals{}, nil, "partial", 44.0 / 60},
+		{"under partial is absent", span(0, 20), Signals{}, nil, "absent", 20.0 / 60},
+		{"never connected is absent despite activity", nil, Signals{Actions: 9, Reported: true, VisibleSeconds: 60}, func(p Policy) Policy {
+			p.DurationWeight, p.EngagementWeight = 0, 1
+			return p
+		}, "absent", 1},
+		{"late within grace is present", span(5, 60), Signals{}, func(p Policy) Policy { p.LateGraceSeconds = grace(300); return p }, "present", 55.0 / 60},
+		{"late past grace is late", span(6, 60), Signals{}, func(p Policy) Policy { p.LateGraceSeconds = grace(300); return p }, "late", 54.0 / 60},
+		{"leaving within grace is present", span(0, 55), Signals{}, func(p Policy) Policy { p.EarlyLeaveGraceSeconds = grace(300); return p }, "present", 55.0 / 60},
+		{"leaving before grace lowers to partial", span(0, 54), Signals{}, func(p Policy) Policy { p.EarlyLeaveGraceSeconds = grace(300); return p }, "partial", 54.0 / 60},
+		{"late and early is partial", span(6, 54), Signals{}, func(p Policy) Policy {
+			p.LateGraceSeconds, p.EarlyLeaveGraceSeconds = grace(300), grace(300)
+			return p
+		}, "partial", 48.0 / 60},
+		{"engagement raises a borderline score", span(0, 42), Signals{Actions: 3}, func(p Policy) Policy {
+			p.DurationWeight, p.EngagementWeight = 0.5, 0.5
+			return p
+		}, "present", 0.85},
+		{"actions past the target add nothing", span(0, 30), Signals{Actions: 100}, func(p Policy) Policy {
+			p.DurationWeight, p.EngagementWeight = 0.5, 0.5
+			return p
+		}, "present", 0.75},
+		{"visibility counts when reported", span(0, 60), Signals{Reported: true, VisibleSeconds: 10, HiddenSeconds: 90}, func(p Policy) Policy {
+			p.DurationWeight, p.BrowserWeight = 0.5, 0.5
+			return p
+		}, "partial", 0.55},
+		{"no browser report is not held against anyone", span(0, 60), Signals{}, func(p Policy) Policy {
+			p.DurationWeight, p.BrowserWeight = 0.5, 0.5
+			return p
+		}, "present", 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			policy := duration
+			if c.policy != nil {
+				policy = c.policy(policy)
+			}
+			got := Evaluate(c.intervals, c.signals, policy, start, end)
+			if got.Status != c.status {
+				t.Errorf("status %s, want %s (%+v)", got.Status, c.status, got.Calculation)
+			}
+			if diff := got.Calculation.Score - c.score; diff > 0.001 || diff < -0.001 {
+				t.Errorf("score %v, want %v", got.Calculation.Score, c.score)
+			}
+		})
 	}
 }
