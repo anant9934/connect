@@ -22,6 +22,7 @@ import (
 	"github.com/tathastu/connect/services/api/internal/config"
 	"github.com/tathastu/connect/services/api/internal/files"
 	"github.com/tathastu/connect/services/api/internal/handlers"
+	"github.com/tathastu/connect/services/api/internal/institution"
 	"github.com/tathastu/connect/services/api/internal/livekit"
 	"github.com/tathastu/connect/services/api/internal/meeting/p2p"
 	"github.com/tathastu/connect/services/api/internal/notes"
@@ -134,7 +135,8 @@ func newRuntimeRouter(t *testing.T, app *pgxpool.Pool, configure func(*auth.Serv
 		room.NewHandlers(roomService, nil, "http://localhost:3000", "http://localhost:7880"),
 		notes.NewHandler(notes.NewService(notes.NewPgxRepository(app), validator, auditService)),
 		files.NewHandler(files.NewService(files.NewPgxRepository(app), files.NewMemoryStorageProvider(), files.NewHeuristicScanner(), validator, auditService)),
-		authService, p2p.NewHandler(cfg, logger, p2p.NewHub(logger), roomService, authService), nil)
+		authService, p2p.NewHandler(cfg, logger, p2p.NewHub(logger), roomService, authService), nil,
+		institution.NewHandler(app, auditService))
 }
 
 // TestWorkflowDB_APITenantIsolation runs the full router with every module on connect_app,
@@ -177,7 +179,6 @@ func TestWorkflowDB_APITenantIsolation(t *testing.T) {
 		s.SetGoogleClientIDs([]string{"connect-web"})
 		s.SetGoogleTokenInfoURL(googleServer.URL)
 	})}
-	roomPath := func(code string) string { return "/api/v1/rooms/" + code }
 
 	createRoom := func(token string, waiting bool) string {
 		t.Helper()

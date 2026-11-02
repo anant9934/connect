@@ -12,6 +12,7 @@ import (
 	"github.com/tathastu/connect/services/api/internal/config"
 	"github.com/tathastu/connect/services/api/internal/files"
 	"github.com/tathastu/connect/services/api/internal/handlers"
+	"github.com/tathastu/connect/services/api/internal/institution"
 	"github.com/tathastu/connect/services/api/internal/meeting/p2p"
 	appmw "github.com/tathastu/connect/services/api/internal/middleware"
 	"github.com/tathastu/connect/services/api/internal/notes"
@@ -40,6 +41,7 @@ func BuildRouter(
 	authService *auth.Service,
 	p2pHandler *p2p.Handler,
 	livekitWebhook http.Handler,
+	institutionHandler *institution.Handler,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -110,6 +112,15 @@ func BuildRouter(
 				})
 			}
 		})
+
+		// Institution Management Routes (roles are enforced by the database)
+		if institutionHandler != nil && authService != nil {
+			api.Group(func(g chi.Router) {
+				g.Use(appmw.CSRFProtection(cfg.CORSAllowedOrigins))
+				g.Use(appmw.RequireAuth(authService))
+				institutionHandler.RegisterRoutes(g)
+			})
+		}
 
 		// Rooms Routes
 		api.Route("/rooms", func(roomsRouter chi.Router) {
