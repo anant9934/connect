@@ -40,6 +40,11 @@ function screen() {
 
 class AppStalled extends Error {}
 
+function launch() {
+  adb('shell', 'am', 'force-stop', PACKAGE);
+  adb('shell', 'monkey', '-p', PACKAGE, '-c', 'android.intent.category.LAUNCHER', '1');
+}
+
 const matches = (node, wanted) => node.label === wanted || node.text === wanted || node.label.includes(wanted) || node.text.includes(wanted);
 
 async function find(wanted, timeout = 30000) {
@@ -52,8 +57,9 @@ async function find(wanted, timeout = 30000) {
       const stalled = last.find((node) => node.text.includes("isn't responding"));
       if (stalled) {
         if (/Tathastu|connect/i.test(stalled.text)) throw new AppStalled(stalled.text);
-        const wait = last.find((node) => node.text === 'Wait');
-        if (wait) adb('shell', 'input', 'tap', String(Math.round(wait.x)), String(Math.round(wait.y)));
+        const dismiss = last.find((node) => node.text === 'Close app') || last.find((node) => node.text === 'Wait');
+        if (dismiss) adb('shell', 'input', 'tap', String(Math.round(dismiss.x)), String(Math.round(dismiss.y)));
+        launch();
         console.log(`NOTE dismissed system dialog: ${stalled.text}`);
         await sleep(2000);
         continue;
@@ -124,11 +130,6 @@ async function until(fn, what, timeout = 30000) {
     await sleep(1000);
   }
   throw new Error(`timed out waiting for ${what}`);
-}
-
-function launch() {
-  adb('shell', 'am', 'force-stop', PACKAGE);
-  adb('shell', 'monkey', '-p', PACKAGE, '-c', 'android.intent.category.LAUNCHER', '1');
 }
 
 async function joinByCode(code, name) {
