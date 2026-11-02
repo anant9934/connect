@@ -102,11 +102,45 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
+// isSystemPrivilegeError checks whether a 42501 error represents a database role or table
+// permission failure (such as missing grants on tables or schemas) that should NOT be
+// masked as a user authorization failure.
+func isSystemPrivilegeError(pgErr *pgconn.PgError) bool {
+	combined := strings.ToLower(pgErr.Message + " " + pgErr.Detail)
+	return strings.Contains(combined, "permission denied for table") ||
+		strings.Contains(combined, "permission denied for schema") ||
+		strings.Contains(combined, "permission denied for relation") ||
+		strings.Contains(combined, "permission denied for sequence") ||
+		strings.Contains(combined, "permission denied for database") ||
+		strings.Contains(combined, "must be owner of") ||
+		strings.Contains(combined, "must be superuser")
+}
+
+// isRecognizedDomainValidationError checks whether a generic P0001 exception represents
+// a known, documented business validation failure from academic/tenancy triggers.
+func isRecognizedDomainValidationError(pgErr *pgconn.PgError) bool {
+	msg := pgErr.Message
+	return strings.HasPrefix(msg, "Foreign Key Violation:") ||
+		strings.HasPrefix(msg, "Integrity Error:") ||
+		strings.HasPrefix(msg, "Temporal Eligibility Error:")
+}
+
 // handleLabError translates database and internal errors into safe, client-facing HTTP responses.
-// Authorization and cross-tenant failures (e.g. SQLSTATE 42501, 28000) are mapped to HTTP 403 Forbidden.
-// Validation and malformed UUID errors are mapped to HTTP 400 Bad Request.
-// Missing resources are mapped to HTTP 404 Not Found.
-// Genuine internal errors return HTTP 500 without leaking raw SQL, SQLSTATE codes, or internal database UUIDs.
+// - SQLSTATE 42501 user/tenant membership denial -> HTTP 403 Forbidden.
+// - SQLSTATE 42501 database system privilege failure -> HTTP 500 Internal Server Error (not concealed).
+// - SQLSTATE 28000 session token missing/expired/invalid -> HTTP 401 Unauthorized.
+// - SQLSTATE 23505 unique violation -> HTTP 409 Conflict.
+// - SQLSTATE 23503, 23514 foreign key/check constraint violation -> HTTP 400 Bad Request.
+// - SQLSTATE 22P02 invalid input syntax (e.g. malformed UUID) -> HTTP 400 Bad Request.
+// - SQLSTATE P0001 recognized domain validation triggers -> HTTP 400 Bad Request.
+// - SQLSTATE P0001 unknown/unrecognized triggers -> HTTP 500 Internal Server Error (not mapped to 400).
+// - SQLSTATE CN404 custom not found -> HTTP 404 Not Found.
+// - SQLSTATE CN409 custom conflict -> HTTP 409 Conflict.
+// - SQLSTATE CN422 custom unprocessable -> HTTP 422 Unprocessable Entity.
+// - database.ErrNoSessionToken / errUnauthenticated / errInvalidUserID -> HTTP 401 Unauthorized.
+// - errInvalidOrgID -> HTTP 400 Bad Request.
+// - pgx.ErrNoRows -> HTTP 404 Not Found.
+// - Genuine internal failures -> HTTP 500 without leaking raw SQL, SQLSTATE, or internal UUIDs.
 func (h *Handler) handleLabError(w http.ResponseWriter, r *http.Request, err error) {
 	if err == nil {
 		return
@@ -117,7 +151,7 @@ func (h *Handler) handleLabError(w http.ResponseWriter, r *http.Request, err err
 		return
 	}
 
-	if errors.Is(err, errUnauthenticated) || errors.Is(err, errInvalidUserID) {
+	if errors.Is(err, errUnauthenticated) || errors.Is(err, errInvalidUserID) || errors.Is(err, database.ErrNoSessionToken) {
 		writeError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
@@ -130,21 +164,59 @@ func (h *Handler) handleLabError(w http.ResponseWriter, r *http.Request, err err
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
-		case "42501", "28000":
+		case "42501":
+			// If this is an unexpected database system privilege failure (e.g. connect_app lacks table grants),
+			// do NOT conceal it as an ordinary user authorization failure; surface as generic 500.
+			if isSystemPrivilegeError(pgErr) {
+				writeError(w, http.StatusInternalServerError, "an unexpected internal error occurred")
+				return
+			}
 			writeError(w, http.StatusForbidden, "you do not have permission to access this organization's resources")
 			return
+
+		case "28000":
+			// 28000 from connect_auth.authenticate_session indicates invalid, expired, or revoked session token.
+			// This is an authentication failure (401), not an authorization failure (403).
+			writeError(w, http.StatusUnauthorized, "authentication required")
+			return
+
 		case "23505":
 			writeError(w, http.StatusConflict, "resource already exists")
 			return
-		case "23503", "23514", "22P02", "P0001":
+
+		case "23503", "23514":
 			writeError(w, http.StatusBadRequest, "invalid request data or referenced entity not found")
 			return
+
+		case "22P02":
+			writeError(w, http.StatusBadRequest, "invalid resource identifier format")
+			return
+
 		case "CN404":
 			writeError(w, http.StatusNotFound, "resource not found")
+			return
+
+		case "CN409":
+			writeError(w, http.StatusConflict, "resource conflict")
+			return
+
+		case "CN422":
+			writeError(w, http.StatusUnprocessableEntity, "unprocessable entity")
+			return
+
+		case "P0001":
+			// Map only recognized, documented domain validation triggers to 400 Bad Request.
+			// Unknown P0001 must remain generic 500 to avoid misclassifying internal trigger/system faults.
+			if isRecognizedDomainValidationError(pgErr) {
+				writeError(w, http.StatusBadRequest, "invalid request data or referenced entity not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "an unexpected internal error occurred")
 			return
 		}
 	}
 
+	// Secondary check for legacy wrapped error text if unwrapping was lost
 	if strings.Contains(err.Error(), "token hash is required") {
 		writeError(w, http.StatusUnauthorized, "authentication required")
 		return

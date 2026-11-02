@@ -2,12 +2,16 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrNoSessionToken is returned when establishing database auth context without a session token hash.
+var ErrNoSessionToken = errors.New("token hash is required to establish database auth context")
 
 // AuthContext holds the verified identity context returned by PostgreSQL connect_auth.authenticate_session.
 type AuthContext struct {
@@ -24,7 +28,7 @@ type AuthContext struct {
 // bound to the current transaction ID (pg_current_xact_id).
 func AuthenticateAndSetContext(ctx context.Context, tx pgx.Tx, tokenHash string, requestedOrgID *string) (*AuthContext, error) {
 	if tokenHash == "" {
-		return nil, fmt.Errorf("token hash is required to establish database auth context")
+		return nil, ErrNoSessionToken
 	}
 
 	query := `

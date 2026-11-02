@@ -591,3 +591,305 @@ func TestHandler_AuthorizationErrorHardening(t *testing.T) {
 		}
 	})
 }
+
+func TestHandler_ErrorClassifierPrecision(t *testing.T) {
+	testOrgUUID := uuid.MustParse("33b4a67f-64fe-4410-bec0-579be3a780ee")
+	testUserUUID := uuid.MustParse("4220b22f-d890-410a-8d18-baec52dc7796")
+
+	tests := []struct {
+		name            string
+		err             error
+		expectedStatus  int
+		expectedError   string
+		sensitiveTokens []string
+	}{
+		{
+			name: "Wrapped 42501 membership denial",
+			err: fmt.Errorf("auth context setup failed: %w", &pgconn.PgError{
+				Code:    "42501",
+				Message: fmt.Sprintf("Authorization Failed: User %s has no active membership in Organization %s", testUserUUID, testOrgUUID),
+			}),
+			expectedStatus:  http.StatusForbidden,
+			expectedError:   "you do not have permission to access this organization's resources",
+			sensitiveTokens: []string{"42501", "SQLSTATE", testUserUUID.String(), testOrgUUID.String(), "Authorization Failed"},
+		},
+		{
+			name: "Unexpected 42501 system privilege failure - table permission denied",
+			err: &pgconn.PgError{
+				Code:      "42501",
+				Message:   "permission denied for table lab_courses",
+				TableName: "lab_courses",
+			},
+			expectedStatus:  http.StatusInternalServerError,
+			expectedError:   "an unexpected internal error occurred",
+			sensitiveTokens: []string{"42501", "lab_courses", "permission denied"},
+		},
+		{
+			name: "Unexpected 42501 system privilege failure - schema permission denied",
+			err: &pgconn.PgError{
+				Code:    "42501",
+				Message: "permission denied for schema connect_lab",
+			},
+			expectedStatus:  http.StatusInternalServerError,
+			expectedError:   "an unexpected internal error occurred",
+			sensitiveTokens: []string{"42501", "connect_lab", "permission denied"},
+		},
+		{
+			name: "Unexpected 42501 system privilege failure - must be owner of relation",
+			err: &pgconn.PgError{
+				Code:    "42501",
+				Message: "must be owner of relation lab_assignments",
+			},
+			expectedStatus:  http.StatusInternalServerError,
+			expectedError:   "an unexpected internal error occurred",
+			sensitiveTokens: []string{"42501", "lab_assignments", "must be owner"},
+		},
+		{
+			name: "28000 authentication failure - expired or revoked session",
+			err: &pgconn.PgError{
+				Code:    "28000",
+				Message: fmt.Sprintf("connect_auth: session token has expired or is revoked for session %s", uuid.New()),
+			},
+			expectedStatus:  http.StatusUnauthorized,
+			expectedError:   "authentication required",
+			sensitiveTokens: []string{"28000", "connect_auth", "session token", "expired"},
+		},
+		{
+			name:            "Typed database.ErrNoSessionToken sentinel",
+			err:             database.ErrNoSessionToken,
+			expectedStatus:  http.StatusUnauthorized,
+			expectedError:   "authentication required",
+			sensitiveTokens: []string{"token hash", "ErrNoSessionToken"},
+		},
+		{
+			name:            "Wrapped database.ErrNoSessionToken sentinel",
+			err:             fmt.Errorf("inOrg failed to obtain auth context: %w", database.ErrNoSessionToken),
+			expectedStatus:  http.StatusUnauthorized,
+			expectedError:   "authentication required",
+			sensitiveTokens: []string{"token hash", "inOrg"},
+		},
+		{
+			name: "Known P0001 domain validation - Foreign Key Violation",
+			err: &pgconn.PgError{
+				Code:    "P0001",
+				Message: fmt.Sprintf("Foreign Key Violation: Course %s does not exist in tenant", uuid.New()),
+			},
+			expectedStatus:  http.StatusBadRequest,
+			expectedError:   "invalid request data or referenced entity not found",
+			sensitiveTokens: []string{"P0001", "Foreign Key Violation", "tenant"},
+		},
+		{
+			name: "Known P0001 domain validation - Integrity Error",
+			err: &pgconn.PgError{
+				Code:    "P0001",
+				Message: "Integrity Error: Module sequence must be strictly greater than zero",
+			},
+			expectedStatus:  http.StatusBadRequest,
+			expectedError:   "invalid request data or referenced entity not found",
+			sensitiveTokens: []string{"P0001", "Integrity Error", "Module sequence"},
+		},
+		{
+			name: "Known P0001 domain validation - Temporal Eligibility Error",
+			err: &pgconn.PgError{
+				Code:    "P0001",
+				Message: "Temporal Eligibility Error: Assignment deadline has already passed",
+			},
+			expectedStatus:  http.StatusBadRequest,
+			expectedError:   "invalid request data or referenced entity not found",
+			sensitiveTokens: []string{"P0001", "Temporal Eligibility Error", "deadline"},
+		},
+		{
+			name: "Unknown P0001 trigger exception - immutability violation must remain 500",
+			err: &pgconn.PgError{
+				Code:    "P0001",
+				Message: "attendance_overrule_audit_log is immutable and records cannot be updated or deleted",
+			},
+			expectedStatus:  http.StatusInternalServerError,
+			expectedError:   "an unexpected internal error occurred",
+			sensitiveTokens: []string{"P0001", "attendance_overrule_audit_log", "immutable"},
+		},
+		{
+			name: "Unknown P0001 trigger exception - unhandled plpgsql exception must remain 500",
+			err: &pgconn.PgError{
+				Code:    "P0001",
+				Message: "internal plpgsql runtime assertion failure in trigger audit_trigger_func",
+			},
+			expectedStatus:  http.StatusInternalServerError,
+			expectedError:   "an unexpected internal error occurred",
+			sensitiveTokens: []string{"P0001", "audit_trigger_func", "plpgsql"},
+		},
+		{
+			name:            "Genuine internal database failure - TCP connection refused",
+			err:             errors.New("dial tcp 127.0.0.1:5432: connect: connection refused"),
+			expectedStatus:  http.StatusInternalServerError,
+			expectedError:   "an unexpected internal error occurred",
+			sensitiveTokens: []string{"dial tcp", "127.0.0.1", "5432", "connection refused"},
+		},
+		{
+			name:            "Genuine internal database failure - query execution timeout",
+			err:             errors.New("pq: canceling statement due to statement timeout"),
+			expectedStatus:  http.StatusInternalServerError,
+			expectedError:   "an unexpected internal error occurred",
+			sensitiveTokens: []string{"statement timeout", "canceling"},
+		},
+		{
+			name: "Invalid resource identifier format - 22P02",
+			err: &pgconn.PgError{
+				Code:    "22P02",
+				Message: "invalid input syntax for type uuid: 'abc-xyz'",
+			},
+			expectedStatus:  http.StatusBadRequest,
+			expectedError:   "invalid resource identifier format",
+			sensitiveTokens: []string{"22P02", "abc-xyz", "invalid input syntax"},
+		},
+		{
+			name: "Unique violation - 23505",
+			err: &pgconn.PgError{
+				Code:      "23505",
+				Message:   "duplicate key value violates unique constraint lab_courses_slug_key",
+				TableName: "lab_courses",
+			},
+			expectedStatus:  http.StatusConflict,
+			expectedError:   "resource already exists",
+			sensitiveTokens: []string{"23505", "lab_courses_slug_key", "duplicate key"},
+		},
+		{
+			name: "Foreign key violation - 23503",
+			err: &pgconn.PgError{
+				Code:    "23503",
+				Message: "insert or update on table violates foreign key constraint lab_assignments_course_fkey",
+			},
+			expectedStatus:  http.StatusBadRequest,
+			expectedError:   "invalid request data or referenced entity not found",
+			sensitiveTokens: []string{"23503", "lab_assignments_course_fkey"},
+		},
+		{
+			name: "Check constraint violation - 23514",
+			err: &pgconn.PgError{
+				Code:    "23514",
+				Message: "new row for relation lab_submissions violates check constraint score_non_negative",
+			},
+			expectedStatus:  http.StatusBadRequest,
+			expectedError:   "invalid request data or referenced entity not found",
+			sensitiveTokens: []string{"23514", "score_non_negative"},
+		},
+		{
+			name: "Custom application not found - CN404",
+			err: &pgconn.PgError{
+				Code:    "CN404",
+				Message: "entity lab_exercise not found in organization",
+			},
+			expectedStatus:  http.StatusNotFound,
+			expectedError:   "resource not found",
+			sensitiveTokens: []string{"CN404", "lab_exercise"},
+		},
+		{
+			name: "Custom application conflict - CN409",
+			err: &pgconn.PgError{
+				Code:    "CN409",
+				Message: "active submission lock currently held by another worker",
+			},
+			expectedStatus:  http.StatusConflict,
+			expectedError:   "resource conflict",
+			sensitiveTokens: []string{"CN409", "submission lock"},
+		},
+		{
+			name: "Custom application unprocessable - CN422",
+			err: &pgconn.PgError{
+				Code:    "CN422",
+				Message: "test case json specification unparseable",
+			},
+			expectedStatus:  http.StatusUnprocessableEntity,
+			expectedError:   "unprocessable entity",
+			sensitiveTokens: []string{"CN422", "test case json"},
+		},
+		{
+			name:            "Missing resource - pgx.ErrNoRows",
+			err:             pgx.ErrNoRows,
+			expectedStatus:  http.StatusNotFound,
+			expectedError:   "resource not found",
+			sensitiveTokens: []string{"ErrNoRows"},
+		},
+		{
+			name:            "Invalid organization ID - errInvalidOrgID",
+			err:             errInvalidOrgID,
+			expectedStatus:  http.StatusBadRequest,
+			expectedError:   "invalid organization id",
+			sensitiveTokens: []string{"errInvalidOrgID"},
+		},
+	}
+
+	h := &Handler{}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+			h.handleLabError(rec, req, tc.err)
+
+			// 1. Verify HTTP Status Code
+			if rec.Code != tc.expectedStatus {
+				t.Errorf("expected HTTP %d, got %d", tc.expectedStatus, rec.Code)
+			}
+
+			// 2. Verify Exact Expected Safe Error Message
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("failed to parse response JSON: %v, raw body: %s", err, rec.Body.String())
+			}
+			if body["error"] != tc.expectedError {
+				t.Errorf("expected error %q, got %q", tc.expectedError, body["error"])
+			}
+
+			// 3. Response-Body Sanitization Check: Zero leak of sensitive tokens
+			rawBody := rec.Body.String()
+			for _, token := range tc.sensitiveTokens {
+				if strings.Contains(rawBody, token) {
+					t.Errorf("SECURITY LEAK: response body contains sensitive token %q: %s", token, rawBody)
+				}
+			}
+
+			// 4. Global Sanitization Check: Zero leak of database drivers or SQL dialect keywords
+			globalSensitives := []string{"SELECT", "INSERT", "UPDATE", "DELETE", "pgx", "pgconn", "SQLSTATE"}
+			for _, gs := range globalSensitives {
+				if strings.Contains(rawBody, gs) {
+					t.Errorf("SECURITY LEAK: response body contains global sensitive keyword %q: %s", gs, rawBody)
+				}
+			}
+		})
+	}
+
+	// 5. Integration Verification: Protected repository query is NEVER executed on context rejection
+	t.Run("Protected repository query is never executed on context rejection", func(t *testing.T) {
+		for _, rejectionErr := range []error{
+			&pgconn.PgError{Code: "42501", Message: "tenant membership denied"},
+			&pgconn.PgError{Code: "28000", Message: "session expired"},
+			database.ErrNoSessionToken,
+			&pgconn.PgError{Code: "P0001", Message: "unhandled trigger failure"},
+			errors.New("database connection refused"),
+		} {
+			repoCalled := false
+			handler := &Handler{
+				withAuthCtxFn: func(ctx context.Context, pool *pgxpool.Pool, tokenHash string, orgID *string, fn func(pgx.Tx, *database.AuthContext) error) error {
+					return rejectionErr
+				},
+			}
+
+			req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/organizations/%s/lab/courses", testOrgUUID), nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("org", testOrgUUID.String())
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+			rec := httptest.NewRecorder()
+
+			handler.listCourses(rec, req)
+
+			if repoCalled {
+				t.Fatalf("SECURITY BREACH: repository operation executed despite rejection with %v", rejectionErr)
+			}
+			if rec.Code == http.StatusOK {
+				t.Fatalf("SECURITY BREACH: HTTP 200 returned despite rejection with %v", rejectionErr)
+			}
+		}
+	})
+}
