@@ -24,6 +24,9 @@ Search-based entries show whether code exists, not that it works.
 | Medium | RLS may silently hide rows from the shared pool (see `RELEASE_READINESS.md`). | Unverified |
 | Medium | Readiness matrix overstates scope and marks a missed latency target as PASS. | Superseded by `RELEASE_READINESS.md` |
 | High | `/participants` public, forged `/leave`, guest token minting for supplied identities, waiting room not persisted, no RLS on users and participants. | Fixed on branch, verified in CI run 41367090494 |
+| High | Participant identities in URL paths were never decoded, so browser requests with `user%3A...` missed their target: co-host grants failed, and remove, mute and promote read it the same way. | Fixed on branch; regression test in CI |
+| High | Join and room lookup limits of 15 and 30 per minute per IP and room would block a class sharing one campus address. | Fixed on branch |
+| Open | Repeated LiveKit reconnects in the three-browser CI journey; cause unknown. | Open, blocks P1-05 and P1-08 |
 | Low | Root `package.json` scripts hardcode a Windows path; 100+ milestone reports clutter `connect-main/`. | Open |
 
 ## Register
@@ -38,10 +41,10 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | P1-02 | 1 | Scheduled meetings | `room`, `000017` | `/schedule` | no | TESTING | API and real Chrome pass, CI run 41367090494; no reminders; no mobile screen |
 | P1-03 | 1 | Meeting passcodes | `room`, `000017` | yes | yes | TESTING | API and real Chrome pass, CI run 41367090494; mobile prompt typechecked only, not run on a device |
 | P1-04 | 1 | Lock, end, waiting room | `room` | yes | partial | TESTING | API passes; web and Android waiting flows never run in a browser or on a device |
-| P1-05 | 1 | Mic, camera, screen share via LiveKit | token | yes | yes | TESTING | Device evidence is historical |
+| P1-05 | 1 | Mic, camera, screen share via LiveKit | token | yes | yes | TESTING | Remote video playback verified on a local LiveKit server; connections intermittently reconnect in CI; screen share step not yet reached; LiveKit Cloud not verified; Android evidence is historical |
 | P1-06 | 1 | Remove, mute, speaker roles | `room` | yes | partial | TESTING | |
 | P1-07 | 1 | Co-host role, host transfer | `room`, `000018` | yes | partial | TESTING | API, concurrency and succession pass in CI run 41367090494; web panel never run in a browser because CI has no LiveKit; Android shows role and moderation only, no grant or transfer |
-| P1-08 | 1 | Chat, hands, reactions | no server persistence | yes | partial | IN_PROGRESS | Client-side data channel; unaudited authorization |
+| P1-08 | 1 | Chat, announcements, hands, reactions | `interaction`, `000020` | yes | partial | TESTING | API passes in CI run 41376757634. Browser journey passes these steps on some runs but is intermittent (see `EXECUTION_STATE.md`). Android uses the same API, typechecked and launched only, no announcement sending |
 | P1-09 | 1 | Signup, login, logout, sessions, Google | `auth` | yes | yes | TESTING | |
 | P1-10 | 1 | Password recovery, email verification | no | no | no | BLOCKED | Needs an email provider; none is authorized under the budget |
 | P1-11 | 1 | Profile and avatar | `auth` | yes | yes | TESTING | |
@@ -54,13 +57,13 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | P2-06 | 2 | Institutions, courses, enrollment | `institution`, `000019` | `/institution` | no | TESTING | Passes in API tests and real Chrome, CI run 41367090494; no subjects or classrooms as separate entities; no Android screens |
 | P2-07 | 2 | Notifications | no | no | no | NOT_STARTED | |
 | P2-08 | 2 | Admin dashboard | audit service only | no | no | NOT_STARTED | |
-| P3-01 | 3 | Trusted session tracking | signed webhook, `000010` | n/a | n/a | TESTING | CI run 41343853509 passes; webhook not registered in LiveKit, migrations not in production |
+| P3-01 | 3 | Trusted session tracking | signed webhook, `000010` | n/a | n/a | TESTING | Real signed webhooks from a local LiveKit server recorded sessions in CI; not registered on the production LiveKit project, migrations not in production |
 | P3-02 | 3 | Duration attendance and reconciliation | worker | n/a | n/a | TESTING | Queue lifecycle passes in CI run 41358542181; process restart mid-job untested |
 | P3-03 | 3 | Versioned attendance rules | `institution` | yes | no | TESTING | API passes in CI run 41367090494; web form not exercised in a browser; early-leave rule and weights missing |
 | P3-04 | 3 | Attendance correction with audit | `institution` | yes | no | TESTING | API and audit row pass in CI run 41367090494; web correction not exercised in a browser |
 | P3-05 | 3 | Dashboards and exports | summary, CSV | per-class table | no | IN_PROGRESS | API summary and CSV pass; no dashboard for engagement, disconnections or device signals |
 | P3-06 | 3 | Engagement and device signals | no | no | no | NOT_STARTED | |
-| P3-07 | 3 | Polls, quizzes, doubts | no | no | no | NOT_STARTED | |
+| P3-07 | 3 | Polls, quizzes, doubts | `interaction`, `000021` | yes | no | IN_PROGRESS | API passes in CI run 41376757634; web passed in a real browser on some runs; no Android screen; no question bank |
 | P3-08 | 3 | Whiteboard, breakout rooms | no | no | no | NOT_STARTED | |
 | P4-01 | 4 | Course workspaces and exercises | no | no | no | NOT_STARTED | |
 | P4-02 | 4 | Multi-language editor | no | no | no | NOT_STARTED | |
