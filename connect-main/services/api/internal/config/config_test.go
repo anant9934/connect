@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/tathastu/connect/services/api/internal/config"
@@ -121,4 +122,55 @@ func TestConfigCanonicalDomainInclusion(t *testing.T) {
 	}
 
 	_ = os.Setenv("APP_ENV", "development")
+}
+
+func clearDatabaseEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"DATABASE_URL", "WORKER_DATABASE_URL", "MIGRATION_DATABASE_URL", "WORKER_ENABLED", "APP_ENV"} {
+		t.Setenv(key, "")
+	}
+}
+
+func TestLoad_WorkerEnabledRequiresItsOwnURL(t *testing.T) {
+	clearDatabaseEnv(t)
+	t.Setenv("WORKER_ENABLED", "true")
+	t.Setenv("DATABASE_URL", "postgres://connect_app@db/x")
+	if _, err := config.Load(); err == nil || !strings.Contains(err.Error(), "WORKER_DATABASE_URL") {
+		t.Fatalf("expected a WORKER_DATABASE_URL error, got %v", err)
+	}
+}
+
+func TestLoad_WorkerURLMustDifferFromAPIURL(t *testing.T) {
+	clearDatabaseEnv(t)
+	t.Setenv("WORKER_ENABLED", "true")
+	t.Setenv("DATABASE_URL", "postgres://same@db/x")
+	t.Setenv("WORKER_DATABASE_URL", "postgres://same@db/x")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("identical API and worker URLs were accepted")
+	}
+}
+
+func TestLoad_ProductionRefusesMigrationURL(t *testing.T) {
+	clearDatabaseEnv(t)
+	t.Setenv("APP_ENV", config.EnvProduction)
+	t.Setenv("MIGRATION_DATABASE_URL", "postgres://admin@db/x")
+	if _, err := config.Load(); err == nil || !strings.Contains(err.Error(), "MIGRATION_DATABASE_URL") {
+		t.Fatalf("expected a MIGRATION_DATABASE_URL error, got %v", err)
+	}
+}
+
+func TestLoadWorker_NeverUsesAPIURL(t *testing.T) {
+	clearDatabaseEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://connect_app@db/x")
+	if _, err := config.LoadWorker(); err == nil {
+		t.Fatal("worker started from DATABASE_URL alone")
+	}
+	t.Setenv("WORKER_DATABASE_URL", "postgres://connect_worker@db/x")
+	cfg, err := config.LoadWorker()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DatabaseURL != "" || cfg.WorkerDatabaseURL != "postgres://connect_worker@db/x" {
+		t.Fatalf("unexpected URLs: api=%q worker=%q", cfg.DatabaseURL, cfg.WorkerDatabaseURL)
+	}
 }

@@ -23,6 +23,9 @@ type Config struct {
 	Port                   int
 	LogLevel               string
 	DatabaseURL            string
+	WorkerDatabaseURL      string
+	WorkerDBMaxOpenConns   int32
+	WorkerDBMaxIdleConns   int32
 	DBMaxOpenConns         int32
 	DBMaxIdleConns         int32
 	DBConnMaxLifetime      time.Duration
@@ -72,6 +75,22 @@ type Config struct {
 
 // Load reads and validates configuration from environment variables.
 func Load() (*Config, error) {
+	return load(false)
+}
+
+// LoadWorker loads configuration for the standalone worker, which holds no API database setting.
+func LoadWorker() (*Config, error) {
+	cfg, err := load(true)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.WorkerDatabaseURL == "" {
+		return nil, errors.New("configuration error: WORKER_DATABASE_URL is required to run the worker; it never falls back to DATABASE_URL")
+	}
+	return cfg, nil
+}
+
+func load(forWorker bool) (*Config, error) {
 	loadDotEnv()
 
 	appEnv := getEnv("APP_ENV", EnvDevelopment)
@@ -162,6 +181,9 @@ func Load() (*Config, error) {
 		AppEnv:                 appEnv,
 		Port:                   port,
 		LogLevel:               getEnv("LOG_LEVEL", "info"),
+		WorkerDatabaseURL:      os.Getenv("WORKER_DATABASE_URL"),
+		WorkerDBMaxOpenConns:   envInt32("WORKER_DB_MAX_OPEN_CONNS", 5),
+		WorkerDBMaxIdleConns:   envInt32("WORKER_DB_MAX_IDLE_CONNS", 1),
 		DatabaseURL:            getEnv("DATABASE_URL", "postgres://connect_app:connect_dev_password@localhost:5432/connect_db?sslmode=disable"),
 		DBMaxOpenConns:         dbMaxOpen,
 		DBMaxIdleConns:         dbMaxIdle,
@@ -223,6 +245,24 @@ func Load() (*Config, error) {
 		}
 	}
 
+	if forWorker {
+		cfg.WorkerEnabled = cfg.WorkerDatabaseURL != ""
+	}
+	if err := validateDatabaseSeparation(cfg); err != nil {
+		return nil, err
+	}
+
+	// A standalone worker serves no traffic, so API-only settings do not apply to it.
+	if forWorker {
+		cfg.WorkerEnabled = true
+		cfg.DatabaseURL = ""
+		if cfg.AppEnv == EnvProduction && cfg.StorageProvider == "r2" &&
+			(cfg.R2Endpoint == "" || cfg.R2Bucket == "" || cfg.R2AccessKeyID == "" || cfg.R2SecretAccessKey == "") {
+			return nil, errors.New("production configuration error: valid R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY required when STORAGE_PROVIDER=r2")
+		}
+		return cfg, nil
+	}
+
 	// Strict Production Security Gates: Fail closed if production missing critical secrets
 	if cfg.AppEnv == EnvProduction {
 		if cfg.DatabaseURL == "" || strings.Contains(cfg.DatabaseURL, "connect_dev_password") {
@@ -253,6 +293,29 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// validateDatabaseSeparation refuses configurations that blur the three database identities.
+// The roles themselves are verified against the live connection at startup.
+func validateDatabaseSeparation(cfg *Config) error {
+	if cfg.WorkerEnabled && cfg.WorkerDatabaseURL == "" {
+		return errors.New("configuration error: WORKER_DATABASE_URL is required when the worker is enabled; it never falls back to DATABASE_URL")
+	}
+	if cfg.WorkerDatabaseURL != "" && cfg.WorkerDatabaseURL == os.Getenv("DATABASE_URL") {
+		return errors.New("configuration error: WORKER_DATABASE_URL must not be the same as DATABASE_URL")
+	}
+	if cfg.AppEnv == EnvProduction && os.Getenv("MIGRATION_DATABASE_URL") != "" {
+		return errors.New("production configuration error: MIGRATION_DATABASE_URL must not be set on runtime services")
+	}
+	return nil
+}
+
+func envInt32(key string, defaultVal int32) int32 {
+	parsed, err := strconv.ParseInt(os.Getenv(key), 10, 32)
+	if err != nil || parsed <= 0 {
+		return defaultVal
+	}
+	return int32(parsed)
 }
 
 func getEnv(key, defaultVal string) string {

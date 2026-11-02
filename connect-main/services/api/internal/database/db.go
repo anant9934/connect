@@ -15,16 +15,29 @@ type DB struct {
 	Pool *pgxpool.Pool
 }
 
-// Connect initializes a connection pool using pgxpool with configured pool limits.
+// Connect opens the API's pool from DATABASE_URL.
 func Connect(ctx context.Context, cfg *config.Config) (*DB, error) {
-	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	return connectPool(ctx, cfg.DatabaseURL, cfg.DBMaxOpenConns, cfg.DBMaxIdleConns, cfg.DBConnMaxLifetime)
+}
+
+// ConnectWorker opens the worker's own pool from WORKER_DATABASE_URL. It never uses DATABASE_URL.
+func ConnectWorker(ctx context.Context, cfg *config.Config) (*DB, error) {
+	if cfg.WorkerDatabaseURL == "" {
+		return nil, fmt.Errorf("WORKER_DATABASE_URL is required to run the worker")
+	}
+	return connectPool(ctx, cfg.WorkerDatabaseURL, cfg.WorkerDBMaxOpenConns, cfg.WorkerDBMaxIdleConns, cfg.DBConnMaxLifetime)
+}
+
+// connectPool initializes a connection pool using pgxpool with configured pool limits.
+func connectPool(ctx context.Context, databaseURL string, maxConns, minConns int32, lifetime time.Duration) (*DB, error) {
+	poolConfig, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse database configuration: %w", err)
 	}
 
-	poolConfig.MaxConns = cfg.DBMaxOpenConns
-	poolConfig.MinConns = cfg.DBMaxIdleConns
-	poolConfig.MaxConnLifetime = cfg.DBConnMaxLifetime
+	poolConfig.MaxConns = maxConns
+	poolConfig.MinConns = minConns
+	poolConfig.MaxConnLifetime = lifetime
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
