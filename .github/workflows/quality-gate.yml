@@ -313,6 +313,8 @@ jobs:
           journey lifecycle e2e_lifecycle.mjs
           sleep 61
           journey responsive e2e_responsive.mjs
+          sleep 61
+          journey acceptance e2e_acceptance.mjs
           cat /tmp/e2e.txt
           [ $status -eq 0 ] || tail -20 /tmp/api.log
           grep -E 'E2E FAIL' /tmp/e2e.txt | cut -c1-400 | head -6 | while IFS= read -r line; do
@@ -337,7 +339,7 @@ jobs:
           python3 - <<'PY'
           import glob, os, re
           passed, failed, missing = [], [], []
-          expected = ['schedule', 'history', 'admin', 'attendance', 'board', 'breakouts', 'institution', 'account', 'lifecycle', 'responsive']
+          expected = ['schedule', 'history', 'admin', 'attendance', 'board', 'breakouts', 'institution', 'account', 'lifecycle', 'responsive', 'acceptance']
           def escape(text):
               return text.replace('%', '%25').replace('\r', '').replace('\n', '%0A')
           for name in expected:

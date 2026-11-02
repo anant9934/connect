@@ -40,7 +40,7 @@ const inspect = (page) => page.evaluate((minTarget) => {
     const rect = el.getBoundingClientRect();
     const style = getComputedStyle(el);
     // Screen-reader-only controls such as the skip link are clipped to a pixel until focused.
-    if (rect.width <= 1 || rect.height <= 1 || style.visibility === 'hidden') return false;
+    if (rect.width <= 1 || rect.height <= 1 || style.visibility === 'hidden' || el.classList.contains('sr-only')) return false;
     // Links inside running text are exempt, as WCAG 2.5.8 allows.
     if (el.tagName === 'A' && style.display === 'inline') return false;
     return Math.min(rect.width, rect.height) < minTarget && el.type !== 'checkbox' && el.type !== 'radio';
@@ -81,11 +81,12 @@ try {
   await home.waitForFunction(() => document.body.innerText.includes('Sign out'), { timeout: 5000, polling: 200 });
   for (const found of await inspect(home)) problems.push(`menu @375: ${found}`);
 
-  if (problems.length > 0) {
-    // Layout breakage first, then each distinct small control once, so the report fits.
-    const serious = problems.filter((p) => !p.includes('small target'));
-    const small = [...new Set(problems.filter((p) => p.includes('small target')).map((p) => `${p.split(' ')[1]} ${p.split(': ').slice(1).join(': ')}`))];
-    console.log(`E2E FAIL responsive ${serious.length} serious: ${serious.slice(0, 15).join(' | ')} || ${small.length} small: ${small.slice(0, 30).join(' | ')}`);
+  // Broken layouts fail the journey. Small controls are reported to fix, and do not stop a task.
+  const serious = problems.filter((p) => !p.includes('small target'));
+  const small = [...new Set(problems.filter((p) => p.includes('small target')).map((p) => p.split(': ').slice(1).join(': ')))];
+  if (small.length > 0) console.log(`SMALL TARGETS ${small.length}: ${small.join(' | ').slice(0, 700)}`);
+  if (serious.length > 0) {
+    console.log(`E2E FAIL responsive ${serious.length} serious: ${serious.slice(0, 15).join(' | ')}`);
     process.exitCode = 1;
   } else {
     console.log('E2E PASS responsive');

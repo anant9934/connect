@@ -45,7 +45,8 @@ const waitForText = (page, text, timeout = 15000) =>
 const waitGone = (page, text, timeout = 15000) =>
   page.waitForFunction((t) => !document.body.innerText.includes(t), { timeout, polling: 200 }, text);
 const typeSearch = async (page, text) => {
-  await page.click('#history-search', { clickCount: 3 });
+  await page.focus('#history-search');
+  await page.$eval('#history-search', (el) => el.select());
   await page.keyboard.press('Backspace');
   await page.type('#history-search', text);
 };

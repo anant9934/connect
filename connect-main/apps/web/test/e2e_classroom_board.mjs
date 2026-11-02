@@ -186,8 +186,14 @@ try {
   await waitForColor(member, BLUE);
 
   step('a closed presentation can be reopened, and stopping ends it for everyone');
+  const covering = await member.$eval('[aria-label="Close board"]', (el) => {
+    const r = el.getBoundingClientRect();
+    const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return el.contains(top) ? null : `${top?.tagName}.${String(top?.className).slice(0, 60)} at ${Math.round(r.x)},${Math.round(r.y)}`;
+  });
+  assert.equal(covering, null, 'the close button cannot be tapped on a phone');
   await member.click('[aria-label="Close board"]');
-  await member.waitForSelector('[data-testid="open-presentation"]');
+  await member.waitForSelector('[data-testid="open-presentation"]', { timeout: 10000 });
   await member.click('[data-testid="open-presentation"]');
   await pageLabel(member, 'Page 3 of 3');
   await host.$$eval('button', (els) => els.find((b) => b.textContent.trim() === 'Stop presenting').click());

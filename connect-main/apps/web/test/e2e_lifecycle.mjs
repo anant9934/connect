@@ -130,8 +130,14 @@ try {
 
   step('removing a person disconnects them and keeps them out');
   await host.waitForFunction(() => document.querySelector('button[aria-label="Remove participant"]'), { timeout: 15000, polling: 200 });
+  // The row is the nearest ancestor holding one person's button, so the right person is removed.
   const removed = await host.$$eval('button[aria-label="Remove participant"]', (buttons) => {
-    const target = buttons.find((b) => (b.closest('div[class*="rounded"]')?.parentElement?.innerText || '').includes('Memberh')) || null;
+    const rowOf = (b) => {
+      let el = b;
+      while (el.parentElement && el.parentElement.querySelectorAll('button[aria-label="Remove participant"]').length === 1) el = el.parentElement;
+      return el;
+    };
+    const target = buttons.find((b) => rowOf(b).innerText.includes('Memberh'));
     if (target) target.click();
     return Boolean(target);
   });
