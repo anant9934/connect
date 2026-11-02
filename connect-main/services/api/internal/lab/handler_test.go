@@ -28,7 +28,7 @@ func TestHandler_CreateAssignmentValidation(t *testing.T) {
 
 	t.Run("fails when title or course ID is missing", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
-			"title": "",
+			"title":         "",
 			"lab_course_id": uuid.Nil,
 		})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/test/lab/assignments", bytes.NewReader(body))
@@ -41,7 +41,7 @@ func TestHandler_CreateAssignmentValidation(t *testing.T) {
 
 	t.Run("fails when title exceeds 255 chars", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
-			"title": strings.Repeat("A", 256),
+			"title":         strings.Repeat("A", 256),
 			"lab_course_id": uuid.New(),
 		})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/test/lab/assignments", bytes.NewReader(body))
@@ -57,9 +57,9 @@ func TestHandler_CreateAssignmentValidation(t *testing.T) {
 
 	t.Run("fails when starter code exceeds 64KB", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
-			"title": "Valid Title",
+			"title":         "Valid Title",
 			"lab_course_id": uuid.New(),
-			"starter_code": strings.Repeat("x", 65537),
+			"starter_code":  strings.Repeat("x", 65537),
 		})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/test/lab/assignments", bytes.NewReader(body))
 		rec := httptest.NewRecorder()
@@ -76,14 +76,14 @@ func TestHandler_CreateAssignmentValidation(t *testing.T) {
 		var testCases []LabTestCase
 		for i := 0; i < 51; i++ {
 			testCases = append(testCases, LabTestCase{
-				Input: "1",
+				Input:          "1",
 				ExpectedOutput: "1",
 			})
 		}
 		body, _ := json.Marshal(map[string]any{
-			"title": "Valid Title",
+			"title":         "Valid Title",
 			"lab_course_id": uuid.New(),
-			"test_cases": testCases,
+			"test_cases":    testCases,
 		})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/test/lab/assignments", bytes.NewReader(body))
 		rec := httptest.NewRecorder()
@@ -119,7 +119,7 @@ func TestHandler_SubmitAssignmentValidation(t *testing.T) {
 
 	t.Run("fails on empty source code", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
-			"language": "python",
+			"language":    "python",
 			"source_code": "",
 		})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/test/lab/assignments/"+assignID+"/submit", bytes.NewReader(body))
@@ -136,7 +136,7 @@ func TestHandler_SubmitAssignmentValidation(t *testing.T) {
 
 	t.Run("fails on oversized source code > 64KB", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
-			"language": "python",
+			"language":    "python",
 			"source_code": strings.Repeat("p", 65537),
 		})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/test/lab/assignments/"+assignID+"/submit", bytes.NewReader(body))
@@ -153,7 +153,7 @@ func TestHandler_SubmitAssignmentValidation(t *testing.T) {
 
 	t.Run("fails on missing language", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
-			"language": "",
+			"language":    "",
 			"source_code": "print('hello')",
 		})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/test/lab/assignments/"+assignID+"/submit", bytes.NewReader(body))
@@ -207,12 +207,12 @@ func TestHandler_DeadlineAndLanguageEnforcementLogic(t *testing.T) {
 
 	assignmentPast := &LabAssignment{
 		AllowedLanguages: []string{"python", "javascript"},
-		DueAt: pastDeadline,
+		DueAt:            pastDeadline,
 	}
 
 	assignmentFuture := &LabAssignment{
 		AllowedLanguages: []string{"python", "javascript"},
-		DueAt: futureDeadline,
+		DueAt:            futureDeadline,
 	}
 
 	// Test deadline check

@@ -6,30 +6,30 @@ import (
 )
 
 var (
-	ErrDepartmentNotFound    = errors.New("department not found")
-	ErrCourseNotFound        = errors.New("course not found")
-	ErrBatchNotFound         = errors.New("course batch not found")
-	ErrAllocationNotFound    = errors.New("faculty allocation not found")
-	ErrEnrollmentNotFound    = errors.New("course enrollment not found")
-	ErrSessionNotFound       = errors.New("class session not found")
-	ErrCourseMismatch        = errors.New("course mismatch between batch and faculty allocation")
-	ErrInactiveMembership    = errors.New("user does not have an active institutional membership")
-	ErrAllocationRevoked     = errors.New("faculty allocation is revoked or expired")
-	ErrStudentNotEnrolled    = errors.New("student is not actively enrolled in batch for session time")
-	ErrInvalidRevocation     = errors.New("revocation reason must be at least 10 characters")
-	ErrInvalidDateRange      = errors.New("end date must be after start date")
+	ErrDepartmentNotFound = errors.New("department not found")
+	ErrCourseNotFound     = errors.New("course not found")
+	ErrBatchNotFound      = errors.New("course batch not found")
+	ErrAllocationNotFound = errors.New("faculty allocation not found")
+	ErrEnrollmentNotFound = errors.New("course enrollment not found")
+	ErrSessionNotFound    = errors.New("class session not found")
+	ErrCourseMismatch     = errors.New("course mismatch between batch and faculty allocation")
+	ErrInactiveMembership = errors.New("user does not have an active institutional membership")
+	ErrAllocationRevoked  = errors.New("faculty allocation is revoked or expired")
+	ErrStudentNotEnrolled = errors.New("student is not actively enrolled in batch for session time")
+	ErrInvalidRevocation  = errors.New("revocation reason must be at least 10 characters")
+	ErrInvalidDateRange   = errors.New("end date must be after start date")
 )
 
 // Department represents an academic department within an institutional tenant.
 type Department struct {
-	ID                string     `json:"id"`
-	OrganizationID    string     `json:"organizationId"`
-	Code              string     `json:"code"` // e.g. "CSE"
-	Name              string     `json:"name"`
-	CoordinatorUserID *string    `json:"coordinatorUserId,omitempty"`
-	Status            string     `json:"status"` // 'active', 'archived'
-	CreatedAt         time.Time  `json:"createdAt"`
-	UpdatedAt         time.Time  `json:"updatedAt"`
+	ID                string    `json:"id"`
+	OrganizationID    string    `json:"organizationId"`
+	Code              string    `json:"code"` // e.g. "CSE"
+	Name              string    `json:"name"`
+	CoordinatorUserID *string   `json:"coordinatorUserId,omitempty"`
+	Status            string    `json:"status"` // 'active', 'archived'
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
 }
 
 // Course represents an academic curriculum course.
@@ -66,7 +66,7 @@ type FacultyAllocation struct {
 	OrganizationID   string     `json:"organizationId"`
 	CourseID         string     `json:"courseId"`
 	FacultyUserID    string     `json:"facultyUserId"`
-	Role             string     `json:"role"` // 'primary_instructor', 'teaching_assistant'
+	Role             string     `json:"role"`   // 'primary_instructor', 'teaching_assistant'
 	Status           string     `json:"status"` // 'active', 'ended', 'revoked'
 	EffectiveFrom    time.Time  `json:"effectiveFrom"`
 	EffectiveTo      *time.Time `json:"effectiveTo,omitempty"`

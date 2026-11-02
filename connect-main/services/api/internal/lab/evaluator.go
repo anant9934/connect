@@ -32,8 +32,8 @@ func CompareOutputs(actual, expected string) bool {
 func EvaluateSubmissionAgainstTestCases(
 	testCases []LabTestCase,
 	outputs map[string]string, // test_case_id string -> stdout
-	errors map[string]string,  // test_case_id string -> stderr
-	durations map[string]int,  // test_case_id string -> duration_ms
+	errors map[string]string, // test_case_id string -> stderr
+	durations map[string]int, // test_case_id string -> duration_ms
 	maxScore int,
 	isStudentCaller bool,
 ) (score int, passedCount int, totalCount int, status string, results []TestCaseResult) {

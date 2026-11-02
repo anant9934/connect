@@ -98,14 +98,14 @@ type LabTestCase struct {
 
 // TestCaseResult is the outcome of running one test case.
 type TestCaseResult struct {
-	TestCaseID     uuid.UUID `json:"test_case_id"`
-	Passed         bool      `json:"passed"`
-	ExecutionTimeMS int      `json:"execution_time_ms"`
-	Input          string    `json:"input,omitempty"`
-	ExpectedOutput string    `json:"expected_output,omitempty"`
-	ActualOutput   string    `json:"actual_output,omitempty"`
-	ErrorMessage   string    `json:"error_message,omitempty"`
-	IsHidden       bool      `json:"is_hidden"`
+	TestCaseID      uuid.UUID `json:"test_case_id"`
+	Passed          bool      `json:"passed"`
+	ExecutionTimeMS int       `json:"execution_time_ms"`
+	Input           string    `json:"input,omitempty"`
+	ExpectedOutput  string    `json:"expected_output,omitempty"`
+	ActualOutput    string    `json:"actual_output,omitempty"`
+	ErrorMessage    string    `json:"error_message,omitempty"`
+	IsHidden        bool      `json:"is_hidden"`
 }
 
 // LabSubmission records a student's solution attempt and evaluation.
