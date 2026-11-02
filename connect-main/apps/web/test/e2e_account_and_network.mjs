@@ -2,6 +2,7 @@
 // Requires CHROME_PATH, WEB_URL and API_URL pointing at disposable local services.
 import puppeteer from 'puppeteer-core';
 import assert from 'node:assert/strict';
+import { describePages } from './e2e_report.mjs';
 import { writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 
@@ -223,6 +224,7 @@ try {
   console.log('E2E PASS account and network');
 } catch (err) {
   console.log(`E2E FAIL account and network [${currentStep}] ${err.message.replace(/\s+/g, ' ').slice(0, 300)}`);
+  for (const line of await describePages(browser)) console.log(line);
   process.exitCode = 1;
 } finally {
   await browser.close();

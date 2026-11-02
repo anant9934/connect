@@ -155,6 +155,7 @@ jobs:
         env:
           ADMIN_URL: "postgres://connect_admin:connect_disposable_ci_password_456@localhost:5432/connect_test_ci_runner?sslmode=disable"
         run: |
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000029.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000028.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000027.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000026.sql
@@ -194,6 +195,7 @@ jobs:
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000026_calendar_export.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000027_classroom_boards.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000028_breakout_rooms.sql
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000029_fail_closed_checks.sql
 
       - name: Verify RLS Under Restricted Runtime Roles
         env:
@@ -267,6 +269,11 @@ jobs:
           for _ in $(seq 1 60); do curl -sf http://localhost:8080/health/live >/dev/null && curl -sf http://localhost:3000 >/dev/null && break; sleep 1; done
           export CHROME_PATH="$(which google-chrome)"
           status=0
+          mkdir -p /tmp/journeys
+          journey() {
+            node "test/$2" > "/tmp/journeys/$1.txt" 2>&1 || status=1
+            cat "/tmp/journeys/$1.txt" >> /tmp/e2e.txt
+          }
           # A local media server. This proves our integration, not the LiveKit Cloud account.
           start_livekit() {
             docker rm -f livekit > /dev/null 2>&1 || true
@@ -288,24 +295,24 @@ jobs:
           done
           { echo "==== server log ===="; docker logs livekit 2>&1 | grep -E 'negotiat|participant closing' | tail -6 | cut -c1-200; } >> /tmp/media_trace.txt
           echo "runner: $(nproc) cpus, load $(cut -d' ' -f1-3 /proc/loadavg)" >> /tmp/media_trace.txt
-          node test/e2e_schedule_passcode.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          journey schedule e2e_schedule_passcode.mjs
           # Signup allows 10 a minute from one address, so each journey starts a new window.
           sleep 61
-          node test/e2e_history.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          journey history e2e_history.mjs
           sleep 61
-          node test/e2e_admin.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          journey admin e2e_admin.mjs
           sleep 61
-          node test/e2e_attendance.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          journey attendance e2e_attendance.mjs
           sleep 61
-          node test/e2e_classroom_board.mjs >> /tmp/e2e.txt 2>&1 || status=1
-          node test/e2e_breakouts.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          journey board e2e_classroom_board.mjs
+          journey breakouts e2e_breakouts.mjs
           sleep 61
-          node test/e2e_institution.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          journey institution e2e_institution.mjs
           sleep 61
-          node test/e2e_account_and_network.mjs >> /tmp/e2e.txt 2>&1 || status=1
-          node test/e2e_lifecycle.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          journey account e2e_account_and_network.mjs
+          journey lifecycle e2e_lifecycle.mjs
           sleep 61
-          node test/e2e_responsive.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          journey responsive e2e_responsive.mjs
           cat /tmp/e2e.txt
           [ $status -eq 0 ] || tail -20 /tmp/api.log
           grep -E 'E2E FAIL' /tmp/e2e.txt | cut -c1-400 | head -6 | while IFS= read -r line; do
@@ -323,6 +330,59 @@ jobs:
           done
           kill %1 %2 2>/dev/null || true
           exit $status
+
+      - name: Report Browser Journeys
+        if: ${{ !cancelled() }}
+        run: |
+          python3 - <<'PY'
+          import glob, os, re
+          passed, failed, missing = [], [], []
+          expected = ['schedule', 'history', 'admin', 'attendance', 'board', 'breakouts', 'institution', 'account', 'lifecycle', 'responsive']
+          def escape(text):
+              return text.replace('%', '%25').replace('\r', '').replace('\n', '%0A')
+          for name in expected:
+              path = f'/tmp/journeys/{name}.txt'
+              if not os.path.exists(path):
+                  missing.append(name)
+                  continue
+              text = open(path, errors='replace').read()
+              steps = re.findall(r'^STEP (.*)$', text, re.M)
+              if re.search(r'^E2E PASS', text, re.M) and not re.search(r'^E2E FAIL', text, re.M):
+                  passed.append(f'{name} ({len(steps)} steps)')
+              else:
+                  failed.append((name, steps, text))
+          print(f"::notice title=Journey summary::passed {len(passed)}, failed {len(failed)}, did not run {len(missing)} of {len(expected)}. Passed: {'; '.join(passed)}. Did not run: {', '.join(missing)}")
+          for name, steps, text in failed[:8]:
+              detail = [line for line in text.splitlines() if re.match(r'E2E FAIL|PAGE |CONSOLE |page ', line)]
+              body = 'steps passed before the failure: ' + ' > '.join(steps[:-1]) + '\n' + '\n'.join(detail) + '\n' + text[-800:] if not detail else 'steps passed before the failure: ' + ' > '.join(steps[:-1]) + '\n' + '\n'.join(detail)
+              print(f"::notice title=Journey {name} FAILED::{escape(body[:3800])}")
+          PY
+
+      - name: Check Logs For Secrets
+        if: ${{ !cancelled() }}
+        run: |
+          status=0
+          for pattern in 'connect_disposable_ci_password_456' 'disposable_livekit_secret_for_browser_tests' 'correct-horse-battery-9' 'a-new-password-77' 'tc_session=' 'password_hash' 'argon2id'; do
+            if cat /tmp/api.log /tmp/web.log /tmp/e2e.txt 2>/dev/null | grep -qF -- "$pattern"; then
+              echo "::notice title=Secret scan::FOUND a sensitive value in logs: pattern $pattern"
+              status=1
+            fi
+          done
+          if [ $status -eq 0 ]; then echo "::notice title=Secret scan::no sensitive values in API, web or journey logs"; fi
+          exit $status
+
+      - name: Upload Browser Journey Reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-journey-reports
+          path: |
+            /tmp/journeys/
+            /tmp/e2e.txt
+            /tmp/api.log
+            /tmp/web.log
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Report Media Trace
         if: ${{ !cancelled() }}

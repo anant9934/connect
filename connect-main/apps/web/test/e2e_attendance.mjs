@@ -3,6 +3,7 @@
 // records here are seeded with what it produces. Requires CHROME_PATH, WEB_URL, API_URL and ADMIN_DATABASE_URL.
 import puppeteer from 'puppeteer-core';
 import assert from 'node:assert/strict';
+import { describePages } from './e2e_report.mjs';
 import { execFileSync } from 'node:child_process';
 
 const WEB_URL = process.env.WEB_URL || 'http://localhost:3000';
@@ -200,6 +201,7 @@ try {
   console.log('E2E PASS attendance');
 } catch (err) {
   console.log(`E2E FAIL attendance [${currentStep}] ${err.message.replace(/\s+/g, ' ').slice(0, 300)}`);
+  for (const line of await describePages(browser)) console.log(line);
   process.exitCode = 1;
 } finally {
   await browser.close();

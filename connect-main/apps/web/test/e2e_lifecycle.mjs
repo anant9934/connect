@@ -2,6 +2,7 @@
 // Requires CHROME_PATH, WEB_URL and API_URL pointing at disposable local services.
 import puppeteer from 'puppeteer-core';
 import assert from 'node:assert/strict';
+import { describePages } from './e2e_report.mjs';
 
 const WEB_URL = process.env.WEB_URL || 'http://localhost:3000';
 const API_URL = process.env.API_URL || 'http://localhost:8080';
@@ -55,6 +56,11 @@ const clickText = (page, text) => page.$$eval('button', (els, t) => {
   if (!found) throw new Error(`no button ${t}`);
   found.click();
 }, text);
+// The room has a waiting room, so someone newly allowed in may need admitting.
+const inRoomOrWaiting = async (host, page) => {
+  await page.waitForFunction(() => document.body.innerText.includes('Please wait') || window.__tcDiagnostics?.getRoomState() === 'connected', { timeout: 30000, polling: 200 });
+  assert.ok(!(await page.evaluate(() => document.body.innerText.includes('locked'))), 'still locked');
+};
 const openPeople = async (page) => {
   await page.waitForSelector('button[aria-label="Toggle participants list"]', { timeout: 20000 });
   await page.click('button[aria-label="Toggle participants list"]');
@@ -105,8 +111,12 @@ try {
   await late.close();
 
   step('unlocking lets people in again');
-  await host.$$eval('button', (els) => els.find((e) => /^unlock/i.test(e.textContent.trim())).click());
-  await host.waitForFunction(() => ![...document.querySelectorAll('button')].some((e) => /^unlock/i.test(e.textContent.trim())), { timeout: 15000, polling: 200 });
+  await clickText(host, 'Unlock');
+  await waitForText(host, 'Lock Room');
+  const again = await preview(lateToken, code);
+  await again.click('form button[type="submit"]');
+  await inRoomOrWaiting(host, again);
+  await again.close();
 
   step('muting everyone silences a live microphone');
   await member.waitForSelector('button[aria-label="Turn on microphone"], button[aria-label="Mute microphone"], button[aria-label="Turn off microphone"]', { timeout: 15000 });
@@ -144,6 +154,7 @@ try {
   console.log('E2E PASS lifecycle');
 } catch (err) {
   console.log(`E2E FAIL lifecycle [${currentStep}] ${err.message.replace(/\s+/g, ' ').slice(0, 300)}`);
+  for (const line of await describePages(browser)) console.log(line);
   process.exitCode = 1;
 } finally {
   await browser.close();

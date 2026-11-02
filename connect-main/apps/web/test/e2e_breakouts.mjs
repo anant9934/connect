@@ -2,6 +2,7 @@
 // Requires CHROME_PATH, WEB_URL and API_URL pointing at disposable local services.
 import puppeteer from 'puppeteer-core';
 import assert from 'node:assert/strict';
+import { describePages } from './e2e_report.mjs';
 
 const WEB_URL = process.env.WEB_URL || 'http://localhost:3000';
 const API_URL = process.env.API_URL || 'http://localhost:8080';
@@ -117,6 +118,7 @@ try {
   console.log('E2E PASS breakouts');
 } catch (err) {
   console.log(`E2E FAIL breakouts [${currentStep}] ${err.message.replace(/\s+/g, ' ').slice(0, 300)}`);
+  for (const line of await describePages(browser)) console.log(line);
   process.exitCode = 1;
 } finally {
   await browser.close();
