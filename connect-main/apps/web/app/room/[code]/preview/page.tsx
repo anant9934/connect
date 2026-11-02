@@ -361,6 +361,9 @@ export default function RoomPreviewPage() {
           <ArrowLeft className="w-4 h-4" />
           <span>Exit</span>
         </Link>
+        <Link href="/diagnostics" className="text-xs sm:text-sm text-[#7258E8] underline inline-flex items-center min-h-[44px]">
+          Check connection
+        </Link>
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
           <span className="text-xs font-mono font-medium text-[#171717] bg-[#F7F7F3] px-2.5 py-1 rounded-md border border-[#E9E9E5]">
