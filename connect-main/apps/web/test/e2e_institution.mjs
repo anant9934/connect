@@ -12,7 +12,7 @@ const stamp = Date.now();
 const step = (name) => console.log(`STEP ${name}`);
 
 async function signup(name) {
-  const email = `${name}-${stamp}@example.test`;
+  const email = `${name.toLowerCase()}-${stamp}@example.test`;
   const res = await fetch(`${API_URL}/api/v1/auth/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Origin: WEB_URL },
