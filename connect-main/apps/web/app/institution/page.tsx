@@ -190,6 +190,9 @@ export default function InstitutionPage() {
       <div className="max-w-4xl mx-auto space-y-5">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-xl font-bold text-[#171717]">{org?.name}</h1>
+          <Link href="/notifications" className="text-sm font-semibold text-[#7258E8] underline inline-flex items-center min-h-[44px]">
+            Notifications
+          </Link>
           {orgs.length > 1 && (
             <select
               aria-label="Institution"

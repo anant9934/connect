@@ -153,6 +153,20 @@ try {
   assert.deepEqual(tabs, ['Classes', 'Attendance']);
   assert.equal(await studentPage.$('#schedule-class'), null, 'student can see the scheduling form');
 
+  step('the student is notified of the new classes, and only the student sees it');
+  await studentPage.goto(`${WEB_URL}/notifications`, { waitUntil: 'networkidle2' });
+  await studentPage.waitForFunction(() => {
+    if (document.body.innerText.includes('New classes scheduled')) return true;
+    return false;
+  }, { timeout: 40000, polling: 1000 }).catch(async () => {
+    await studentPage.reload({ waitUntil: 'networkidle2' });
+    await waitForText(studentPage, 'New classes scheduled', 20000);
+  });
+  await waitForText(studentPage, '1 unread');
+  await studentPage.$$eval('button', (els) => els.find((e) => e.textContent.trim() === 'Mark all as read').click());
+  await waitForText(studentPage, '0 unread');
+  await studentPage.goto(`${WEB_URL}/institution`, { waitUntil: 'networkidle2' });
+
   step('someone outside the institution sees no institution');
   const outsiderContext = await browser.createBrowserContext();
   const outsiderPage = await signIn(outsiderContext, outsider);
