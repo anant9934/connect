@@ -17,7 +17,7 @@ RETURNS BOOLEAN
 SECURITY DEFINER SET search_path = pg_catalog, public, connect_auth
 LANGUAGE sql STABLE AS $$
     SELECT connect_auth.is_super_admin()
-        OR (connect_auth.current_org_id() = p_org AND connect_auth.current_org_role() IN ('institution_admin', 'institution_auditor'))
+        OR (connect_auth.current_org_id() = p_org AND connect_auth.current_role() IN ('institution_admin', 'institution_auditor'))
 $$;
 
 REVOKE ALL ON FUNCTION connect_auth.can_oversee_org(UUID) FROM PUBLIC;
