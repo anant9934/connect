@@ -34,7 +34,7 @@ func main() {
 	logger.Info("connect_worker_initializing", slog.String("version", buildVersion))
 
 	// 2. Load configuration
-	cfg, err := config.Load()
+	cfg, err := config.LoadWorker()
 	if err != nil {
 		logger.Error("configuration_load_failed", slog.String("error", err.Error()))
 		os.Exit(1)
@@ -44,13 +44,23 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	db, err := database.Connect(ctx, cfg)
+	db, err := database.ConnectWorker(ctx, cfg)
 	if err != nil {
 		logger.Error("database_connection_failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 	defer db.Close()
 	logger.Info("database_connected_successfully")
+
+	if err := database.VerifyRuntimeIdentity(ctx, db.Pool, database.RoleWorker); err != nil {
+		if cfg.AppEnv == config.EnvProduction {
+			logger.Error("database_identity_rejected", slog.String("role", database.RoleWorker), slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		logger.Warn("database_identity_unverified_non_production", slog.String("role", database.RoleWorker), slog.String("error", err.Error()))
+	} else {
+		logger.Info("database_identity_verified", slog.String("role", database.RoleWorker))
+	}
 
 	// 4. Initialize Storage & Registry & Register default handlers
 	var filesStorage files.StorageProvider

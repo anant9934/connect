@@ -31,6 +31,23 @@ import (
 
 const buildVersion = "v0.1.0"
 
+// enforceDatabaseIdentity stops a production process connected as anything but its own restricted
+// role. Elsewhere it warns, so local setups without the roles keep working.
+func enforceDatabaseIdentity(db *database.DB, role string, cfg *config.Config, logger *slog.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	err := database.VerifyRuntimeIdentity(ctx, db.Pool, role)
+	if err == nil {
+		logger.Info("database_identity_verified", slog.String("role", role))
+		return
+	}
+	if cfg.AppEnv == config.EnvProduction {
+		logger.Error("database_identity_rejected", slog.String("role", role), slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	logger.Warn("database_identity_unverified_non_production", slog.String("role", role), slog.String("error", err.Error()))
+}
+
 func main() {
 	// 1. Initial logger setup
 	logLevel := slog.LevelInfo
@@ -62,6 +79,22 @@ func main() {
 	} else {
 		logger.Info("database_connected_successfully")
 		defer db.Close()
+		enforceDatabaseIdentity(db, database.RoleAPI, cfg, logger)
+	}
+
+	// The in-process worker has its own pool and role. A configured worker that cannot connect
+	// stops startup: running without it would silently lose background work.
+	var workerDB *database.DB
+	if cfg.WorkerEnabled && db != nil {
+		workerCtx, workerCtxCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		workerDB, err = database.ConnectWorker(workerCtx, cfg)
+		workerCtxCancel()
+		if err != nil {
+			logger.Error("worker_database_connection_failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		defer workerDB.Close()
+		enforceDatabaseIdentity(workerDB, database.RoleWorker, cfg, logger)
 	}
 
 	// 4. Redis connection initialization
@@ -212,7 +245,7 @@ func main() {
 	var workerCancel context.CancelFunc
 	workerDone := make(chan struct{})
 
-	if cfg.WorkerEnabled && db != nil && db.Pool != nil {
+	if workerDB != nil {
 		runnerCfg := worker.DefaultRunnerConfig()
 		hostname, _ := os.Hostname()
 		if hostname == "" {
@@ -226,10 +259,10 @@ func main() {
 		runnerCfg.HeartbeatInterval = cfg.WorkerLeaseTTL / 3
 
 		workerRegistry := worker.NewRegistry()
-		worker.RegisterDefaultHandlers(workerRegistry, db.Pool, filesStorage, logger)
+		worker.RegisterDefaultHandlers(workerRegistry, workerDB.Pool, filesStorage, logger)
 
 		var err error
-		workerRunner, err = worker.NewRunner(db.Pool, workerRegistry, logger, runnerCfg)
+		workerRunner, err = worker.NewRunner(workerDB.Pool, workerRegistry, logger, runnerCfg)
 		if err != nil {
 			logger.Error("failed_to_initialize_inproc_worker", slog.String("error", err.Error()))
 			os.Exit(1)
@@ -279,6 +312,8 @@ func main() {
 			workerRunner.Stop()
 			<-workerDone
 		}
+		workerDB.Close()
+		db.Close()
 		os.Exit(1)
 	case sig := <-stop:
 		logger.Info("shutdown_signal_received", slog.String("signal", sig.String()))
