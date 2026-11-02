@@ -2,6 +2,7 @@ package database_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -48,7 +49,25 @@ func TestDB_UninitializedPoolHandling(t *testing.T) {
 func TestAuthenticateAndSetContext_EmptyTokenHash(t *testing.T) {
 	ctx := context.Background()
 	_, err := database.AuthenticateAndSetContext(ctx, nil, "", nil)
-	if err == nil || !strings.Contains(err.Error(), "token hash is required") {
-		t.Errorf("expected token hash required error, got: %v", err)
+	if err == nil {
+		t.Fatal("expected error for empty token hash, got nil")
+	}
+	if !errors.Is(err, database.ErrNoSessionToken) {
+		t.Errorf("expected errors.Is(err, ErrNoSessionToken) to be true, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "token hash is required") {
+		t.Errorf("expected token hash required message, got: %v", err)
+	}
+}
+
+func TestDatabase_Sentinels(t *testing.T) {
+	if database.ErrNoSessionToken == nil {
+		t.Error("expected ErrNoSessionToken to be defined")
+	}
+	if database.ErrSessionInvalid == nil {
+		t.Error("expected ErrSessionInvalid to be defined")
+	}
+	if database.ErrMembershipDenied == nil {
+		t.Error("expected ErrMembershipDenied to be defined")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -12,6 +13,12 @@ import (
 
 // ErrNoSessionToken is returned when establishing database auth context without a session token hash.
 var ErrNoSessionToken = errors.New("token hash is required to establish database auth context")
+
+// ErrSessionInvalid is returned when a session token hash is invalid, expired, or revoked (SQLSTATE 28000).
+var ErrSessionInvalid = errors.New("invalid, expired, or revoked session token")
+
+// ErrMembershipDenied is returned when an authenticated user does not have an active membership in the requested organization (SQLSTATE 42501 from connect_auth.authenticate_session).
+var ErrMembershipDenied = errors.New("organization membership denied")
 
 // AuthContext holds the verified identity context returned by PostgreSQL connect_auth.authenticate_session.
 type AuthContext struct {
@@ -52,6 +59,20 @@ func AuthenticateAndSetContext(ctx context.Context, tx pgx.Tx, tokenHash string,
 		&authSig,
 	)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			if pgErr.Code == "28000" {
+				return nil, fmt.Errorf("%w: %w", ErrSessionInvalid, err)
+			}
+			if pgErr.Code == "42501" && requestedOrgID != nil {
+				msg := strings.TrimSpace(pgErr.Message)
+				msg = strings.TrimPrefix(msg, "ERROR:")
+				msg = strings.TrimSpace(msg)
+				if strings.HasPrefix(msg, "Authorization Failed:") || strings.Contains(msg, "has no active membership in Organization") {
+					return nil, fmt.Errorf("%w: %w", ErrMembershipDenied, err)
+				}
+			}
+		}
 		return nil, fmt.Errorf("failed to authenticate database session context: %w", err)
 	}
 

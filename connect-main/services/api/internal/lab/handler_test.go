@@ -604,6 +604,20 @@ func TestHandler_ErrorClassifierPrecision(t *testing.T) {
 		sensitiveTokens []string
 	}{
 		{
+			name:            "Unwrapped typed database.ErrMembershipDenied",
+			err:             database.ErrMembershipDenied,
+			expectedStatus:  http.StatusForbidden,
+			expectedError:   "you do not have permission to access this organization's resources",
+			sensitiveTokens: []string{"membership", "denied"},
+		},
+		{
+			name:            "Wrapped typed database.ErrMembershipDenied",
+			err:             fmt.Errorf("inOrg authentication boundary failure: %w", database.ErrMembershipDenied),
+			expectedStatus:  http.StatusForbidden,
+			expectedError:   "you do not have permission to access this organization's resources",
+			sensitiveTokens: []string{"inOrg", "boundary"},
+		},
+		{
 			name: "Wrapped 42501 membership denial",
 			err: fmt.Errorf("auth context setup failed: %w", &pgconn.PgError{
 				Code:    "42501",
@@ -612,6 +626,16 @@ func TestHandler_ErrorClassifierPrecision(t *testing.T) {
 			expectedStatus:  http.StatusForbidden,
 			expectedError:   "you do not have permission to access this organization's resources",
 			sensitiveTokens: []string{"42501", "SQLSTATE", testUserUUID.String(), testOrgUUID.String(), "Authorization Failed"},
+		},
+		{
+			name: "Error-message variation - Membership denial with whitespace and ERROR prefix",
+			err: &pgconn.PgError{
+				Code:    "42501",
+				Message: fmt.Sprintf("  ERROR: Authorization Failed: User %s has no active membership in Organization %s  ", testUserUUID, testOrgUUID),
+			},
+			expectedStatus:  http.StatusForbidden,
+			expectedError:   "you do not have permission to access this organization's resources",
+			sensitiveTokens: []string{"42501", testUserUUID.String(), testOrgUUID.String()},
 		},
 		{
 			name: "Unexpected 42501 system privilege failure - table permission denied",
@@ -645,6 +669,26 @@ func TestHandler_ErrorClassifierPrecision(t *testing.T) {
 			sensitiveTokens: []string{"42501", "lab_assignments", "must be owner"},
 		},
 		{
+			name: "Unknown 42501 privilege failure - arbitrary unknown table",
+			err: &pgconn.PgError{
+				Code:    "42501",
+				Message: "permission denied for table custom_analytics",
+			},
+			expectedStatus:  http.StatusInternalServerError,
+			expectedError:   "an unexpected internal error occurred",
+			sensitiveTokens: []string{"42501", "custom_analytics"},
+		},
+		{
+			name: "Unknown 42501 privilege failure - ambiguous privilege message",
+			err: &pgconn.PgError{
+				Code:    "42501",
+				Message: "insufficient privilege on database object",
+			},
+			expectedStatus:  http.StatusInternalServerError,
+			expectedError:   "an unexpected internal error occurred",
+			sensitiveTokens: []string{"42501", "database object"},
+		},
+		{
 			name: "28000 authentication failure - expired or revoked session",
 			err: &pgconn.PgError{
 				Code:    "28000",
@@ -653,6 +697,30 @@ func TestHandler_ErrorClassifierPrecision(t *testing.T) {
 			expectedStatus:  http.StatusUnauthorized,
 			expectedError:   "authentication required",
 			sensitiveTokens: []string{"28000", "connect_auth", "session token", "expired"},
+		},
+		{
+			name: "Error-message variation - 28000 with custom text",
+			err: &pgconn.PgError{
+				Code:    "28000",
+				Message: "invalid authorization specification: custom oauth token expired",
+			},
+			expectedStatus:  http.StatusUnauthorized,
+			expectedError:   "authentication required",
+			sensitiveTokens: []string{"28000", "oauth token"},
+		},
+		{
+			name:            "Unwrapped typed database.ErrSessionInvalid",
+			err:             database.ErrSessionInvalid,
+			expectedStatus:  http.StatusUnauthorized,
+			expectedError:   "authentication required",
+			sensitiveTokens: []string{"invalid", "revoked"},
+		},
+		{
+			name:            "Wrapped typed database.ErrSessionInvalid",
+			err:             fmt.Errorf("session validation failed: %w", database.ErrSessionInvalid),
+			expectedStatus:  http.StatusUnauthorized,
+			expectedError:   "authentication required",
+			sensitiveTokens: []string{"session", "validation"},
 		},
 		{
 			name:            "Typed database.ErrNoSessionToken sentinel",
@@ -667,6 +735,20 @@ func TestHandler_ErrorClassifierPrecision(t *testing.T) {
 			expectedStatus:  http.StatusUnauthorized,
 			expectedError:   "authentication required",
 			sensitiveTokens: []string{"token hash", "inOrg"},
+		},
+		{
+			name:            "Typed application domain error - ErrDomainValidation",
+			err:             ErrDomainValidation,
+			expectedStatus:  http.StatusBadRequest,
+			expectedError:   "invalid request data or referenced entity not found",
+			sensitiveTokens: []string{"domain validation"},
+		},
+		{
+			name:            "Wrapped typed application domain error",
+			err:             fmt.Errorf("submission rejected by business rule: %w", ErrDomainValidation),
+			expectedStatus:  http.StatusBadRequest,
+			expectedError:   "invalid request data or referenced entity not found",
+			sensitiveTokens: []string{"business rule"},
 		},
 		{
 			name: "Known P0001 domain validation - Foreign Key Violation",
@@ -717,6 +799,16 @@ func TestHandler_ErrorClassifierPrecision(t *testing.T) {
 			expectedStatus:  http.StatusInternalServerError,
 			expectedError:   "an unexpected internal error occurred",
 			sensitiveTokens: []string{"P0001", "audit_trigger_func", "plpgsql"},
+		},
+		{
+			name: "Error-message variation - Unknown P0001 with keyword inside message rather than prefix",
+			err: &pgconn.PgError{
+				Code:    "P0001",
+				Message: "Internal trigger check failed: Integrity Error observed in table row",
+			},
+			expectedStatus:  http.StatusInternalServerError,
+			expectedError:   "an unexpected internal error occurred",
+			sensitiveTokens: []string{"P0001", "Internal trigger check"},
 		},
 		{
 			name:            "Genuine internal database failure - TCP connection refused",
@@ -794,6 +886,16 @@ func TestHandler_ErrorClassifierPrecision(t *testing.T) {
 			sensitiveTokens: []string{"CN409", "submission lock"},
 		},
 		{
+			name: "Custom application gone - CN410",
+			err: &pgconn.PgError{
+				Code:    "CN410",
+				Message: "interactive exercise session expired",
+			},
+			expectedStatus:  http.StatusGone,
+			expectedError:   "resource no longer available",
+			sensitiveTokens: []string{"CN410", "interactive exercise"},
+		},
+		{
 			name: "Custom application unprocessable - CN422",
 			err: &pgconn.PgError{
 				Code:    "CN422",
@@ -863,9 +965,12 @@ func TestHandler_ErrorClassifierPrecision(t *testing.T) {
 	// 5. Integration Verification: Protected repository query is NEVER executed on context rejection
 	t.Run("Protected repository query is never executed on context rejection", func(t *testing.T) {
 		for _, rejectionErr := range []error{
-			&pgconn.PgError{Code: "42501", Message: "tenant membership denied"},
-			&pgconn.PgError{Code: "28000", Message: "session expired"},
+			database.ErrMembershipDenied,
+			database.ErrSessionInvalid,
 			database.ErrNoSessionToken,
+			ErrDomainValidation,
+			&pgconn.PgError{Code: "42501", Message: "Authorization Failed: User lacks membership"},
+			&pgconn.PgError{Code: "28000", Message: "session expired"},
 			&pgconn.PgError{Code: "P0001", Message: "unhandled trigger failure"},
 			errors.New("database connection refused"),
 		} {
