@@ -35,6 +35,23 @@ export interface MobileRoomInfo {
   hasPasscode?: boolean;
 }
 
+export interface MobileStoredMessage {
+  id: string;
+  seq: number;
+  senderIdentity: string;
+  senderName: string;
+  kind: 'chat' | 'announcement';
+  body: string;
+  clientMessageId: string;
+  createdAt: string;
+}
+
+export interface MobileLiveState {
+  messages: MobileStoredMessage[];
+  raisedHands: string[];
+  reactions: { id: string; identity: string; emoji: string; createdAt: string }[];
+}
+
 export interface MobileParticipant {
   identity: string;
   displayName: string;
@@ -333,6 +350,50 @@ export class TathastuApiClient {
     return this.request(`/api/v1/rooms/${encodeURIComponent(norm)}/me`, {
       method: 'GET',
       headers: this.guestHeaders(norm),
+    });
+  }
+
+  public async getLiveState(code: string, afterSeq: number): Promise<MobileLiveState> {
+    const norm = normalizeRoomCode(code);
+    return this.request<MobileLiveState>(
+      `/api/v1/rooms/${encodeURIComponent(norm)}/live-state?afterSeq=${afterSeq}`,
+      { method: 'GET', headers: this.guestHeaders(norm) }
+    );
+  }
+
+  public async getOlderMessages(code: string, beforeSeq: number, limit: number): Promise<MobileStoredMessage[]> {
+    const norm = normalizeRoomCode(code);
+    const res = await this.request<{ messages: MobileStoredMessage[] }>(
+      `/api/v1/rooms/${encodeURIComponent(norm)}/messages?before=${beforeSeq}&limit=${limit}`,
+      { method: 'GET', headers: this.guestHeaders(norm) }
+    );
+    return res.messages;
+  }
+
+  public async postMessage(code: string, clientMessageId: string, body: string): Promise<MobileStoredMessage> {
+    const norm = normalizeRoomCode(code);
+    const res = await this.request<{ message: MobileStoredMessage }>(
+      `/api/v1/rooms/${encodeURIComponent(norm)}/messages`,
+      { method: 'POST', headers: this.guestHeaders(norm), body: JSON.stringify({ clientMessageId, body }) }
+    );
+    return res.message;
+  }
+
+  public async postReaction(code: string, emoji: string): Promise<void> {
+    const norm = normalizeRoomCode(code);
+    await this.request(`/api/v1/rooms/${encodeURIComponent(norm)}/reactions`, {
+      method: 'POST',
+      headers: this.guestHeaders(norm),
+      body: JSON.stringify({ emoji }),
+    });
+  }
+
+  public async setHand(code: string, raised: boolean): Promise<void> {
+    const norm = normalizeRoomCode(code);
+    await this.request(`/api/v1/rooms/${encodeURIComponent(norm)}/hand`, {
+      method: 'POST',
+      headers: this.guestHeaders(norm),
+      body: JSON.stringify({ raised }),
     });
   }
 

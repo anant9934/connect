@@ -23,21 +23,23 @@ test('M5 Priority P0: Shared Realtime Chat Protocol Contract', async (t) => {
     assert.match(contractsContent, /timestamp:\s*number/);
   });
 
-  await t.test('mobile MeetingScreen handles tc-chat topic and deduplicates by id', () => {
-    const meetingScreenPath = path.join(rootDir, 'apps/mobile/src/screens/MeetingScreen.tsx');
-    const meetingContent = fs.readFileSync(meetingScreenPath, 'utf-8');
+  await t.test('mobile MeetingScreen stores chat through the API and treats data channels as hints', () => {
+    const meetingPath = path.join(rootDir, 'apps/mobile/src/screens/MeetingScreen.tsx');
+    const meetingContent = fs.readFileSync(meetingPath, 'utf-8');
 
-    assert.match(meetingContent, /TC_TOPIC_CHAT/);
-    assert.match(meetingContent, /publishData\(data,\s*\{[\s\S]*topic:\s*TC_TOPIC_CHAT/);
-    assert.match(meetingContent, /prev\.some\(\(m\)\s*=>\s*m\.id\s*===\s*msgId\)/);
+    assert.match(meetingContent, /defaultApiClient\.postMessage\(roomCode, clientMessageId, text\)/);
+    assert.match(meetingContent, /defaultApiClient\.getLiveState\(roomCode, lastSeqRef\.current\)/);
+    assert.match(meetingContent, /topic === TC_TOPIC_SYNC/);
+    assert.doesNotMatch(meetingContent, /topic === TC_TOPIC_CHAT/);
   });
 
-  await t.test('web MeetingRoom publishes and receives on tc-chat', () => {
+  await t.test('web MeetingRoom stores chat through the API and treats data channels as hints', () => {
     const webMeetingPath = path.join(rootDir, 'apps/web/components/meeting/MeetingRoom.tsx');
     const webContent = fs.readFileSync(webMeetingPath, 'utf-8');
 
-    assert.match(webContent, /sendData\(['"]tc-chat['"]/);
-    assert.match(webContent, /topic\s*===\s*['"]tc-chat['"]/);
+    assert.match(webContent, /useMeetingInteraction\(/);
+    assert.match(webContent, /topic\s*===\s*['"]tc-sync['"]/);
+    assert.doesNotMatch(webContent, /topic\s*===\s*['"]tc-chat['"]/);
   });
 });
 
@@ -56,13 +58,12 @@ test('M5 Priority P0: Shared Reaction & Hand Raise Protocol Contract', async (t)
     assert.match(contractsContent, /type:\s*['"]reaction['"]/);
   });
 
-  await t.test('mobile MeetingScreen publishes hand raise and reactions on tc-reaction', () => {
-    const meetingScreenPath = path.join(rootDir, 'apps/mobile/src/screens/MeetingScreen.tsx');
-    const meetingContent = fs.readFileSync(meetingScreenPath, 'utf-8');
+  await t.test('mobile MeetingScreen stores hands and reactions through the API', () => {
+    const meetingPath = path.join(rootDir, 'apps/mobile/src/screens/MeetingScreen.tsx');
+    const meetingContent = fs.readFileSync(meetingPath, 'utf-8');
 
-    assert.match(meetingContent, /TC_TOPIC_REACTION/);
-    assert.match(meetingContent, /type:\s*['"]hand_raise['"]/);
-    assert.match(meetingContent, /type:\s*['"]reaction['"]/);
+    assert.match(meetingContent, /defaultApiClient\.setHand\(roomCode, !isHandRaised\)/);
+    assert.match(meetingContent, /defaultApiClient\.postReaction\(roomCode, emoji\)/);
   });
 });
 

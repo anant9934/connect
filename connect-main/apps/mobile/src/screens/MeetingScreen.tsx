@@ -31,7 +31,7 @@ import {
   VideoPresets,
 } from 'livekit-client';
 import { VideoView, AudioSession } from '@livekit/react-native';
-import { defaultApiClient } from '../services/apiClient';
+import { MobileStoredMessage, defaultApiClient } from '../services/apiClient';
 import {
   checkCameraPermission,
   requestCameraPermission,
@@ -68,6 +68,7 @@ import { secureStorage } from '../services/storage';
 // Realtime topic constants (matching web exactly)
 export const TC_TOPIC_CHAT = 'tc-chat';
 export const TC_TOPIC_REACTION = 'tc-reaction';
+export const TC_TOPIC_SYNC = 'tc-sync';
 
 interface MeetingScreenProps {
   roomCode: string;
@@ -82,6 +83,9 @@ interface MeetingScreenProps {
 
 interface ChatMessage {
   id: string;
+  clientMessageId: string;
+  seq?: number;
+  kind: 'chat' | 'announcement';
   sender: string;
   senderIdentity?: string;
   text: string;
@@ -89,6 +93,23 @@ interface ChatMessage {
   isSelf: boolean;
   status: 'sending' | 'sent' | 'error';
 }
+
+// Stored messages replace optimistic copies; unsent ones stay after everything stored.
+const mergeChatMessages = (current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] => {
+  const keyOf = (m: ChatMessage) => `${m.isSelf ? '' : m.senderIdentity || ''}|${m.clientMessageId}`;
+  const byKey = new Map(current.map((m) => [keyOf(m), m]));
+  for (const message of incoming) {
+    byKey.set(keyOf(message), message);
+  }
+  return Array.from(byKey.values()).sort((a, b) => {
+    if (a.seq !== undefined && b.seq !== undefined) return a.seq - b.seq;
+    if (a.seq !== undefined) return -1;
+    if (b.seq !== undefined) return 1;
+    return a.timestamp - b.timestamp;
+  });
+};
+
+const CHAT_PAGE_SIZE = 50;
 
 const REACTION_EMOJIS = ['👏', '❤️', '🎉', '👍', '💡', '🔥'];
 
@@ -143,8 +164,19 @@ export function MeetingScreen({
   const [activeSpeaker, setActiveSpeaker] = useState<string | null>(null);
 
   // Reactions & Hand Raise State
-  const [isHandRaised, setIsHandRaised] = useState(false);
   const [raisedHands, setRaisedHands] = useState<Set<string>>(new Set());
+  const [localIdentity, setLocalIdentity] = useState('');
+  const isHandRaised = raisedHands.has(localIdentity);
+  const [chatLoading, setChatLoading] = useState(true);
+  const [chatOffline, setChatOffline] = useState(false);
+  const [chatHasOlder, setChatHasOlder] = useState(false);
+  const [latestAnnouncement, setLatestAnnouncement] = useState<ChatMessage | null>(null);
+  const lastSeqRef = useRef(0);
+  const chatFirstLoadRef = useRef(true);
+  const seenReactionsRef = useRef(new Set<string>());
+  const liveStateInFlightRef = useRef(false);
+  const showChatRef = useRef(false);
+  const refreshLiveStateRef = useRef<() => void>(() => {});
   const [transientReactions, setTransientReactions] = useState<
     { id: string; emoji: string; sender: string }[]
   >([]);
@@ -478,6 +510,8 @@ export function MeetingScreen({
             });
 
             const localPart = room.localParticipant;
+            setLocalIdentity(localPart.identity);
+            refreshLiveStateRef.current();
 
             // Publish Initial Camera with Retry Loop (Handles native Camera2 release delay)
             if (initialCamera) {
@@ -550,6 +584,7 @@ export function MeetingScreen({
           })
           .on(RoomEvent.Reconnected, () => {
             mediaDiagnostics.log('room', 'Reconnected');
+            refreshLiveStateRef.current();
             if (isMounted) {
               setConnectionState('connected');
               updateParticipants();
@@ -712,59 +747,9 @@ export function MeetingScreen({
                   details: { topic, length: payload.length },
                 });
 
-                // Handle Chat
-                if (topic === TC_TOPIC_CHAT || (!topic && data.text && (data.id || data.type === 'chat'))) {
-                  const msgId = typeof data.id === 'string' ? data.id : `msg_${Date.now()}_${Math.random()}`;
-                  const senderName =
-                    data.senderName || data.sender || participant?.name || participant?.identity || 'Participant';
-                  const senderIdentity = participant?.identity || data.senderIdentity;
-
-                  setChatMessages((prev) => {
-                    if (prev.some((m) => m.id === msgId)) return prev;
-                    return [
-                      ...prev,
-                      {
-                        id: msgId,
-                        sender: senderName,
-                        senderIdentity,
-                        text: data.text,
-                        timestamp: typeof data.timestamp === 'number' ? data.timestamp : Date.now(),
-                        isSelf: false,
-                        status: 'sent',
-                      },
-                    ];
-                  });
-
-                  if (!showChat) {
-                    setUnreadChatCount((c) => c + 1);
-                  }
-                }
-                // Handle Reactions & Hand Raise
-                else if (
-                  topic === TC_TOPIC_REACTION ||
-                  (!topic && (data.type === 'hand_raise' || data.type === 'reaction'))
-                ) {
-                  if (data.type === 'hand_raise' && participant) {
-                    setRaisedHands((prev) => {
-                      const next = new Set(prev);
-                      if (data.raised) {
-                        next.add(participant.identity);
-                      } else {
-                        next.delete(participant.identity);
-                      }
-                      return next;
-                    });
-                  } else if (data.type === 'reaction' && data.emoji) {
-                    const reactionId = `rx_${Date.now()}_${Math.random()}`;
-                    const senderName = participant?.name || participant?.identity || 'Participant';
-                    setTransientReactions((prev) => [
-                      ...prev,
-                      { id: reactionId, emoji: data.emoji, sender: senderName },
-                    ]);
-                    setTimeout(() => {
-                      setTransientReactions((current) => current.filter((r) => r.id !== reactionId));
-                    }, 3500);
-                  }
+                // Never trusted as content: it only says the stored state may have changed.
+                if (topic === TC_TOPIC_SYNC) {
+                  refreshLiveStateRef.current();
                 }
               } catch (e) {
                 console.warn('Failed to parse incoming data message:', e);
@@ -926,96 +911,160 @@ export function MeetingScreen({
     onLeave();
   };
 
-  // Chat Actions
-  const handleSendChat = async () => {
-    const text = chatInput.trim();
-    if (!text || !roomRef.current) return;
+  const toChatMessage = (stored: MobileStoredMessage, self: string): ChatMessage => ({
+    id: stored.id,
+    clientMessageId: stored.clientMessageId,
+    seq: stored.seq,
+    kind: stored.kind,
+    sender: stored.senderName,
+    senderIdentity: stored.senderIdentity,
+    text: stored.body,
+    timestamp: new Date(stored.createdAt).getTime(),
+    isSelf: stored.senderIdentity === self,
+    status: 'sent',
+  });
 
-    const msgId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const newMsg: ChatMessage = {
-      id: msgId,
-      sender: displayName,
-      text,
-      timestamp: Date.now(),
-      isSelf: true,
-      status: 'sending',
-    };
+  const publishSyncHint = () => {
+    roomRef.current?.localParticipant
+      .publishData(new TextEncoder().encode('{}'), { reliable: true, topic: TC_TOPIC_SYNC })
+      .catch(() => {
+        // Others catch up on their next poll.
+      });
+  };
 
-    setChatMessages((prev) => [...prev, newMsg]);
-    setChatInput('');
-
+  // The server is the source of truth; this recovers everything after a reconnect or restart.
+  const refreshLiveState = async () => {
+    if (liveStateInFlightRef.current) return;
+    liveStateInFlightRef.current = true;
     try {
-      const payload = JSON.stringify({
-        id: msgId,
-        text,
-        timestamp: newMsg.timestamp,
-        senderName: displayName,
-        senderIdentity: roomRef.current.localParticipant.identity,
-      });
-      const data = new TextEncoder().encode(payload);
-      await roomRef.current.localParticipant.publishData(data, {
-        reliable: true,
-        topic: TC_TOPIC_CHAT,
-      });
+      const state = await defaultApiClient.getLiveState(roomCode, lastSeqRef.current);
+      const self = roomRef.current?.localParticipant?.identity || localIdentity;
+      const incoming = state.messages.map((m) => toChatMessage(m, self));
+      if (incoming.length > 0) {
+        setChatMessages((prev) => mergeChatMessages(prev, incoming));
+        lastSeqRef.current = Math.max(lastSeqRef.current, ...state.messages.map((m) => m.seq));
+        if (chatFirstLoadRef.current) {
+          setChatHasOlder(incoming.length >= CHAT_PAGE_SIZE);
+        } else {
+          const fromOthers = incoming.filter((m) => !m.isSelf);
+          if (fromOthers.length > 0 && !showChatRef.current) {
+            setUnreadChatCount((c) => c + fromOthers.length);
+          }
+          const announcement = [...fromOthers].reverse().find((m) => m.kind === 'announcement');
+          if (announcement) setLatestAnnouncement(announcement);
+        }
+      }
+      chatFirstLoadRef.current = false;
+      setRaisedHands(new Set(state.raisedHands));
+      for (const reaction of state.reactions) {
+        if (seenReactionsRef.current.has(reaction.id)) continue;
+        seenReactionsRef.current.add(reaction.id);
+        const isMine = reaction.identity === self;
+        setTransientReactions((prev) => [
+          ...prev,
+          { id: reaction.id, emoji: reaction.emoji, sender: isMine ? 'You' : 'Participant' },
+        ]);
+        setTimeout(() => {
+          setTransientReactions((current) => current.filter((r) => r.id !== reaction.id));
+        }, 3500);
+      }
+      setChatOffline(false);
+    } catch (_) {
+      setChatOffline(true);
+    } finally {
+      liveStateInFlightRef.current = false;
+      setChatLoading(false);
+    }
+  };
+  refreshLiveStateRef.current = refreshLiveState;
 
-      setChatMessages((prev) =>
-        prev.map((m) => (m.id === msgId ? { ...m, status: 'sent' } : m))
-      );
+  useEffect(() => {
+    showChatRef.current = showChat;
+  }, [showChat]);
+
+  useEffect(() => {
+    refreshLiveStateRef.current();
+    const timer = setInterval(() => refreshLiveStateRef.current(), 4000);
+    return () => clearInterval(timer);
+  }, [roomCode]);
+
+  const handleLoadOlderMessages = async () => {
+    const oldest = chatMessages.find((m) => m.seq !== undefined)?.seq;
+    if (!oldest) return;
+    try {
+      const older = await defaultApiClient.getOlderMessages(roomCode, oldest, CHAT_PAGE_SIZE);
+      const self = roomRef.current?.localParticipant?.identity || localIdentity;
+      setChatMessages((prev) => mergeChatMessages(prev, older.map((m) => toChatMessage(m, self))));
+      setChatHasOlder(older.length >= CHAT_PAGE_SIZE);
+    } catch (err: any) {
+      Alert.alert('Could not load messages', err?.message || 'Please try again.');
+    }
+  };
+
+  // Chat Actions. A retry reuses the same id, so the server cannot store a message twice.
+  const deliverChat = async (clientMessageId: string, text: string) => {
+    try {
+      const stored = await defaultApiClient.postMessage(roomCode, clientMessageId, text);
+      const self = roomRef.current?.localParticipant?.identity || localIdentity;
+      setChatMessages((prev) => mergeChatMessages(prev.filter((m) => m.clientMessageId !== clientMessageId), [toChatMessage(stored, self)]));
+      publishSyncHint();
     } catch (err) {
-      console.warn('Failed to publish chat data:', err);
+      console.warn('Failed to send chat message:', err);
       setChatMessages((prev) =>
-        prev.map((m) => (m.id === msgId ? { ...m, status: 'error' } : m))
+        prev.map((m) => (m.clientMessageId === clientMessageId ? { ...m, status: 'error' } : m))
       );
     }
   };
 
+  const handleSendChat = async () => {
+    const text = chatInput.trim();
+    if (!text) return;
+
+    const clientMessageId = `m${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: clientMessageId,
+        clientMessageId,
+        kind: 'chat',
+        sender: displayName,
+        text,
+        timestamp: Date.now(),
+        isSelf: true,
+        status: 'sending',
+      },
+    ]);
+    setChatInput('');
+    await deliverChat(clientMessageId, text);
+  };
+
+  const handleRetryChat = (message: ChatMessage) => {
+    setChatMessages((prev) =>
+      prev.map((m) => (m.clientMessageId === message.clientMessageId ? { ...m, status: 'sending' } : m))
+    );
+    deliverChat(message.clientMessageId, message.text);
+  };
+
   // Hand Raise Action
   const handleToggleHandRaise = async () => {
-    if (!roomRef.current) return;
-    const next = !isHandRaised;
-    setIsHandRaised(next);
-
     try {
-      const payload = JSON.stringify({
-        type: 'hand_raise',
-        raised: next,
-      });
-      const data = new TextEncoder().encode(payload);
-      await roomRef.current.localParticipant.publishData(data, {
-        reliable: true,
-        topic: TC_TOPIC_REACTION,
-      });
-    } catch (err) {
-      console.warn('Failed to publish hand raise:', err);
+      await defaultApiClient.setHand(roomCode, !isHandRaised);
+      publishSyncHint();
+      await refreshLiveState();
+    } catch (err: any) {
+      Alert.alert('Could not change your hand', err?.message || 'Please try again.');
     }
   };
 
   // Send Reaction Action
   const handleSendReaction = async (emoji: string) => {
     setShowReactionPicker(false);
-    if (!roomRef.current) return;
-
-    const reactionId = `self_rx_${Date.now()}`;
-    setTransientReactions((prev) => [
-      ...prev,
-      { id: reactionId, emoji, sender: 'You' },
-    ]);
-    setTimeout(() => {
-      setTransientReactions((current) => current.filter((r) => r.id !== reactionId));
-    }, 3500);
-
     try {
-      const payload = JSON.stringify({
-        type: 'reaction',
-        emoji,
-      });
-      const data = new TextEncoder().encode(payload);
-      await roomRef.current.localParticipant.publishData(data, {
-        reliable: true,
-        topic: TC_TOPIC_REACTION,
-      });
-    } catch (err) {
-      console.warn('Failed to publish reaction:', err);
+      await defaultApiClient.postReaction(roomCode, emoji);
+      publishSyncHint();
+      await refreshLiveState();
+    } catch (err: any) {
+      Alert.alert('Could not send the reaction', err?.message || 'Please try again.');
     }
   };
 
@@ -1194,6 +1243,19 @@ export function MeetingScreen({
       </View>
 
       {/* Transient Floating Reactions Overlay */}
+      {latestAnnouncement ? (
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss announcement"
+          onPress={() => setLatestAnnouncement(null)}
+          style={{ position: 'absolute', top: 48, left: 12, right: 12, zIndex: 50, backgroundColor: '#FFF2BE', borderRadius: 12, padding: 12 }}
+        >
+          <Text style={{ color: '#451A03', fontSize: 14 }}>
+            {`${latestAnnouncement.sender}: ${latestAnnouncement.text}`}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+
       {transientReactions.length > 0 && (
         <View style={styles.reactionsOverlay} pointerEvents="none">
           {transientReactions.map((rx) => (
@@ -2170,19 +2232,30 @@ export function MeetingScreen({
               {chatMessages.length === 0 ? (
                 <View style={styles.emptyChatBox}>
                   <Text style={styles.chatEmptyText}>
+                    {chatLoading ? 'Loading messages…' : ''}
+                  </Text>
+                  <Text style={styles.chatEmptyText}>
                     Messages sent here are visible to everyone in the room.
                   </Text>
                 </View>
               ) : (
-                chatMessages.map((msg) => (
+                <>
+                {chatHasOlder ? (
+                  <TouchableOpacity onPress={handleLoadOlderMessages} accessibilityRole="button">
+                    <Text style={styles.chatStatusText}>Load earlier messages</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {chatMessages.map((msg) => (
                   <View
-                    key={msg.id}
+                    key={msg.clientMessageId + (msg.senderIdentity || '')}
                     style={[
                       styles.chatBubble,
                       msg.isSelf ? styles.chatBubbleSelf : styles.chatBubbleRemote,
                     ]}
                   >
-                    <Text style={styles.chatSenderText}>{msg.sender}</Text>
+                    <Text style={styles.chatSenderText}>
+                      {msg.kind === 'announcement' ? `Announcement · ${msg.sender}` : msg.sender}
+                    </Text>
                     <Text style={msg.isSelf ? styles.chatTextSelf : styles.chatTextRemote}>
                       {msg.text}
                     </Text>
@@ -2193,16 +2266,32 @@ export function MeetingScreen({
                           minute: '2-digit',
                         })}
                       </Text>
-                      {msg.isSelf && (
+                      {msg.isSelf && msg.status === 'error' ? (
+                        <TouchableOpacity
+                          onPress={() => handleRetryChat(msg)}
+                          accessibilityRole="button"
+                          accessibilityLabel="Retry sending this message"
+                        >
+                          <Text style={styles.chatStatusText}>• Not sent. Tap to retry</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      {msg.isSelf && msg.status !== 'error' && (
                         <Text style={styles.chatStatusText}>
-                          {msg.status === 'sending' ? '• sending' : msg.status === 'error' ? '• failed' : '✓'}
+                          {msg.status === 'sending' ? '• sending' : '✓'}
                         </Text>
                       )}
                     </View>
                   </View>
-                ))
+                ))}
+                </>
               )}
             </ScrollView>
+
+            {chatOffline ? (
+              <Text accessibilityLiveRegion="polite" style={styles.chatStatusText}>
+                Reconnecting. New messages will appear when the connection returns.
+              </Text>
+            ) : null}
 
             <View style={[styles.chatInputRow, { paddingBottom: Math.max(12, (safeInsets?.bottom || 0) + 6) }]}>
               <TextInput
