@@ -155,6 +155,9 @@ jobs:
         env:
           ADMIN_URL: "postgres://connect_admin:connect_disposable_ci_password_456@localhost:5432/connect_test_ci_runner?sslmode=disable"
         run: |
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000028.sql
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000027.sql
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000026.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000025.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000024.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000023.sql
@@ -188,6 +191,9 @@ jobs:
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000023_meeting_search.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000024_admin_dashboard.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000025_attendance_signals.sql
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000026_calendar_export.sql
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000027_classroom_boards.sql
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000028_breakout_rooms.sql
 
       - name: Verify RLS Under Restricted Runtime Roles
         env:
@@ -291,12 +297,16 @@ jobs:
           sleep 61
           node test/e2e_attendance.mjs >> /tmp/e2e.txt 2>&1 || status=1
           sleep 61
+          node test/e2e_classroom_board.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          node test/e2e_breakouts.mjs >> /tmp/e2e.txt 2>&1 || status=1
+          sleep 61
           node test/e2e_institution.mjs >> /tmp/e2e.txt 2>&1 || status=1
           cat /tmp/e2e.txt
           [ $status -eq 0 ] || tail -20 /tmp/api.log
-          grep -E 'E2E (PASS|FAIL)|^page ' /tmp/e2e.txt | sort | uniq -c | sed 's/^ *//' | cut -c1-230 | tail -7 | while IFS= read -r line; do
+          grep -E 'E2E FAIL' /tmp/e2e.txt | cut -c1-400 | head -6 | while IFS= read -r line; do
             echo "::notice title=RLS browser::$line"
           done
+          echo "::notice title=RLS browser::passed: $(grep -E 'E2E PASS' /tmp/e2e.txt | sed 's/E2E PASS //' | sort | uniq -c | sed 's/^ *//' | tr '\n' ';' | cut -c1-600)"
           grep -E '^STEP' /tmp/e2e.txt | tail -1 | while IFS= read -r line; do
             echo "::notice title=RLS browser::last $line"
           done
