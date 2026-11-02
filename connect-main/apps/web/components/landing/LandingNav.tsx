@@ -40,13 +40,13 @@ export function LandingNav({ onStartMeeting }: { onStartMeeting?: () => void }) 
           </Link>
 
           <div className="hidden md:flex gap-6 text-[15px] font-medium text-[#5E5A50]">
-            <Link href="/features" className="hover:text-[#17151F] transition-colors no-underline">
+            <Link href="/features" className="inline-flex items-center min-h-[44px] hover:text-[#17151F] transition-colors no-underline">
               Features
             </Link>
-            <Link href="/rooms" className="hover:text-[#17151F] transition-colors no-underline">
+            <Link href="/rooms" className="inline-flex items-center min-h-[44px] hover:text-[#17151F] transition-colors no-underline">
               Rooms
             </Link>
-            <Link href="/security" className="hover:text-[#17151F] transition-colors no-underline">
+            <Link href="/security" className="inline-flex items-center min-h-[44px] hover:text-[#17151F] transition-colors no-underline">
               Security
             </Link>
           </div>

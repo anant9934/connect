@@ -153,7 +153,7 @@ export default function RoomsPage() {
                 <div className="pt-4 border-t border-[#F0EEE8]">
                   <Link
                     href={room.href}
-                    className="inline-flex items-center gap-2 text-xs font-semibold text-[#17151F] hover:text-[#7357E8] transition-colors"
+                    className="inline-flex items-center gap-2 min-h-[44px] text-xs font-semibold text-[#17151F] hover:text-[#7357E8] transition-colors"
                   >
                     <span>Learn more about {room.title}</span>
                     <ArrowRight className="w-3.5 h-3.5" />
