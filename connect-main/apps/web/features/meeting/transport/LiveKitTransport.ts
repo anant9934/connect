@@ -6,10 +6,13 @@ import {
   TrackPublication,
   Participant,
   LocalParticipant,
+  RemoteTrackPublication,
+  VideoQuality,
   setLogLevel,
 } from 'livekit-client';
 import { LIVEKIT_ROOM_OPTIONS } from '../livekit';
 import {
+  BandwidthMode,
   MediaTransport,
   TransportType,
   TransportConnectOptions,
@@ -98,6 +101,7 @@ export class LiveKitTransport implements MediaTransport {
   readonly type: TransportType = 'livekit';
   private room: LiveKitRoom | null = null;
   private connectAttempt: Promise<void> | null = null;
+  private bandwidthMode: BandwidthMode = 'normal';
   private eventListeners: Map<string, Set<Function>> = new Map();
   private _screenSharePub: TransportTrackPublication | null = null;
   private _screenShareParticipant: TransportParticipant | null = null;
@@ -190,6 +194,7 @@ export class LiveKitTransport implements MediaTransport {
         this.emit('participants_changed');
       })
       .on(RoomEvent.TrackPublished, (pub: any, p: Participant) => {
+        this.applyBandwidthMode(pub);
         webDiagnostics.log('track', 'TrackPublished', {
           participantIdentity: p.identity,
           trackSid: pub?.trackSid,
@@ -420,6 +425,22 @@ export class LiveKitTransport implements MediaTransport {
       throw err;
     } finally {
       this.emit('participants_changed');
+    }
+  }
+
+  setBandwidthMode(mode: BandwidthMode): void {
+    this.bandwidthMode = mode;
+    this.room?.remoteParticipants.forEach((participant) => {
+      participant.trackPublications.forEach((pub) => this.applyBandwidthMode(pub as RemoteTrackPublication));
+    });
+  }
+
+  // Shared screens stay on in every mode: they are what a class is usually looking at.
+  private applyBandwidthMode(pub: RemoteTrackPublication): void {
+    if (pub.kind !== Track.Kind.Video || pub.source === Track.Source.ScreenShare) return;
+    pub.setSubscribed(this.bandwidthMode !== 'audio-only');
+    if (this.bandwidthMode !== 'audio-only') {
+      pub.setVideoQuality(this.bandwidthMode === 'low' ? VideoQuality.LOW : VideoQuality.HIGH);
     }
   }
 

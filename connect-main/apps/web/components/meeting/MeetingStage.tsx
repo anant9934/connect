@@ -18,6 +18,7 @@ import { ChatPanel } from './ChatPanel';
 import { ParticipantsPanel } from './ParticipantsPanel';
 import { NotesPanel } from './NotesPanel';
 import { ClassroomPanel } from './ClassroomPanel';
+import { BandwidthControl } from './BandwidthControl';
 import { ClassroomBoard } from './ClassroomBoard';
 import { BreakoutControl } from './BreakoutControl';
 import { FilesPanel } from './FilesPanel';
@@ -201,6 +202,7 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
           <ConnectionStatus connectionState={connectionState} />
           {/* Integrated WebRTC Transport Diagnostics in header layout zone */}
           {transport && <TransportDiagnostics transport={transport} inline={true} />}
+          {transport && <BandwidthControl transport={transport} />}
         </div>
 
         <div className="flex items-center gap-3">

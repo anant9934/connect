@@ -62,7 +62,11 @@ export interface TransportConnectOptions {
   videoDeviceId?: string;
 }
 
+/** How much video to receive: all of it, the lowest quality, or none except shared screens. */
+export type BandwidthMode = 'normal' | 'low' | 'audio-only';
+
 export interface MediaTransport {
+  setBandwidthMode?(mode: BandwidthMode): void;
   readonly type: TransportType;
   readonly state: ConnectionState;
   readonly localParticipant: TransportParticipant | null;
