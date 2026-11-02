@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -121,4 +122,18 @@ func WithRoomGuestContext(ctx context.Context, pool *pgxpool.Pool, roomID, ident
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// InCallerContext runs fn in the context of whoever the request authenticated: a session, or a
+// guest limited to roomID. With neither it refuses, rather than run with no identity.
+func InCallerContext(ctx context.Context, pool *pgxpool.Pool, roomID string, fn func(pgx.Tx) error) error {
+	if tokenHash := SessionTokenHash(ctx); tokenHash != "" {
+		return WithAuthContext(ctx, pool, tokenHash, nil, func(tx pgx.Tx, _ *AuthContext) error {
+			return fn(tx)
+		})
+	}
+	if identity := GuestIdentity(ctx); identity != "" {
+		return WithRoomGuestContext(ctx, pool, roomID, identity, fn)
+	}
+	return &pgconn.PgError{Code: "42501", Message: "no caller identity"}
 }

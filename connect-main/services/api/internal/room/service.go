@@ -518,6 +518,11 @@ func (s *Service) GetMyRole(ctx context.Context, code, identity string) (*MyRole
 	return result, nil
 }
 
+// GetRoomForInteraction returns the room whatever its status, for reading its history.
+func (s *Service) GetRoomForInteraction(ctx context.Context, code string) (*Room, error) {
+	return s.repo.GetRoomByCode(ctx, NormalizeCode(code))
+}
+
 // GetRoom retrieves a room by its normalized public code.
 func (s *Service) GetRoom(ctx context.Context, code string) (*Room, error) {
 	normCode := NormalizeCode(code)

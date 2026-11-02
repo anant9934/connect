@@ -13,6 +13,7 @@ import (
 	"github.com/tathastu/connect/services/api/internal/files"
 	"github.com/tathastu/connect/services/api/internal/handlers"
 	"github.com/tathastu/connect/services/api/internal/institution"
+	"github.com/tathastu/connect/services/api/internal/interaction"
 	"github.com/tathastu/connect/services/api/internal/meeting/p2p"
 	appmw "github.com/tathastu/connect/services/api/internal/middleware"
 	"github.com/tathastu/connect/services/api/internal/notes"
@@ -42,6 +43,7 @@ func BuildRouter(
 	p2pHandler *p2p.Handler,
 	livekitWebhook http.Handler,
 	institutionHandler *institution.Handler,
+	interactionHandler *interaction.Handler,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -273,6 +275,28 @@ func BuildRouter(
 						roomDetail.With(
 							appmw.OptionalAuth(authService),
 						).Get("/p2p/ws", p2pHandler.ServeWS)
+					}
+
+					// Chat, announcements, reactions and raised hands
+					if interactionHandler != nil {
+						roomDetail.With(appmw.OptionalAuth(authService)).Get("/messages", interactionHandler.ListMessages)
+						roomDetail.With(appmw.OptionalAuth(authService)).Get("/live-state", interactionHandler.LiveState)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Post("/messages", interactionHandler.PostMessage)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Post("/reactions", interactionHandler.PostReaction)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Post("/hand", interactionHandler.SetHand)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.RequireAuth(authService),
+						).Delete("/participants/{identity}/hand", interactionHandler.LowerHand)
 					}
 
 					// Notes routes

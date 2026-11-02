@@ -423,6 +423,11 @@ func callerIdentity(r *http.Request, normCode string) (string, *http.Request) {
 	return identity, r.WithContext(database.WithGuestIdentity(r.Context(), identity))
 }
 
+// CallerIdentity exposes callerIdentity to other room-scoped modules.
+func CallerIdentity(r *http.Request, normCode string) (string, *http.Request) {
+	return callerIdentity(r, normCode)
+}
+
 // Get handles GET /api/v1/rooms/{code}
 func (h *Handlers) Get(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")

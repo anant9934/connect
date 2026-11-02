@@ -23,6 +23,7 @@ import (
 	"github.com/tathastu/connect/services/api/internal/files"
 	"github.com/tathastu/connect/services/api/internal/handlers"
 	"github.com/tathastu/connect/services/api/internal/institution"
+	"github.com/tathastu/connect/services/api/internal/interaction"
 	"github.com/tathastu/connect/services/api/internal/livekit"
 	"github.com/tathastu/connect/services/api/internal/meeting/p2p"
 	"github.com/tathastu/connect/services/api/internal/notes"
@@ -136,7 +137,8 @@ func newRuntimeRouter(t *testing.T, app *pgxpool.Pool, configure func(*auth.Serv
 		notes.NewHandler(notes.NewService(notes.NewPgxRepository(app), validator, auditService)),
 		files.NewHandler(files.NewService(files.NewPgxRepository(app), files.NewMemoryStorageProvider(), files.NewHeuristicScanner(), validator, auditService)),
 		authService, p2p.NewHandler(cfg, logger, p2p.NewHub(logger), roomService, authService), nil,
-		institution.NewHandler(app, auditService))
+		institution.NewHandler(app, auditService),
+		interaction.NewHandler(app, roomService, limiter, auditService))
 }
 
 // TestWorkflowDB_APITenantIsolation runs the full router with every module on connect_app,

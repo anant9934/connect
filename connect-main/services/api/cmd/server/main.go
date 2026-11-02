@@ -19,6 +19,7 @@ import (
 	"github.com/tathastu/connect/services/api/internal/files"
 	"github.com/tathastu/connect/services/api/internal/handlers"
 	"github.com/tathastu/connect/services/api/internal/institution"
+	"github.com/tathastu/connect/services/api/internal/interaction"
 	"github.com/tathastu/connect/services/api/internal/livekit"
 	"github.com/tathastu/connect/services/api/internal/meeting/p2p"
 	"github.com/tathastu/connect/services/api/internal/notes"
@@ -234,10 +235,12 @@ func main() {
 
 	// 6. Assemble Router and Hardened Server
 	var institutionHandler *institution.Handler
+	var interactionHandler *interaction.Handler
 	if db != nil {
 		institutionHandler = institution.NewHandler(db.Pool, auditService)
+		interactionHandler = interaction.NewHandler(db.Pool, roomService, limiter, auditService)
 	}
-	router := server.BuildRouter(cfg, logger, limiter, healthHandler, systemHandler, assertionHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler, livekitWebhook, institutionHandler)
+	router := server.BuildRouter(cfg, logger, limiter, healthHandler, systemHandler, assertionHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler, livekitWebhook, institutionHandler, interactionHandler)
 	srv := server.New(cfg, logger, router)
 
 	// 7. Initialize In-Process Background Worker (if enabled)
