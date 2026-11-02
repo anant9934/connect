@@ -42,6 +42,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/organizations", h.listOrganizations)
 	r.Post("/organizations", h.createOrganization)
 	r.Route("/organizations/{org}", func(o chi.Router) {
+		o.Get("/admin/overview", h.overview)
+		o.Get("/admin/audit", h.auditLog)
 		o.Get("/members", h.listMembers)
 		o.Post("/members", h.addMember)
 		o.Patch("/members/{user}", h.updateMember)
