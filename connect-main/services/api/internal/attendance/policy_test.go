@@ -99,6 +99,10 @@ func TestEvaluate_RulesAndWeights(t *testing.T) {
 			p.DurationWeight, p.BrowserWeight = 0.5, 0.5
 			return p
 		}, "partial", 0.55},
+		{"exactly on the threshold despite floating point", span(0, 60), Signals{}, func(p Policy) Policy {
+			p.DurationWeight, p.EngagementWeight, p.BrowserWeight = 0.6, 0.2, 0.2
+			return p
+		}, "present", 0.75},
 		{"no browser report is not held against anyone", span(0, 60), Signals{}, func(p Policy) Policy {
 			p.DurationWeight, p.BrowserWeight = 0.5, 0.5
 			return p

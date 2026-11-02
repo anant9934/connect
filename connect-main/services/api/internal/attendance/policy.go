@@ -100,7 +100,9 @@ func Evaluate(intervals []Interval, signals Signals, policy Policy, sessionStart
 		calc.Rules = append(calc.Rules, "browser_signal_unavailable")
 	}
 	if counted > 0 {
-		calc.Score = weighted / counted
+		// Scores are stored to 3 places. Comparing the same value stops rounding error from
+		// moving someone exactly on a threshold.
+		calc.Score = math.Round(weighted/counted*1000) / 1000
 	}
 
 	result := StudentResult{ConnectedSeconds: connected, Status: "absent"}
