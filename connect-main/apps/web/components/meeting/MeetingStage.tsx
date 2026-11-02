@@ -20,6 +20,7 @@ import { NotesPanel } from './NotesPanel';
 import { FilesPanel } from './FilesPanel';
 import { TransportDiagnostics } from './TransportDiagnostics';
 import { ChatMessage } from '@/features/chat/types';
+import { InteractionStatus } from '@/features/chat/useMeetingInteraction';
 import { AdmissionRequest, RoomModeration } from '@/features/rooms/types';
 import { TransportParticipant, TransportTrackPublication, MediaTransport } from '@/features/meeting/transport';
 
@@ -32,6 +33,15 @@ interface MeetingStageProps {
   screenShareParticipant: Participant | TransportParticipant | any;
   isHost: boolean;
   moderation: RoomModeration;
+  interaction: {
+    status: InteractionStatus;
+    actionError: string | null;
+    canAnnounce: boolean;
+    hasOlder: boolean;
+    loadingOlder: boolean;
+    onLoadOlder: () => void;
+    onRetry: (message: ChatMessage) => void;
+  };
   isLocked: boolean;
   isMicMuted: boolean;
   isVideoMuted: boolean;
@@ -53,7 +63,7 @@ interface MeetingStageProps {
   externalFileEvent?: { action: string; fileId: string; filename: string };
   captureMode?: 'detail' | 'motion';
   onToggleCaptureMode?: () => void;
-  onSendMessage: (text: string) => Promise<void>;
+  onSendMessage: (text: string, kind: 'chat' | 'announcement') => void;
   onSendReaction: (emoji: string) => void;
   onToggleHandRaise: () => void;
   onTogglePanel: (panel: 'chat' | 'participants' | 'notes' | 'files') => void;
@@ -79,6 +89,7 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
   screenShareParticipant,
   isHost,
   moderation,
+  interaction,
   isLocked,
   isMicMuted,
   isVideoMuted,
@@ -324,6 +335,13 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
           <aside className="absolute inset-0 sm:relative sm:inset-auto w-full sm:w-80 md:w-96 bg-white border-l border-[#E5E5E3] flex flex-col shrink-0 z-30 shadow-lg animate-in slide-in-from-right duration-150">
             <ChatPanel
               messages={chatMessages}
+              status={interaction.status}
+              actionError={interaction.actionError}
+              canAnnounce={interaction.canAnnounce}
+              hasOlder={interaction.hasOlder}
+              loadingOlder={interaction.loadingOlder}
+              onLoadOlder={interaction.onLoadOlder}
+              onRetry={interaction.onRetry}
               onSendMessage={onSendMessage}
               onClose={onClosePanel}
             />

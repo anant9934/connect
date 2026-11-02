@@ -69,14 +69,13 @@ describe('Phase 3 Architecture, Security & Light-First Verification', () => {
     );
   });
 
-  test('Realtime Chat: Ephemeral messaging with verified sender identity and character caps', () => {
+  test('Chat: stored by the server, with a size limit and data channels only as hints', () => {
     const chatPanel = fs.readFileSync(path.join(webRoot, 'components/meeting/ChatPanel.tsx'), 'utf-8');
-    assert.ok(chatPanel.includes('1000') || chatPanel.includes('1,000'), 'Chat must enforce max 1000 characters');
-    assert.ok(chatPanel.includes('Ephemeral') || chatPanel.includes('visible to participants currently'), 'Chat must clearly document ephemeral retention behavior');
+    assert.ok(chatPanel.includes('MAX_MESSAGE_LENGTH = 2000'), 'Chat must enforce the server limit');
 
     const meetingRoom = fs.readFileSync(path.join(webRoot, 'components/meeting/MeetingRoom.tsx'), 'utf-8');
-    assert.ok(meetingRoom.includes('tc-chat'), 'MeetingRoom must use tc-chat LiveKit data channel');
-    assert.ok(meetingRoom.includes('participant.identity'), 'MeetingRoom must verify senderIdentity from LiveKit participant');
+    assert.ok(meetingRoom.includes('useMeetingInteraction'), 'MeetingRoom must use stored chat');
+    assert.ok(!meetingRoom.includes("topic === 'tc-chat'"), 'MeetingRoom must not trust data channel chat');
   });
 
   test('Security: Waiting room gatekeeping prevents unauthorized LiveKit token issuance', () => {

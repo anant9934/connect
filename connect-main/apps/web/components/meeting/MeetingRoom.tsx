@@ -34,6 +34,7 @@ import {
 import { MeetingStage } from './MeetingStage';
 import { Loader2, AlertCircle, UserX, Clock, Volume2, X } from 'lucide-react';
 import { ChatMessage } from '@/features/chat/types';
+import { useMeetingInteraction } from '@/features/chat/useMeetingInteraction';
 import { AdmissionRequest } from '@/features/rooms/types';
 import {
   MediaTransportFactory,
@@ -106,11 +107,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   // Phase 3 & 4 States: Panels, Chat, Reactions, Notes, Files, Host Moderation
   const [activePanel, setActivePanel] = useState<'chat' | 'participants' | 'notes' | 'files' | null>(null);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
-  const [raisedHands, setRaisedHands] = useState<Set<string>>(new Set());
-  const [reactions, setReactions] = useState<Record<string, string>>({});
-  const [isLocalHandRaised, setIsLocalHandRaised] = useState(false);
+  const [latestAnnouncement, setLatestAnnouncement] = useState<ChatMessage | null>(null);
+  const [myRole, setMyRole] = useState('participant');
   const [pendingAdmissions, setPendingAdmissions] = useState<AdmissionRequest[]>([]);
   const [externalNotesRevision, setExternalNotesRevision] = useState<number>(1);
   const [externalFileEvent, setExternalFileEvent] = useState<{ action: string; fileId: string; filename: string } | undefined>(undefined);
@@ -155,64 +154,37 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     setIsScreenSharing(false);
   }, []);
 
-  const handleDataPayload = useCallback((payload: Uint8Array, participant?: any, topic?: string) => {
-    const sender = participant || {
-      identity: 'remote-peer',
-      name: 'Participant',
-    };
+  const interaction = useMeetingInteraction(
+    roomCode,
+    initialIdentity || '',
+    () => {
+      transportRef.current?.sendData('tc-sync', {}).catch(() => {
+        // Others catch up on their next poll.
+      });
+    },
+    (fromOthers) => {
+      if (activePanelRef.current !== 'chat') {
+        setUnreadChatCount((c) => c + fromOthers.length);
+      }
+      const announcement = [...fromOthers].reverse().find((m) => m.kind === 'announcement');
+      if (announcement) setLatestAnnouncement(announcement);
+    }
+  );
+  const chatMessages = interaction.messages;
+  const raisedHands = interaction.raisedHands;
+  const reactions = interaction.reactions;
+  const isLocalHandRaised = raisedHands.has(initialIdentity || '');
+  const refreshInteractionRef = useRef(interaction.refresh);
+  refreshInteractionRef.current = interaction.refresh;
 
+  const handleDataPayload = useCallback((payload: Uint8Array, participant?: any, topic?: string) => {
     try {
       const text = new TextDecoder().decode(payload);
       const data = JSON.parse(text);
 
-      if (topic === 'tc-chat') {
-        if (typeof data.text === 'string' && data.text.length <= 1000) {
-          const newMsg: ChatMessage = {
-            id: typeof data.id === 'string' ? data.id : `msg-${Date.now()}`,
-            senderIdentity: sender.identity,
-            senderName: sender.name || sender.identity,
-            text: data.text,
-            timestamp: typeof data.timestamp === 'number' ? data.timestamp : Date.now(),
-            isSelf: false,
-            status: 'delivered',
-          };
-
-          setChatMessages((prev) => {
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            return [...prev, newMsg];
-          });
-
-          if (activePanelRef.current !== 'chat') {
-            setUnreadChatCount((c) => c + 1);
-          }
-        }
-      } else if (topic === 'tc-reaction') {
-        if (data.type === 'hand_raise') {
-          setRaisedHands((prev) => {
-            const next = new Set(prev);
-            if (data.raised) {
-              next.add(participant.identity);
-            } else {
-              next.delete(participant.identity);
-            }
-            return next;
-          });
-        } else if (data.type === 'reaction' && typeof data.emoji === 'string') {
-          setReactions((prev) => ({
-            ...prev,
-            [participant.identity]: data.emoji,
-          }));
-          setTimeout(() => {
-            setReactions((prev) => {
-              if (prev[participant.identity] === data.emoji) {
-                const next = { ...prev };
-                delete next[participant.identity];
-                return next;
-              }
-              return prev;
-            });
-          }, 3500);
-        }
+      // Never trusted as content: it only says the stored state may have changed.
+      if (topic === 'tc-sync') {
+        refreshInteractionRef.current();
       } else if (topic === 'tc-notes') {
         if (typeof data.revision === 'number') {
           setExternalNotesRevision(data.revision);
@@ -272,6 +244,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               setConnectionState(ConnectionState.Reconnecting);
             })
             .on(RoomEvent.Reconnected, () => {
+              refreshInteractionRef.current();
               setConnectionState(ConnectionState.Connected);
               setRemoteParticipants(Array.from(room.remoteParticipants.values()));
               setLocalParticipant(room.localParticipant);
@@ -286,18 +259,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               setRemoteParticipants(Array.from(room.remoteParticipants.values()));
               setLocalParticipant(room.localParticipant);
               updateScreenShareState(room);
-              setRaisedHands((prev) => {
-                if (!prev.has(participant.identity)) return prev;
-                const next = new Set(prev);
-                next.delete(participant.identity);
-                return next;
-              });
-              setReactions((prev) => {
-                if (!prev[participant.identity]) return prev;
-                const next = { ...prev };
-                delete next[participant.identity];
-                return next;
-              });
             })
             .on(RoomEvent.TrackSubscribed, () => {
               setRemoteParticipants(Array.from(room.remoteParticipants.values()));
@@ -548,6 +509,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         const [me, participants] = await Promise.all([getMyRole(roomCode), getParticipants(roomCode)]);
         if (!isMounted) return;
         setIsHost(me.isHost);
+        setMyRole(me.role);
         setMyPermissions(me.permissions || {});
         setParticipantRoles(Object.fromEntries(participants.map((p) => [p.identity, p.identity === me.hostIdentity ? 'host' : p.role])));
       } catch {
@@ -755,99 +717,17 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
-  // Phase 3: Realtime Chat Sending
-  const handleSendMessage = async (text: string) => {
-    const transport = transportRef.current;
-    if (!transport || !localParticipant) return;
-
+  const handleSendMessage = (text: string, kind: 'chat' | 'announcement') => {
     const trimmed = text.trim();
-    if (!trimmed || trimmed.length > 1000) return;
-
-    const msgId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    const newMsg: ChatMessage = {
-      id: msgId,
-      senderIdentity: localParticipant.identity,
-      senderName: localParticipant.name || 'You',
-      text: trimmed,
-      timestamp: Date.now(),
-      isSelf: true,
-      status: 'sending',
-    };
-
-    setChatMessages((prev) => [...prev, newMsg]);
-
-    try {
-      await transport.sendData('tc-chat', {
-        id: msgId,
-        text: trimmed,
-        timestamp: newMsg.timestamp,
-      });
-
-      setChatMessages((prev) =>
-        prev.map((m) => (m.id === msgId ? { ...m, status: 'sent' } : m))
-      );
-    } catch {
-      setChatMessages((prev) =>
-        prev.map((m) => (m.id === msgId ? { ...m, status: 'error' } : m))
-      );
-    }
+    if (trimmed) interaction.sendMessage(trimmed, kind);
   };
 
-  // Phase 3: Reactions & Hand Raise
   const handleSendReaction = (emoji: string) => {
-    const transport = transportRef.current;
-    if (!transport || !localParticipant) return;
-
-    setReactions((prev) => ({
-      ...prev,
-      [localParticipant.identity]: emoji,
-    }));
-
-    setTimeout(() => {
-      setReactions((prev) => {
-        if (prev[localParticipant.identity] === emoji) {
-          const next = { ...prev };
-          delete next[localParticipant.identity];
-          return next;
-        }
-        return prev;
-      });
-    }, 3500);
-
-    try {
-      transport.sendData('tc-reaction', {
-        type: 'reaction',
-        emoji,
-        timestamp: Date.now(),
-      });
-    } catch {
-      // Non-blocking
-    }
+    interaction.react(emoji);
   };
 
   const handleToggleHandRaise = () => {
-    const transport = transportRef.current;
-    if (!transport || !localParticipant) return;
-
-    const nextState = !isLocalHandRaised;
-    setIsLocalHandRaised(nextState);
-
-    setRaisedHands((prev) => {
-      const next = new Set(prev);
-      if (nextState) next.add(localParticipant.identity);
-      else next.delete(localParticipant.identity);
-      return next;
-    });
-
-    try {
-      transport.sendData('tc-reaction', {
-        type: 'hand_raise',
-        raised: nextState,
-        timestamp: Date.now(),
-      });
-    } catch {
-      // Non-blocking
-    }
+    interaction.setOwnHand(!isLocalHandRaised);
   };
 
   // Phase 3: Host Moderation Actions
@@ -891,6 +771,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     onGrantCoHost: (identity: string) => runModeration(() => grantCoHost(roomCode, identity), 'Could not make this person a co-host.'),
     onRevokeCoHost: (identity: string) => runModeration(() => revokeCoHost(roomCode, identity), 'Could not revoke co-host.'),
     onTransferHost: (identity: string) => runModeration(() => transferHost(roomCode, identity), 'Could not transfer the host role.'),
+    onLowerHand: (identity: string) => interaction.lowerHand(identity),
     onMuteAll: () => runModeration(() => muteAllParticipants(roomCode), 'Could not mute everyone.'),
     onUpdatePermissions: (coHost: Record<string, boolean>, canPublish: boolean) => {
       setCoHostPermissions(coHost);
@@ -1054,6 +935,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         </div>
       )}
 
+      {latestAnnouncement && (
+        <div role="status" data-testid="announcement-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-50 w-[min(92vw,560px)] flex items-start gap-3 rounded-xl border border-amber-300 bg-[#FFF2BE] px-4 py-2.5 text-sm text-amber-950 shadow-lg">
+          <p className="min-w-0 break-words">
+            <span className="font-semibold">{latestAnnouncement.senderName}: </span>
+            {latestAnnouncement.text}
+          </p>
+          <button type="button" onClick={() => setLatestAnnouncement(null)} className="shrink-0 text-xs font-semibold underline min-h-[24px]">
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <MeetingStage
         roomCode={roomCode}
         connectionState={connectionState}
@@ -1063,6 +956,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         screenShareParticipant={screenShareParticipant}
         isHost={isHost}
         moderation={moderation}
+        interaction={{
+          status: interaction.status,
+          actionError: interaction.actionError,
+          canAnnounce: isHost || myRole === 'co-host',
+          hasOlder: interaction.hasOlder,
+          loadingOlder: interaction.loadingOlder,
+          onLoadOlder: interaction.loadOlder,
+          onRetry: interaction.retryMessage,
+        }}
         isLocked={isLocked}
         isMicMuted={isMicMuted}
         isVideoMuted={isVideoMuted}

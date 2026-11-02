@@ -76,5 +76,6 @@ export interface RoomModeration {
   onRevokeCoHost: (identity: string) => void;
   onTransferHost: (identity: string) => void;
   onMuteAll: () => void;
+  onLowerHand: (identity: string) => void;
   onUpdatePermissions: (coHost: Record<string, boolean>, participantsCanPublish: boolean) => void;
 }

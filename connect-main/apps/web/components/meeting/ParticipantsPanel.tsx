@@ -295,9 +295,21 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
 
                 <div className="flex items-center gap-1.5 shrink-0">
                   {hasHandRaised && (
-                    <span className="p-1 rounded-md bg-amber-100 text-amber-800" title="Hand raised">
-                      <Hand className="w-3.5 h-3.5" />
-                    </span>
+                    permissions.mute ? (
+                      <button
+                        type="button"
+                        onClick={() => moderation.onLowerHand(p.identity)}
+                        className="p-1 rounded-md bg-amber-100 text-amber-800 hover:bg-amber-200"
+                        title="Lower this hand"
+                        aria-label={`Lower ${p.name || 'participant'}'s hand`}
+                      >
+                        <Hand className="w-3.5 h-3.5" />
+                      </button>
+                    ) : (
+                      <span className="p-1 rounded-md bg-amber-100 text-amber-800" title="Hand raised" aria-label="Hand raised" role="img">
+                        <Hand className="w-3.5 h-3.5" />
+                      </span>
+                    )
                   )}
                   <span className={`p-1 rounded-md ${p.isMicrophoneEnabled ? 'bg-[#DFF5E8] text-[#1E7E34]' : 'bg-[#F3F4F6] text-[#9CA3AF]'}`}>
                     {p.isMicrophoneEnabled ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
