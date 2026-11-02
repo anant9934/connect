@@ -78,9 +78,15 @@ int main() {
     ],
   };
 
+  // Enforce zero-leakage of hidden test cases to student client
+  const studentAssignment: LabAssignment = {
+    ...assignment,
+    test_cases: (assignment.test_cases || []).filter((tc) => !tc.is_hidden),
+  };
+
   return (
     <div className="min-h-screen bg-[#FAF9FC]">
-      <AssignmentSolver assignment={assignment} orgId={assignment.organization_id} />
+      <AssignmentSolver assignment={studentAssignment} orgId={assignment.organization_id} />
     </div>
   );
 }
