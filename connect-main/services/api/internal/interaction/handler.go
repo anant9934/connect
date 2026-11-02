@@ -65,10 +65,11 @@ type Message struct {
 }
 
 type caller struct {
-	identity string
-	role     *room.MyRole
-	roomID   string
-	r        *http.Request
+	identity   string
+	role       *room.MyRole
+	roomID     string
+	roomStatus string
+	r          *http.Request
 }
 
 // resolve returns the caller from their credentials only, with a verified place in the room.
@@ -93,7 +94,7 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request) (*caller, bool
 		model.SendJSONError(w, r, http.StatusNotFound, "ROOM_NOT_FOUND", "This meeting is unavailable.")
 		return nil, false
 	}
-	return &caller{identity: identity, role: role, roomID: rm.ID, r: r}, true
+	return &caller{identity: identity, role: role, roomID: rm.ID, roomStatus: rm.Status, r: r}, true
 }
 
 func (h *Handler) allow(w http.ResponseWriter, c *caller, action string, limit int, window time.Duration) bool {
@@ -237,16 +238,16 @@ func (h *Handler) PostMessage(w http.ResponseWriter, r *http.Request) {
 	created := false
 	err := database.InCallerContext(c.r.Context(), h.pool, c.roomID, func(tx pgx.Tx) error {
 		ctx := c.r.Context()
-		var status, senderName string
-		if err := tx.QueryRow(ctx, `
-			SELECT r.status, p.display_name FROM room_participants p JOIN rooms r ON r.id = p.room_id
-			WHERE p.room_id = $1 AND p.identity = connect_auth.current_room_identity() AND p.left_at IS NULL
-			ORDER BY p.joined_at DESC LIMIT 1
-		`, c.roomID).Scan(&status, &senderName); err != nil {
-			return err
-		}
-		if status != "active" {
+		if c.roomStatus != "active" {
 			return errRoomClosed
+		}
+		var senderName string
+		if err := tx.QueryRow(ctx, `
+			SELECT display_name FROM room_participants
+			WHERE room_id = $1 AND identity = connect_auth.current_room_identity() AND left_at IS NULL
+			ORDER BY joined_at DESC LIMIT 1
+		`, c.roomID).Scan(&senderName); err != nil {
+			return err
 		}
 		// Sequence numbers are taken under this lock, so a reader who has seen seq N can never
 		// later miss a lower one that committed after it.
