@@ -26,7 +26,7 @@ Search-based entries show whether code exists, not that it works.
 | High | `/participants` public, forged `/leave`, guest token minting for supplied identities, waiting room not persisted, no RLS on users and participants. | Fixed on branch, verified in CI run 41367090494 |
 | High | Participant identities in URL paths were never decoded, so browser requests with `user%3A...` missed their target: co-host grants failed, and remove, mute and promote read it the same way. | Fixed on branch; regression test in CI |
 | High | Join and room lookup limits of 15 and 30 per minute per IP and room would block a class sharing one campus address. | Fixed on branch |
-| Resolved | Repeated LiveKit reconnects in CI: server v1.9.0 is incompatible with `livekit-client` 2.22. | Server pinned to 1.13.11; repeated runs pass in CI run 41380290532 |
+| Resolved | Repeated LiveKit reconnects in CI: server v1.9.0 is incompatible with `livekit-client` 2.22. | Server pinned to 1.13.11; 15 of 15 two-browser and three-browser runs each, across 5 CI runs |
 | Low | Root `package.json` scripts hardcode a Windows path; 100+ milestone reports clutter `connect-main/`. | Open |
 
 ## Register
@@ -44,7 +44,7 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | P1-05 | 1 | Mic, camera, screen share via LiveKit | token | yes | yes | TESTING | Remote video, mic and screen share publishing pass on a local LiveKit server in CI run 41380290532; LiveKit Cloud not verified; Android evidence is historical |
 | P1-06 | 1 | Remove, mute, speaker roles | `room` | yes | partial | TESTING | |
 | P1-07 | 1 | Co-host role, host transfer | `room`, `000018` | yes | partial | TESTING | API, concurrency and succession pass in CI run 41367090494; web panel never run in a browser because CI has no LiveKit; Android shows role and moderation only, no grant or transfer |
-| P1-08 | 1 | Chat, announcements, hands, reactions | `interaction`, `000020` | yes | partial | TESTING | API and 3 of 3 real-browser runs pass in CI run 41380290532. Android uses the same API, typechecked and launched only, no announcement sending |
+| P1-08 | 1 | Chat, announcements, hands, reactions | `interaction`, `000020` | yes | partial | TESTING | Web and API pass: 15 of 15 three-browser journeys across 5 CI runs, latest 41391002517. Stays TESTING because Android, deferred by the owner, is a required layer |
 | P1-09 | 1 | Signup, login, logout, sessions, Google | `auth` | yes | yes | TESTING | |
 | P1-10 | 1 | Password recovery, email verification | no | no | no | BLOCKED | Needs an email provider; none is authorized under the budget |
 | P1-11 | 1 | Profile and avatar | `auth` | yes | yes | TESTING | |
@@ -55,7 +55,7 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | P2-04 | 2 | Presentation tools | no | no | no | NOT_STARTED | |
 | P2-05 | 2 | Low-bandwidth mode, diagnostics | n/a | partial | partial | IN_PROGRESS | |
 | P2-06 | 2 | Institutions, courses, enrollment | `institution`, `000019` | `/institution` | no | TESTING | Passes in API tests and real Chrome, CI run 41367090494; no subjects or classrooms as separate entities; no Android screens |
-| P2-07 | 2 | Notifications | no | no | no | NOT_STARTED | |
+| P2-07 | 2 | Notifications | `notifications`, `000022` | `/notifications` | deferred | TESTING | In-app: class changes, reminders and attendance corrections pass with jobs run as `connect_worker` and in real Chrome, CI run 41391002517. No email (no provider approved); no recording or assignment notices yet |
 | P2-08 | 2 | Admin dashboard | audit service only | no | no | NOT_STARTED | |
 | P3-01 | 3 | Trusted session tracking | signed webhook, `000010` | n/a | n/a | TESTING | Real signed webhooks from a local LiveKit server recorded sessions in CI; not registered on the production LiveKit project, migrations not in production |
 | P3-02 | 3 | Duration attendance and reconciliation | worker | n/a | n/a | TESTING | Queue lifecycle passes in CI run 41358542181; process restart mid-job untested |
@@ -63,7 +63,7 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | P3-04 | 3 | Attendance correction with audit | `institution` | yes | no | TESTING | API and audit row pass in CI run 41367090494; web correction not exercised in a browser |
 | P3-05 | 3 | Dashboards and exports | summary, CSV | per-class table | no | IN_PROGRESS | API summary and CSV pass; no dashboard for engagement, disconnections or device signals |
 | P3-06 | 3 | Engagement and device signals | no | no | no | NOT_STARTED | |
-| P3-07 | 3 | Polls, quizzes, doubts | `interaction`, `000021` | yes | no | IN_PROGRESS | API and 3 of 3 real-browser runs pass in CI run 41380290532; no Android screen; no question bank |
+| P3-07 | 3 | Polls, quizzes, doubts | `interaction`, `000021` | yes | no | IN_PROGRESS | Web and API pass, latest CI run 41391002517; no question bank; hosts' poll options not edited after creation; Android deferred |
 | P3-08 | 3 | Whiteboard, breakout rooms | no | no | no | NOT_STARTED | |
 | P4-01 | 4 | Course workspaces and exercises | no | no | no | NOT_STARTED | |
 | P4-02 | 4 | Multi-language editor | no | no | no | NOT_STARTED | |

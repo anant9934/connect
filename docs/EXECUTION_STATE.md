@@ -12,9 +12,9 @@ Compact checkpoint. Resume from here. Budget: free tier only.
 | Runtime DB role | `neondb_owner` through the pooler, not `connect_app`. Owner reports `rolbypassrls=true`, so RLS does not apply |
 | Vercel | Project `connect`, root `connect-main/apps/web`, production branch `main` |
 
-## Verified on disposable Postgres 16 (CI run 41380290532, commit `f6c8f91`: all database tests and browser journeys pass)
+## Verified on disposable Postgres 16 (CI run 41391002517, commit `3ad4c2f`: all 18 database tests and all browser journeys pass)
 
-- Migrations 000001-000021, SQL security suites, rollback and re-apply of 000010-000021.
+- Migrations 000001-000022, SQL security suites, rollback and re-apply of 000010-000022.
 - `TestWorkflowDB_APITenantIsolation`: the full router with auth, room, notes and files all on `connect_app`:
   account lifecycle, room flow, forged leave and identity theft, waiting room, institutional rooms, suspended member,
   scheduled meetings, passcodes, co-hosts, host transfer including concurrent requests, account routes, Google checks.
@@ -38,7 +38,7 @@ Limits:
 - Production still connects as `neondb_owner`, which bypasses RLS. Role separation is coded and tested on this branch;
   applying it needs owner approval: `deployment/ROLE_SEPARATION_RELEASE.md`.
 - SECURITY DEFINER functions and foreign key checks need the table owner to bypass RLS; unconfirmed in production.
-- Deploy order: migrations 000013-000021 must be applied before this code, or the API fails.
+- Deploy order: migrations 000013-000022 must be applied before this code, or the API fails.
 - Behavior changes: guests are refused in institutional rooms; class rooms admit only their batch, faculty and admins;
   Google sign-in is refused until `GOOGLE_CLIENT_IDS` is set in production; regular participants may publish by default,
   and class rooms start with publishing off.
@@ -64,12 +64,12 @@ connection, duplicate connects, a real server outage with recovery, reload, leav
 
 ## Next action
 
-1. Android meeting, waiting room and role tests against a real backend, in a CI emulator job.
-2. Android: the release APK builds and launches on the emulator (`Medium_Phone_API_37.0`), but it has no local backend to
-   reach. Running meeting screens needs a local Postgres and API, which CI has but this machine does not. Android has no
-   polls or doubts screen yet.
-3. Then, in order: notifications (P2-07), history search (P2-02), admin (P2-08), engagement and browser signals
-   (P3-05, P3-06), presentation (P2-04), whiteboard and breakout rooms (P3-08). Recording stays blocked on quota.
+**Web and backend only, by owner instruction.** Android is deferred, not failed: its polls and doubts screen is local and
+uncommitted (`ClassroomSheet.tsx`, `MeetingScreen.tsx`, `apiClient.ts`), must stay out of commits, and the emulator workflow
+runs by hand only. The emulator has never reached the meeting screens.
+
+In order: history search (P2-02), admin dashboard (P2-08), engagement and browser signals (P3-05, P3-06), presentation
+(P2-04), whiteboard and breakout rooms (P3-08). Recording stays blocked on quota. Email is an open adapter: in-app only.
 
 The Neon rehearsal is planned in `deployment/NEON_REHEARSAL_PLAN.md` and has not been run.
 
