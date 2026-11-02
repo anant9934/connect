@@ -40,6 +40,13 @@ async function person(token) {
   const page = await context.newPage();
   await page.setViewport({ width: 1280, height: 800 });
   page.on('dialog', (d) => d.accept());
+  page.problems = [];
+  page.on('console', (m) => {
+    if (m.type() === 'error' || m.type() === 'warn') page.problems.push(m.text().slice(0, 90));
+  });
+  page.on('response', (r) => {
+    if (r.status() >= 400 && r.url().includes('/api/')) page.problems.push(`${r.status()} ${r.request().method()} ${r.url().split('/rooms/')[1] || r.url()}`);
+  });
   return page;
 }
 
@@ -77,6 +84,8 @@ async function sendChat(page, text) {
   await click(page, 'Send message');
 }
 
+const people = {};
+
 try {
   step('three people enter one meeting');
   const [hostToken, memberToken] = await Promise.all([signup('Hosta'), signup('Membera')]);
@@ -89,6 +98,7 @@ try {
   const code = (await created.json()).room.publicCode;
 
   const [host, member, guest] = await Promise.all([person(hostToken), person(memberToken), person()]);
+  Object.assign(people, { host, member, guest });
   await enter(host, code);
   await enter(member, code);
   await enter(guest, code, 'Guesta');
@@ -190,8 +200,10 @@ try {
   console.log('E2E PASS meeting interaction with real media');
 } catch (err) {
   console.log(`E2E FAIL ${err.message}`);
-  for (const [i, page] of (await browser.pages()).entries()) {
-    console.log(`page ${i}: ${page.url()}`);
+  for (const [name, page] of Object.entries(people)) {
+    const tail = await page.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').slice(-140)).catch(() => '');
+    console.log(`page ${name}: ${tail}`);
+    console.log(`page ${name} problems: ${[...new Set(page.problems)].slice(-3).join(' | ')}`);
   }
   process.exitCode = 1;
 } finally {

@@ -241,16 +241,16 @@ jobs:
           node test/e2e_meeting_interaction.mjs >> /tmp/e2e.txt 2>&1 || status=1
           cat /tmp/e2e.txt
           [ $status -eq 0 ] || tail -20 /tmp/api.log
-          grep -E 'E2E|^page ' /tmp/e2e.txt | tail -8 | while IFS= read -r line; do
+          grep -E 'E2E|^page ' /tmp/e2e.txt | tail -9 | while IFS= read -r line; do
             echo "::notice title=RLS browser::$line"
           done
           grep -E '^STEP' /tmp/e2e.txt | tail -1 | while IFS= read -r line; do
             echo "::notice title=RLS browser::last $line"
           done
-          [ $status -eq 0 ] || docker logs livekit 2>&1 | tail -5 | cut -c1-200 | while IFS= read -r line; do
+          [ $status -eq 0 ] || docker logs livekit 2>&1 | grep -E 'closing|reason|disconnect' | tail -1 | cut -c1-300 | while IFS= read -r line; do
             echo "::notice title=RLS browser::livekit $line"
           done
-          grep -E '"level":"ERROR"|panic' /tmp/api.log | tail -3 | cut -c1-200 | while IFS= read -r line; do
+          grep -E '"level":"ERROR"|panic' /tmp/api.log | tail -1 | cut -c1-200 | while IFS= read -r line; do
             echo "::notice title=RLS browser::api $line"
           done
           kill %1 %2 2>/dev/null || true
