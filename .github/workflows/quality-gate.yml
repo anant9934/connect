@@ -214,6 +214,8 @@ jobs:
           LIVEKIT_API_KEY: "devkey"
           LIVEKIT_API_SECRET: "disposable_livekit_secret_for_browser_tests"
           WEB_URL: "http://localhost:3000"
+          API_URL: "http://localhost:8080"
+          ADMIN_DATABASE_URL: "postgres://connect_admin:connect_disposable_ci_password_456@localhost:5432/connect_test_ci_runner?sslmode=disable"
         run: |
           (cd connect-main/services/api && go build -o /tmp/connect-api ./cmd/server)
           /tmp/connect-api > /tmp/api.log 2>&1 &
@@ -225,6 +227,7 @@ jobs:
           export CHROME_PATH="$(which google-chrome)"
           status=0
           node test/e2e_schedule_passcode.mjs > /tmp/e2e.txt 2>&1 || status=1
+          node test/e2e_institution.mjs >> /tmp/e2e.txt 2>&1 || status=1
           cat /tmp/e2e.txt
           [ $status -eq 0 ] || tail -20 /tmp/api.log
           grep -E 'E2E|^page ' /tmp/e2e.txt | tail -8 | while IFS= read -r line; do
@@ -232,6 +235,9 @@ jobs:
           done
           grep -E '^STEP' /tmp/e2e.txt | tail -1 | while IFS= read -r line; do
             echo "::notice title=RLS browser::last $line"
+          done
+          grep -iE 'error|panic' /tmp/api.log | tail -3 | cut -c1-200 | while IFS= read -r line; do
+            echo "::notice title=RLS browser::api $line"
           done
           kill %1 %2 2>/dev/null || true
           exit $status
