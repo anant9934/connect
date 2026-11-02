@@ -163,3 +163,13 @@ Should an unexpected issue occur in production, the system can be rolled back wi
    - In Vercel Dashboard, assign the production domain `connect-alpha-seven.vercel.app` to previous healthy deployment `dpl_FhzALaqNqpudACaoHEEuMJvKyQcb` (commit `95d9859de9172e4f776fbf1eb6eb70b80436336f`).
 3. **Database Point-in-Time Recovery:**
    - If relational data corruption occurs, restore Neon PostgreSQL project `late-night-b4r5iy1t` from backup branch `pre-migration-backup-20261103`.
+
+
+---
+
+## 9. Historical Addendum: Release SHA Clarification (Phase 4.16 Audit)
+
+During the Phase 4.16 independent release audit, the Git SHA alignment claims of this Phase 4.15 report were formally analyzed:
+1. **Repository HEAD vs Deployed Commit:** When this report was committed to Git (`87fd9d4`), GitHub `origin/main` advanced from `a5a6b66` to `87fd9d4`. Vercel automatically deployed `87fd9d4` (`dpl_52HB37g5wWZL8BQPaZNYjMY5CMzb`), while Render remained live on `a5a6b66` (`dep-dbkgqql9fdbs73flf24g`) because Render has `autoDeploy: no`.
+2. **Zero Codebase Delta:** Commit `87fd9d4` touched exclusively this markdown documentation file. There is zero application code difference between `a5a6b66` and `87fd9d4`. Both live deployments run identical application code.
+3. **Formal Specification:** See `docs/qa/PHASE_4_16_INDEPENDENT_RELEASE_VERIFICATION.md` for the authoritative Release Identity Matrix.
