@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import {
+import { DisconnectReason,
   Room as LiveKitRoom,
   RoomEvent,
   ConnectionState,
@@ -248,8 +248,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               updateScreenShareState(room);
               setCanPlaybackAudio(room.canPlaybackAudio);
             })
-            .on(RoomEvent.Disconnected, () => {
-              if (hasBeenConnectedRef.current) {
+            .on(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
+              if (reason === DisconnectReason.PARTICIPANT_REMOVED) {
+                setWasRemoved(true);
+              } else if (hasBeenConnectedRef.current) {
                 setMeetingEnded(true);
               }
             })

@@ -114,7 +114,7 @@ try {
     return img.complete && img.naturalWidth === 256;
   }, { timeout: 15000, polling: 200 });
   const served = await page.$eval('[data-testid="avatar-image"]', async (img) => {
-    const res = await fetch(img.src, { credentials: 'include' });
+    const res = await fetch(img.src, { credentials: 'include', cache: 'no-store' });
     return { status: res.status, type: res.headers.get('content-type'), sniff: res.headers.get('x-content-type-options') };
   });
   assert.deepEqual(served, { status: 200, type: 'image/jpeg', sniff: 'nosniff' });

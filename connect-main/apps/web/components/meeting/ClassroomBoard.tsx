@@ -224,7 +224,7 @@ export const ClassroomBoard: React.FC<ClassroomBoardProps> = ({ roomCode, selfId
   };
 
   return (
-    <div data-testid="classroom-board" className="absolute inset-0 z-20 bg-[#F3F4F6] flex flex-col">
+    <div data-testid="classroom-board" className="fixed inset-0 z-40 sm:absolute sm:z-20 bg-[#F3F4F6] flex flex-col">
       <div className="flex flex-wrap items-center justify-between gap-1.5 p-2 bg-white border-b border-[#E5E7EB]">
         <p className="text-xs font-semibold text-[#1C1C1C] break-all min-w-0">
           {view === 'whiteboard' ? 'Whiteboard' : state.fileName ?? 'Presentation'}
