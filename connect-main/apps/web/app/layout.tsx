@@ -20,7 +20,7 @@ const jetbrainsMono = JetBrains_Mono({
   variable: '--font-mono',
 });
 
-const canonicalUrl = process.env.NEXT_PUBLIC_APP_ORIGIN || 'https://connect-mauve-nine.vercel.app';
+const canonicalUrl = process.env.NEXT_PUBLIC_APP_ORIGIN || 'https://connect-alpha-seven.vercel.app';
 
 export const metadata: Metadata = {
   metadataBase: new URL(canonicalUrl),
@@ -110,15 +110,15 @@ const structuredData = {
       url: 'https://aitathastu.com',
       logo: {
         '@type': 'ImageObject',
-        url: 'https://connect-mauve-nine.vercel.app/android-chrome-512x512.png',
+        url: 'https://connect-alpha-seven.vercel.app/android-chrome-512x512.png',
         width: 512,
         height: 512,
       },
     },
     {
       '@type': 'WebSite',
-      '@id': 'https://connect-mauve-nine.vercel.app/#website',
-      url: 'https://connect-mauve-nine.vercel.app',
+      '@id': 'https://connect-alpha-seven.vercel.app/#website',
+      url: 'https://connect-alpha-seven.vercel.app',
       name: 'Tathastu Meet',
       description:
         'Video meetings and collaborative spaces for research, projects, mentorship, and everyday teamwork.',
@@ -128,11 +128,11 @@ const structuredData = {
     },
     {
       '@type': 'SoftwareApplication',
-      '@id': 'https://connect-mauve-nine.vercel.app/#application',
+      '@id': 'https://connect-alpha-seven.vercel.app/#application',
       name: 'Tathastu Meet',
       applicationCategory: 'CommunicationApplication',
       operatingSystem: 'Web, Android, iOS',
-      url: 'https://connect-mauve-nine.vercel.app',
+      url: 'https://connect-alpha-seven.vercel.app',
       offers: {
         '@type': 'Offer',
         price: '0',

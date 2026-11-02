@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     title: 'Video Meetings for Research Groups & AI Labs | Tathastu Meet',
     description:
       'Secure, privacy-conscious video collaboration platform for academic researchers, scientific laboratories, and AI teams. High-clarity audio and code sharing.',
-    url: 'https://connect-mauve-nine.vercel.app/use-cases/researchers',
+    url: 'https://connect-alpha-seven.vercel.app/use-cases/researchers',
   },
 };
 
@@ -29,19 +29,19 @@ export default function ResearchersUseCasePage() {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: 'https://connect-mauve-nine.vercel.app',
+        item: 'https://connect-alpha-seven.vercel.app',
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: 'Use Cases',
-        item: 'https://connect-mauve-nine.vercel.app/use-cases/researchers',
+        item: 'https://connect-alpha-seven.vercel.app/use-cases/researchers',
       },
       {
         '@type': 'ListItem',
         position: 3,
         name: 'Researchers',
-        item: 'https://connect-mauve-nine.vercel.app/use-cases/researchers',
+        item: 'https://connect-alpha-seven.vercel.app/use-cases/researchers',
       },
     ],
   };

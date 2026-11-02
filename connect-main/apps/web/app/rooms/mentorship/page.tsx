@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     title: 'Mentorship Rooms & 1:1 Guidance Sessions | Tathastu Meet',
     description:
       'Dedicated video meetings for student-mentor guidance, academic office hours, and professional coaching. Private waiting rooms, low-latency audio, and 1:1 focus.',
-    url: 'https://connect-mauve-nine.vercel.app/rooms/mentorship',
+    url: 'https://connect-alpha-seven.vercel.app/rooms/mentorship',
   },
 };
 
@@ -29,19 +29,19 @@ export default function MentorshipRoomPage() {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: 'https://connect-mauve-nine.vercel.app',
+        item: 'https://connect-alpha-seven.vercel.app',
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: 'Rooms',
-        item: 'https://connect-mauve-nine.vercel.app/rooms',
+        item: 'https://connect-alpha-seven.vercel.app/rooms',
       },
       {
         '@type': 'ListItem',
         position: 3,
         name: 'Mentorship Room',
-        item: 'https://connect-mauve-nine.vercel.app/rooms/mentorship',
+        item: 'https://connect-alpha-seven.vercel.app/rooms/mentorship',
       },
     ],
   };

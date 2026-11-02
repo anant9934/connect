@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     title: 'Platform Features & Capabilities | Tathastu Meet',
     description:
       'Explore verified video conferencing capabilities in Tathastu Meet: adaptive HD video, clear voice, instant screen sharing, and secure waiting rooms.',
-    url: 'https://connect-mauve-nine.vercel.app/features',
+    url: 'https://connect-alpha-seven.vercel.app/features',
   },
 };
 
@@ -74,13 +74,13 @@ export default function FeaturesPage() {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: 'https://connect-mauve-nine.vercel.app',
+        item: 'https://connect-alpha-seven.vercel.app',
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: 'Features',
-        item: 'https://connect-mauve-nine.vercel.app/features',
+        item: 'https://connect-alpha-seven.vercel.app/features',
       },
     ],
   };
