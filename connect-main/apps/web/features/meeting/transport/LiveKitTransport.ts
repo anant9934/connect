@@ -97,6 +97,7 @@ class LiveKitParticipantAdapter implements TransportParticipant {
 export class LiveKitTransport implements MediaTransport {
   readonly type: TransportType = 'livekit';
   private room: LiveKitRoom | null = null;
+  private connectAttempt: Promise<void> | null = null;
   private eventListeners: Map<string, Set<Function>> = new Map();
   private _screenSharePub: TransportTrackPublication | null = null;
   private _screenShareParticipant: TransportParticipant | null = null;
@@ -298,7 +299,19 @@ export class LiveKitTransport implements MediaTransport {
     return this.room;
   }
 
-  async connect(options: TransportConnectOptions): Promise<void> {
+  // One connection per transport: a second call joins the attempt in progress or does nothing.
+  connect(options: TransportConnectOptions): Promise<void> {
+    if (this.connectAttempt) {
+      return this.connectAttempt;
+    }
+    this.connectAttempt = this.openConnection(options).catch((err) => {
+      this.connectAttempt = null;
+      throw err;
+    });
+    return this.connectAttempt;
+  }
+
+  private async openConnection(options: TransportConnectOptions): Promise<void> {
     if (!options.livekitUrl || !options.token) {
       throw new Error('LiveKit URL and token required for LiveKitTransport');
     }
@@ -319,6 +332,7 @@ export class LiveKitTransport implements MediaTransport {
       if (allowDiagnostics) {
         (window as any).__livekitRoom = this.room;
         (window as any).__tcDiagnostics = {
+          connectAgain: () => this.connect(options),
           getRoomState: () => this.room?.state,
           getPeerConnections: () => {
             const pcs: RTCPeerConnection[] = [];
@@ -370,6 +384,7 @@ export class LiveKitTransport implements MediaTransport {
   }
 
   async disconnect(): Promise<void> {
+    this.connectAttempt = null;
     if (typeof window !== 'undefined') {
       delete (window as any).__livekitRoom;
       delete (window as any).__tcDiagnostics;
