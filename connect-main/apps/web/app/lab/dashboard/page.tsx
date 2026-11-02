@@ -1,51 +1,56 @@
-import React from 'react';
+'use client';
+
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import { StudentDashboard } from '@/features/lab/components/StudentDashboard';
 import type { LabStudentProgress } from '@/features/lab/types';
+import { getSession } from '@/features/auth/api';
+import { listOrganizations } from '@/features/institution/api';
+import { fetchStudentProgress } from '@/features/lab/api';
 
 export default function DashboardPage() {
-  const dummyProgress: LabStudentProgress[] = [
-    {
-      id: 'p-1',
-      organization_id: '11111111-1111-1111-1111-111111111111',
-      lab_course_id: 'c-1',
-      course_slug: 'cpp-oops',
-      course_title: 'Object-Oriented Programming with C++',
-      student_user_id: 'u-1',
-      exercises_completed: 4,
-      assignments_submitted: 1,
-      total_points: 90,
-      current_streak_days: 5,
-      last_activity_at: new Date().toISOString(),
-    },
-    {
-      id: 'p-2',
-      organization_id: '11111111-1111-1111-1111-111111111111',
-      lab_course_id: 'c-2',
-      course_slug: 'dsa',
-      course_title: 'Data Structures & Algorithms',
-      student_user_id: 'u-1',
-      exercises_completed: 5,
-      assignments_submitted: 1,
-      total_points: 100,
-      current_streak_days: 5,
-      last_activity_at: new Date().toISOString(),
-    },
-    {
-      id: 'p-3',
-      organization_id: '11111111-1111-1111-1111-111111111111',
-      lab_course_id: 'c-5',
-      course_slug: 'dbms-sql',
-      course_title: 'Database Management Systems (SQL)',
-      student_user_id: 'u-1',
-      exercises_completed: 5,
-      assignments_submitted: 1,
-      total_points: 90,
-      current_streak_days: 5,
-      last_activity_at: new Date().toISOString(),
-    },
-  ];
+  const [loading, setLoading] = useState(true);
+  const [progressList, setProgressList] = useState<LabStudentProgress[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function load() {
+      try {
+        const user = await getSession().catch(() => null);
+        if (!user) {
+          if (isMounted) setLoading(false);
+          return;
+        }
+
+        const orgs = await listOrganizations().catch(() => []);
+        if (orgs.length > 0) {
+          const res = await fetchStudentProgress(orgs[0].id).catch(() => ({ progress: [] }));
+          if (isMounted && res.progress && res.progress.length > 0) {
+            setProgressList(res.progress);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {
+        // Fallback gracefully
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  if (loading) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-[#FAF9FC]">
+        <Loader2 className="w-6 h-6 animate-spin text-[#7444E8]" aria-label="Loading student dashboard" />
+      </main>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#FAF9FC]">
@@ -57,7 +62,7 @@ export default function DashboardPage() {
           <ArrowLeft className="w-3.5 h-3.5" /> Back to Lab Hub
         </Link>
       </div>
-      <StudentDashboard progressList={dummyProgress} />
+      <StudentDashboard progressList={progressList} />
     </div>
   );
 }
