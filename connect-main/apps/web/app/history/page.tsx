@@ -98,6 +98,14 @@ export default function MeetingHistoryPage() {
     setter(value);
     setOffset(0);
   };
+  const clearFilters = () => {
+    setQuery('');
+    setDebouncedQuery('');
+    setStatus('');
+    setFromDay('');
+    setToDay('');
+    setOffset(0);
+  };
   const hasFilters = Boolean(debouncedQuery || status || fromDay || toDay);
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -177,6 +185,11 @@ export default function MeetingHistoryPage() {
               <input id="history-to" type="date" value={toDay} min={fromDay || undefined} onChange={(e) => change(setToDay)(e.target.value)} className={inputClass} />
             </div>
           </div>
+          {(query || hasFilters) && (
+            <button type="button" onClick={clearFilters} className="text-sm font-semibold text-[#7258E8] underline min-h-[44px]">
+              Clear filters
+            </button>
+          )}
         </form>
 
         {error && <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{error}</p>}

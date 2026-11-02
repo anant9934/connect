@@ -69,7 +69,7 @@ const nextConfig = {
             "script-src 'self' 'unsafe-inline'", // Next.js hydration bootstrap scripts
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "font-src 'self' https://fonts.gstatic.com data:",
-            "img-src 'self' data: blob: https:",
+            "img-src 'self' data: blob: https: http://localhost:8080",
             "connect-src 'self' http://localhost:8080 ws://localhost:8080 http://localhost:7880 ws://localhost:7880 wss://localhost:7880 https: wss:",
             "frame-ancestors 'none'",
             "object-src 'none'",

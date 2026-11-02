@@ -54,6 +54,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
   const pendingRef = useRef<Map<string, api.NewStroke>>(new Map());
   const currentRef = useRef<Point[] | null>(null);
   const counterRef = useRef(0);
+  const generationRef = useRef(0);
   const [color, setColor] = useState(COLORS[0]);
   const [tool, setTool] = useState<'pen' | 'highlighter'>('pen');
   const [strokeCount, setStrokeCount] = useState(0);
@@ -73,12 +74,18 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
   }, [color, tool]);
 
   const sync = useCallback(async (reset: boolean) => {
+    // A redraw outdates anything still on its way, which could bring back a removed line.
+    if (reset) generationRef.current += 1;
+    const generation = generationRef.current;
     try {
       const after = reset ? 0 : strokesRef.current.at(-1)?.seq ?? 0;
       const fresh = await api.listStrokes(roomCode, board, after);
-      strokesRef.current = reset ? fresh : [...strokesRef.current, ...fresh];
+      if (generation !== generationRef.current) return;
+      const known = new Set(reset ? [] : strokesRef.current.map((s) => s.seq));
+      const added = fresh.filter((s) => !known.has(s.seq));
+      strokesRef.current = reset ? added : [...strokesRef.current, ...added];
       for (const [id, pending] of pendingRef.current) {
-        if (fresh.some((s) => s.authorIdentity && s.points.length === pending.points.length && s.color === pending.color && s.points[0]?.[0] === pending.points[0]?.[0] && s.points[0]?.[1] === pending.points[0]?.[1])) {
+        if (fresh.some((s) => s.points.length === pending.points.length && s.color === pending.color && s.points[0]?.[0] === pending.points[0]?.[0] && s.points[0]?.[1] === pending.points[0]?.[1])) {
           pendingRef.current.delete(id);
         }
       }
