@@ -402,6 +402,15 @@ type createAssignmentRequest struct {
 	TestCases        []LabTestCase `json:"test_cases"`
 }
 
+// defaultAllowedLanguages mirrors the lab_assignments column default. A nil slice would be
+// sent as NULL and violate the NOT NULL constraint, turning an omitted field into a 500.
+func defaultAllowedLanguages(langs []string) []string {
+	if len(langs) == 0 {
+		return []string{"cpp", "python", "java", "javascript", "sql"}
+	}
+	return langs
+}
+
 func (h *Handler) createAssignment(w http.ResponseWriter, r *http.Request) {
 	var req createAssignmentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -434,6 +443,7 @@ func (h *Handler) createAssignment(w http.ResponseWriter, r *http.Request) {
 	if req.Status == "" {
 		req.Status = "published"
 	}
+	req.AllowedLanguages = defaultAllowedLanguages(req.AllowedLanguages)
 
 	err := h.inOrg(r, func(tx pgx.Tx, authCtx *database.AuthContext, orgID uuid.UUID) error {
 		if !h.isFacultyOrAdmin(authCtx.Role, authCtx.IsSuperAdmin) {
