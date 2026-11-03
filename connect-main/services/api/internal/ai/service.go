@@ -86,35 +86,46 @@ func (s *Service) GetOrgSpend(orgID string) (spend int64, budget int64) {
 	return policy.CurrentSpendMicroUSD, policy.MonthlyBudgetMicroUSD
 }
 
-func (s *Service) checkLimits(ctx context.Context, orgID, userID, model string, estimatedTokens int) error {
+func (s *Service) checkLimits(ctx context.Context, orgID, userID, model string, estimatedTokens int) (int64, error) {
 	// 1. Rate Limit Check
 	if s.limiter != nil {
 		key := fmt.Sprintf("ai:ratelimit:org:%s", orgID)
 		allowed, err := s.limiter.Allow(ctx, key, s.cfg.RateLimitRPM, time.Minute)
 		if err == nil && !allowed {
-			return ErrRateLimitExceeded
+			return 0, ErrRateLimitExceeded
 		}
 	}
 
-	// 2. Policy and Spend Limit Check via PolicyEngine
-	_, err := s.policyEngine.AuthorizeRequest(ctx, orgID, model, estimatedTokens)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	// 2. Policy check and atomic budget reservation via PolicyEngine
+	return s.policyEngine.AuthorizeRequest(ctx, orgID, model, estimatedTokens)
 }
 
-func (s *Service) recordSpend(orgID string, billedMicroUSD int64) {
-	s.policyEngine.CommitSpend(orgID, billedMicroUSD)
+// complete enforces limits, reserves budget, calls the router and settles the reservation
+// against the amount actually billed. The reservation is released if the call fails.
+func (s *Service) complete(ctx context.Context, orgID, userID string, req CompletionRequest) (*CompletionResult, error) {
+	reserved, err := s.checkLimits(ctx, orgID, userID, req.Model, req.MaxTokens)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := s.router.Complete(ctx, req)
+	if err != nil {
+		s.policyEngine.SettleSpend(orgID, reserved, 0)
+		return nil, err
+	}
+
+	res.Usage.EstimatedCostMicroUSD = res.Usage.CostMicroUSD
+	res.Usage.IsMock = res.IsMock
+	res.Usage.BilledCostMicroUSD = res.Usage.CostMicroUSD
+	if info, ok := s.registry.Get(res.Model); ok && info.IsFreeTierEligible {
+		res.Usage.BilledCostMicroUSD = 0
+	}
+	s.policyEngine.SettleSpend(orgID, reserved, res.Usage.BilledCostMicroUSD)
+	return res, nil
 }
 
 // SummarizeLecture generates a structured summary from an authoritative classroom transcript.
 func (s *Service) SummarizeLecture(ctx context.Context, orgID, userID, courseCode, transcriptText string) (*LectureSummary, *Usage, error) {
-	if err := s.checkLimits(ctx, orgID, userID, s.cfg.DefaultFastModel, 2048); err != nil {
-		return nil, nil, err
-	}
-
 	cleanTranscript, err := s.sanitizer.ValidateAndSanitize(transcriptText)
 	if err != nil {
 		return nil, nil, err
@@ -141,21 +152,10 @@ Return only valid JSON.`
 		ResponseFormat: "json",
 	}
 
-	res, err := s.router.Complete(ctx, req)
+	res, err := s.complete(ctx, orgID, userID, req)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	res.Usage.EstimatedCostMicroUSD = res.Usage.CostMicroUSD
-	res.Usage.IsMock = res.IsMock
-	modelInfo, _ := s.registry.GetModel(req.Model)
-	if modelInfo != nil && modelInfo.IsFreeTierEligible {
-		res.Usage.BilledCostMicroUSD = 0
-	} else {
-		res.Usage.BilledCostMicroUSD = res.Usage.CostMicroUSD
-	}
-
-	s.recordSpend(orgID, res.Usage.BilledCostMicroUSD)
 
 	summary, err := s.validator.ValidateLectureSummary(res.Content)
 	if err != nil {
@@ -167,10 +167,6 @@ Return only valid JSON.`
 
 // GeneratePracticeQuiz creates multiple-choice revision questions for students.
 func (s *Service) GeneratePracticeQuiz(ctx context.Context, orgID, userID, courseTitle, topic string, count int) (*PracticeQuiz, *Usage, error) {
-	if err := s.checkLimits(ctx, orgID, userID, s.cfg.DefaultModel, 4096); err != nil {
-		return nil, nil, err
-	}
-
 	cleanTopic, err := s.sanitizer.ValidateAndSanitize(topic)
 	if err != nil {
 		return nil, nil, err
@@ -208,21 +204,10 @@ Return only valid JSON.`
 		ResponseFormat: "json",
 	}
 
-	res, err := s.router.Complete(ctx, req)
+	res, err := s.complete(ctx, orgID, userID, req)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	res.Usage.EstimatedCostMicroUSD = res.Usage.CostMicroUSD
-	res.Usage.IsMock = res.IsMock
-	modelInfo, _ := s.registry.GetModel(req.Model)
-	if modelInfo != nil && modelInfo.IsFreeTierEligible {
-		res.Usage.BilledCostMicroUSD = 0
-	} else {
-		res.Usage.BilledCostMicroUSD = res.Usage.CostMicroUSD
-	}
-
-	s.recordSpend(orgID, res.Usage.BilledCostMicroUSD)
 
 	quiz, err := s.validator.ValidatePracticeQuiz(res.Content)
 	if err != nil {
@@ -234,10 +219,6 @@ Return only valid JSON.`
 
 // GenerateFlashcards creates a revision deck for a study topic.
 func (s *Service) GenerateFlashcards(ctx context.Context, orgID, userID, deckTitle, notesText string) (*FlashcardSet, *Usage, error) {
-	if err := s.checkLimits(ctx, orgID, userID, s.cfg.DefaultFastModel, 2048); err != nil {
-		return nil, nil, err
-	}
-
 	cleanNotes, err := s.sanitizer.ValidateAndSanitize(notesText)
 	if err != nil {
 		return nil, nil, err
@@ -267,21 +248,10 @@ Return only valid JSON.`
 		ResponseFormat: "json",
 	}
 
-	res, err := s.router.Complete(ctx, req)
+	res, err := s.complete(ctx, orgID, userID, req)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	res.Usage.EstimatedCostMicroUSD = res.Usage.CostMicroUSD
-	res.Usage.IsMock = res.IsMock
-	modelInfo, _ := s.registry.GetModel(req.Model)
-	if modelInfo != nil && modelInfo.IsFreeTierEligible {
-		res.Usage.BilledCostMicroUSD = 0
-	} else {
-		res.Usage.BilledCostMicroUSD = res.Usage.CostMicroUSD
-	}
-
-	s.recordSpend(orgID, res.Usage.BilledCostMicroUSD)
 
 	cards, err := s.validator.ValidateFlashcards(res.Content)
 	if err != nil {

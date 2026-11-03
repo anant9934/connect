@@ -93,7 +93,7 @@ func TestPolicyEngine_BudgetModesAndConcurrency(t *testing.T) {
 				cost, authErr := pe.AuthorizeRequest(context.Background(), cappedOrgID, "gpt-4o-mini", 2000)
 				if authErr == nil {
 					atomic.AddInt64(&authorizedCount, 1)
-					pe.CommitSpend(cappedOrgID, cost)
+					pe.SettleSpend(cappedOrgID, cost, cost)
 				} else if errors.Is(authErr, ErrBudgetExceeded) {
 					atomic.AddInt64(&rejectedCount, 1)
 				}
@@ -102,7 +102,7 @@ func TestPolicyEngine_BudgetModesAndConcurrency(t *testing.T) {
 		wg.Wait()
 
 		policy := pe.GetPolicy(cappedOrgID)
-		if policy.CurrentSpendMicroUSD > policy.MonthlyBudgetMicroUSD+500 {
+		if policy.CurrentSpendMicroUSD > policy.MonthlyBudgetMicroUSD {
 			t.Errorf("spend %d exceeded budget %d significantly under concurrency", policy.CurrentSpendMicroUSD, policy.MonthlyBudgetMicroUSD)
 		}
 		if rejectedCount == 0 {
@@ -394,5 +394,30 @@ func TestWorker_AIJobLifecycleAndIdempotency(t *testing.T) {
 	}
 	if key1 == keyDifferent {
 		t.Errorf("idempotency keys for different jobs must differ: %s == %s", key1, keyDifferent)
+	}
+}
+
+func TestPolicyEngine_ReservationReleasedOnFailure(t *testing.T) {
+	pe := NewPolicyEngine(NewDefaultModelRegistry())
+	orgID := uuid.New().String()
+	if err := pe.SetPolicy(&OrgPolicy{
+		OrganizationID:        orgID,
+		BudgetMode:            BudgetModeCapped,
+		MonthlyBudgetMicroUSD: 1000,
+		AllowedModels:         []string{"gpt-4o-mini"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reserved, err := pe.AuthorizeRequest(context.Background(), orgID, "gpt-4o-mini", 2000)
+	if err != nil || reserved <= 0 {
+		t.Fatalf("expected a positive reservation, got %d, %v", reserved, err)
+	}
+	if got := pe.GetPolicy(orgID).ReservedMicroUSD; got != reserved {
+		t.Fatalf("expected reserved %d, got %d", reserved, got)
+	}
+	pe.SettleSpend(orgID, reserved, 0) // provider call failed
+	p := pe.GetPolicy(orgID)
+	if p.ReservedMicroUSD != 0 || p.CurrentSpendMicroUSD != 0 {
+		t.Fatalf("failed request must release its reservation and bill nothing, got reserved=%d spend=%d", p.ReservedMicroUSD, p.CurrentSpendMicroUSD)
 	}
 }

@@ -41,6 +41,7 @@ type OrgPolicy struct {
 	BudgetMode            BudgetMode `json:"budgetMode"`
 	MonthlyBudgetMicroUSD int64      `json:"monthlyBudgetMicroUSD"`
 	CurrentSpendMicroUSD  int64      `json:"currentSpendMicroUSD"`
+	ReservedMicroUSD      int64      `json:"reservedMicroUSD"`
 	BillingCycleAnchor    time.Time  `json:"billingCycleAnchor"`
 	AllowedModels         []string   `json:"allowedModels"`
 	UpdatedAt             time.Time  `json:"updatedAt"`
@@ -100,6 +101,7 @@ func (pe *PolicyEngine) GetPolicy(orgID string) *OrgPolicy {
 		BudgetMode:            p.BudgetMode,
 		MonthlyBudgetMicroUSD: p.MonthlyBudgetMicroUSD,
 		CurrentSpendMicroUSD:  p.CurrentSpendMicroUSD,
+		ReservedMicroUSD:      p.ReservedMicroUSD,
 		BillingCycleAnchor:    p.BillingCycleAnchor,
 		AllowedModels:         append([]string(nil), p.AllowedModels...),
 		UpdatedAt:             p.UpdatedAt,
@@ -128,8 +130,13 @@ func (pe *PolicyEngine) SetPolicy(policy *OrgPolicy) error {
 	pe.mu.Lock()
 	defer pe.mu.Unlock()
 
+	var reserved int64
+	if existing, ok := pe.policies[policy.OrganizationID]; ok {
+		reserved = existing.ReservedMicroUSD // keep in-flight reservations
+	}
 	policy.UpdatedAt = time.Now().UTC()
 	pe.policies[policy.OrganizationID] = &OrgPolicy{
+		ReservedMicroUSD:      reserved,
 		OrganizationID:        policy.OrganizationID,
 		BudgetMode:            policy.BudgetMode,
 		MonthlyBudgetMicroUSD: policy.MonthlyBudgetMicroUSD,
@@ -194,14 +201,18 @@ func (pe *PolicyEngine) AuthorizeRequest(ctx context.Context, orgID, modelID str
 		if p.MonthlyBudgetMicroUSD <= 0 {
 			return 0, fmt.Errorf("%w: budget capped at 0 micro-USD", ErrBudgetExceeded)
 		}
-		// Atomic check against current spend
-		if p.CurrentSpendMicroUSD+estimatedCost > p.MonthlyBudgetMicroUSD {
-			return 0, fmt.Errorf("%w: current spend %d + est %d exceeds budget %d micro-USD",
-				ErrBudgetExceeded, p.CurrentSpendMicroUSD, estimatedCost, p.MonthlyBudgetMicroUSD)
+		// Check and reserve under the same lock, so concurrent requests cannot all pass
+		// the check before any of them records spend.
+		committed := p.CurrentSpendMicroUSD + p.ReservedMicroUSD
+		if committed+estimatedCost > p.MonthlyBudgetMicroUSD {
+			return 0, fmt.Errorf("%w: committed %d + est %d exceeds budget %d micro-USD",
+				ErrBudgetExceeded, committed, estimatedCost, p.MonthlyBudgetMicroUSD)
 		}
+		p.ReservedMicroUSD += estimatedCost
 		return estimatedCost, nil
 
 	case BudgetModeUnlimited:
+		p.ReservedMicroUSD += estimatedCost
 		return estimatedCost, nil
 
 	default:
@@ -209,16 +220,32 @@ func (pe *PolicyEngine) AuthorizeRequest(ctx context.Context, orgID, modelID str
 	}
 }
 
-// CommitSpend atomically increments an organization's billed spend ledger.
-func (pe *PolicyEngine) CommitSpend(orgID string, billedMicroUSD int64) {
-	if billedMicroUSD <= 0 {
+// SettleSpend releases a reservation returned by AuthorizeRequest and records the amount
+// actually billed. Pass billed = 0 to release a reservation for a failed request.
+func (pe *PolicyEngine) SettleSpend(orgID string, reservedMicroUSD, billedMicroUSD int64) {
+	if reservedMicroUSD <= 0 && billedMicroUSD <= 0 {
 		return
 	}
 	pe.mu.Lock()
 	defer pe.mu.Unlock()
 
-	if p, ok := pe.policies[orgID]; ok {
-		p.CurrentSpendMicroUSD += billedMicroUSD
-		p.UpdatedAt = time.Now().UTC()
+	p, ok := pe.policies[orgID]
+	if !ok {
+		return
 	}
+	if reservedMicroUSD > 0 {
+		p.ReservedMicroUSD -= reservedMicroUSD
+		if p.ReservedMicroUSD < 0 {
+			p.ReservedMicroUSD = 0
+		}
+	}
+	if billedMicroUSD > 0 {
+		p.CurrentSpendMicroUSD += billedMicroUSD
+	}
+	p.UpdatedAt = time.Now().UTC()
+}
+
+// CommitSpend records billed spend that had no reservation.
+func (pe *PolicyEngine) CommitSpend(orgID string, billedMicroUSD int64) {
+	pe.SettleSpend(orgID, 0, billedMicroUSD)
 }

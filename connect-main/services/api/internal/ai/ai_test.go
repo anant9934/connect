@@ -407,7 +407,7 @@ func TestService_BudgetsAndRateLimits(t *testing.T) {
 
 		// Set budget to 10 micro-USD and exhaust it
 		svc.SetOrgBudget(orgID, 10)
-		svc.recordSpend(orgID, 10)
+		svc.PolicyEngine().CommitSpend(orgID, 10)
 
 		_, _, err := svc.SummarizeLecture(context.Background(), orgID, userID, "CS101", "Lecture transcript text...")
 		if !errors.Is(err, ErrBudgetExceeded) {
