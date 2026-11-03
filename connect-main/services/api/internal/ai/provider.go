@@ -56,13 +56,15 @@ var (
 
 // Usage tracks tokens consumed by an AI operation with separate estimated and billed costs.
 type Usage struct {
-	InputTokens           int   `json:"inputTokens"`
-	OutputTokens          int   `json:"outputTokens"`
-	TotalTokens           int   `json:"totalTokens"`
-	CostMicroUSD          int64 `json:"costMicroUSD"`          // backward-compat: mirrors EstimatedCostMicroUSD
-	EstimatedCostMicroUSD int64 `json:"estimatedCostMicroUSD"` // provider theoretical cost
-	BilledCostMicroUSD    int64 `json:"billedCostMicroUSD"`    // actual amount billed to organization (0 for free tier)
-	IsMock                bool  `json:"isMock,omitempty"`
+	Provider              string `json:"provider"` // provider that actually answered
+	Model                 string `json:"model"`    // model that actually answered (may be a fallback)
+	InputTokens           int    `json:"inputTokens"`
+	OutputTokens          int    `json:"outputTokens"`
+	TotalTokens           int    `json:"totalTokens"`
+	CostMicroUSD          int64  `json:"costMicroUSD"`          // backward-compat: mirrors EstimatedCostMicroUSD
+	EstimatedCostMicroUSD int64  `json:"estimatedCostMicroUSD"` // provider theoretical cost
+	BilledCostMicroUSD    int64  `json:"billedCostMicroUSD"`    // actual amount billed to organization (0 for free tier)
+	IsMock                bool   `json:"isMock,omitempty"`
 }
 
 // CompletionRequest is a provider-neutral request for text generation.

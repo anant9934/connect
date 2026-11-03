@@ -142,6 +142,8 @@ func (s *Service) complete(ctx context.Context, orgID, userID string, req Comple
 		return nil, err
 	}
 
+	res.Usage.Provider = res.Provider
+	res.Usage.Model = res.Model
 	res.Usage.EstimatedCostMicroUSD = res.Usage.CostMicroUSD
 	res.Usage.IsMock = res.IsMock
 	res.Usage.BilledCostMicroUSD = res.Usage.CostMicroUSD

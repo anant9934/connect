@@ -586,3 +586,27 @@ func TestMockProvider_ExplicitLabeling(t *testing.T) {
 		}
 	})
 }
+
+func TestService_UsageAttributedToAnsweringModel(t *testing.T) {
+	reg := NewDefaultModelRegistry()
+	router := NewRouter(reg, nil)
+	primary := NewMockProvider("gemini")
+	fallback := NewMockProvider("groq")
+	router.RegisterProvider(primary)
+	router.RegisterProvider(fallback)
+	router.SetFallback(ModelGeminiFlashLite, ModelGroqSmall)
+	primary.SetError(fmt.Errorf("%w: upstream 503", ErrProviderUnavailable))
+	fallback.SetResponse(`{"deckTitle":"Graphs","cards":[{"front":"BFS","back":"Breadth-first search","concept":"traversal"}]}`)
+
+	svc := NewService(router, reg, nil, ServiceConfig{})
+	_, usage, err := svc.GenerateFlashcards(context.Background(), "33b4a67f-64fe-4410-bec0-579be3a780ee", "u1", "Graphs", "BFS explores level by level.")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if usage.Provider != "groq" || usage.Model != ModelGroqSmall {
+		t.Fatalf("usage must name the answering fallback, got provider=%q model=%q", usage.Provider, usage.Model)
+	}
+	if usage.BilledCostMicroUSD != 0 {
+		t.Fatalf("free-tier model must bill 0, got %d", usage.BilledCostMicroUSD)
+	}
+}

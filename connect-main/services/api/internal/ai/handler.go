@@ -209,24 +209,8 @@ func (h *Handler) generateSummary(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		if usage != nil {
-			_ = h.repo.RecordUsage(r.Context(), tx, &UsageRecord{
-				ID:                    uuid.New(),
-				OrganizationID:        orgID,
-				UserID:                userUUID,
-				CourseID:              courseUUID,
-				ClassID:               classUUID,
-				SessionID:             sessionUUID,
-				ProviderName:          "gemini",
-				ModelName:             h.service.cfg.DefaultFastModel,
-				FeatureName:           "lecture_summary",
-				PromptTokens:          usage.InputTokens,
-				CompletionTokens:      usage.OutputTokens,
-				TotalTokens:           usage.TotalTokens,
-				EstimatedCostMicroUSD: usage.EstimatedCostMicroUSD,
-				BilledCostMicroUSD:    usage.BilledCostMicroUSD,
-				Status:                "success",
-			})
+		if err := h.recordUsage(r.Context(), tx, orgID, userUUID, courseUUID, classUUID, sessionUUID, "lecture_summary", usage); err != nil {
+			return err
 		}
 
 		model.SendJSON(w, http.StatusOK, map[string]any{
@@ -290,33 +274,36 @@ func (h *Handler) generateQuiz(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Self-practice quizzes created by students are automatically published to self
-		visibility := "faculty_only"
-		if !h.isFacultyOrAdmin(authCtx) {
-			visibility = "published"
-		}
-
-		artifact := &Artifact{
-			ID:             uuid.New(),
-			OrganizationID: orgID,
-			CourseID:       courseUUID,
-			ClassID:        classUUID,
-			CreatorUserID:  userUUID,
-			ArtifactType:   "practice_quiz",
-			Title:          fmt.Sprintf("Practice Quiz: %s", req.Topic),
-			Content:        quizBytes,
-			Visibility:     visibility,
-			HumanReviewed:  h.isFacultyOrAdmin(authCtx),
-		}
-
-		if err := h.repo.CreateArtifact(r.Context(), tx, artifact); err != nil {
+		if err := h.recordUsage(r.Context(), tx, orgID, userUUID, courseUUID, classUUID, nil, "practice_quiz", usage); err != nil {
 			return err
 		}
 
+		// Row level security lets only faculty and admins store artifacts. Student
+		// self-practice quizzes are returned to the student without being stored.
+		var artifact *Artifact
+		if h.isFacultyOrAdmin(authCtx) {
+			artifact = &Artifact{
+				ID:             uuid.New(),
+				OrganizationID: orgID,
+				CourseID:       courseUUID,
+				ClassID:        classUUID,
+				CreatorUserID:  userUUID,
+				ArtifactType:   "practice_quiz",
+				Title:          fmt.Sprintf("Practice Quiz: %s", req.Topic),
+				Content:        quizBytes,
+				Visibility:     "faculty_only",
+				HumanReviewed:  false,
+			}
+			if err := h.repo.CreateArtifact(r.Context(), tx, artifact); err != nil {
+				return err
+			}
+		}
+
 		model.SendJSON(w, http.StatusOK, map[string]any{
-			"artifact": artifact,
-			"quiz":     quiz,
-			"usage":    usage,
+			"artifact":  artifact,
+			"persisted": artifact != nil,
+			"quiz":      quiz,
+			"usage":     usage,
 		})
 		return nil
 	})
@@ -373,27 +360,35 @@ func (h *Handler) generateFlashcards(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		artifact := &Artifact{
-			ID:             uuid.New(),
-			OrganizationID: orgID,
-			CourseID:       courseUUID,
-			ClassID:        classUUID,
-			CreatorUserID:  userUUID,
-			ArtifactType:   "flashcard_deck",
-			Title:          cards.DeckTitle,
-			Content:        cardsBytes,
-			Visibility:     "faculty_only",
-			HumanReviewed:  false,
-		}
-
-		if err := h.repo.CreateArtifact(r.Context(), tx, artifact); err != nil {
+		if err := h.recordUsage(r.Context(), tx, orgID, userUUID, courseUUID, classUUID, nil, "flashcards", usage); err != nil {
 			return err
 		}
 
+		// Students receive their deck without it being stored (see generateQuiz).
+		var artifact *Artifact
+		if h.isFacultyOrAdmin(authCtx) {
+			artifact = &Artifact{
+				ID:             uuid.New(),
+				OrganizationID: orgID,
+				CourseID:       courseUUID,
+				ClassID:        classUUID,
+				CreatorUserID:  userUUID,
+				ArtifactType:   "flashcard_deck",
+				Title:          cards.DeckTitle,
+				Content:        cardsBytes,
+				Visibility:     "faculty_only",
+				HumanReviewed:  false,
+			}
+			if err := h.repo.CreateArtifact(r.Context(), tx, artifact); err != nil {
+				return err
+			}
+		}
+
 		model.SendJSON(w, http.StatusOK, map[string]any{
-			"artifact": artifact,
-			"cards":    cards,
-			"usage":    usage,
+			"artifact":  artifact,
+			"persisted": artifact != nil,
+			"cards":     cards,
+			"usage":     usage,
 		})
 		return nil
 	})
@@ -683,6 +678,32 @@ func (h *Handler) getUsage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.handleError(w, r, err)
 	}
+}
+
+// recordUsage writes one immutable ledger row for a completed AI call, attributed to the
+// provider and model that actually answered. Errors are returned, not ignored: a failed
+// statement aborts the surrounding transaction.
+func (h *Handler) recordUsage(ctx context.Context, tx pgx.Tx, orgID, userID uuid.UUID, courseID, classID, sessionID *uuid.UUID, feature string, usage *Usage) error {
+	if usage == nil {
+		return nil
+	}
+	return h.repo.RecordUsage(ctx, tx, &UsageRecord{
+		ID:                    uuid.New(),
+		OrganizationID:        orgID,
+		UserID:                userID,
+		CourseID:              courseID,
+		ClassID:               classID,
+		SessionID:             sessionID,
+		ProviderName:          usage.Provider,
+		ModelName:             usage.Model,
+		FeatureName:           feature,
+		PromptTokens:          usage.InputTokens,
+		CompletionTokens:      usage.OutputTokens,
+		TotalTokens:           usage.TotalTokens,
+		EstimatedCostMicroUSD: usage.EstimatedCostMicroUSD,
+		BilledCostMicroUSD:    usage.BilledCostMicroUSD,
+		Status:                "success",
+	})
 }
 
 func (h *Handler) handleError(w http.ResponseWriter, r *http.Request, err error) {
