@@ -42,13 +42,14 @@ function merge(current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
 
 /**
  * Keeps chat, hands and reactions in step with the server, which is the source of truth. A data
- * channel hint from another participant only triggers an earlier fetch; polling covers missed
- * hints, reconnects and reloads.
+ * channel hint from another participant triggers an earlier fetch, and after the server accepts a
+ * message the sender includes the stored copy so others can show it without another round trip.
+ * Polling covers missed hints, reconnects and reloads.
  */
 export function useMeetingInteraction(
   roomCode: string,
   selfIdentity: string,
-  sendHint: () => void,
+  sendHint: (payload?: { message?: api.StoredMessage }) => void,
   onNewMessages: (fromOthers: ChatMessage[]) => void
 ) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -129,7 +130,8 @@ export function useMeetingInteraction(
       try {
         const stored = await api.postMessage(roomCode, clientMessageId, text, kind);
         setMessages((prev) => merge(prev, [toChatMessage(stored, callbacks.current.selfIdentity)]));
-        callbacks.current.sendHint();
+        // Only messages the server accepted are shared, so nothing rejected is ever displayed.
+        callbacks.current.sendHint({ message: stored });
         setStatus('ready');
       } catch (err) {
         setMessages((prev) =>
@@ -165,6 +167,41 @@ export function useMeetingInteraction(
     },
     [deliver]
   );
+
+  /**
+   * Shows a message delivered over the data channel immediately. The sender's identity comes from
+   * LiveKit's authenticated participant, so a participant cannot inject a message as someone else.
+   * The next poll still reconciles with the server; merge() de-duplicates by sender and client id.
+   */
+  const ingestRemoteMessage = useCallback((stored: unknown, fromIdentity: string | undefined) => {
+    const m = stored as Partial<api.StoredMessage> | null;
+    if (
+      !m || !fromIdentity || typeof m.id !== 'string' || typeof m.body !== 'string' || typeof m.clientMessageId !== 'string' ||
+      typeof m.seq !== 'number' || typeof m.senderIdentity !== 'string' || m.senderIdentity !== fromIdentity ||
+      (m.kind !== 'chat' && m.kind !== 'announcement') || m.body.length > 4000
+    ) {
+      return;
+    }
+    const message = toChatMessage(
+      {
+        id: m.id,
+        seq: m.seq,
+        senderIdentity: m.senderIdentity,
+        senderName: typeof m.senderName === 'string' ? m.senderName : 'Participant',
+        kind: m.kind,
+        body: m.body,
+        clientMessageId: m.clientMessageId,
+        createdAt: typeof m.createdAt === 'string' ? m.createdAt : new Date().toISOString(),
+      },
+      callbacks.current.selfIdentity
+    );
+    let isNew = false;
+    setMessages((prev) => {
+      isNew = !prev.some((x) => x.senderIdentity === message.senderIdentity && x.clientMessageId === message.clientMessageId);
+      return isNew ? merge(prev, [message]) : prev;
+    });
+    if (isNew && !message.isSelf) callbacks.current.onNewMessages([message]);
+  }, []);
 
   const loadOlder = useCallback(async () => {
     const oldest = messages.find((m) => m.seq !== undefined)?.seq;
@@ -223,5 +260,5 @@ export function useMeetingInteraction(
     [refresh, roomCode]
   );
 
-  return { messages, raisedHands, reactions, status, hasOlder, loadingOlder, actionError, refresh, sendMessage, retryMessage, loadOlder, react, setOwnHand, lowerHand };
+  return { messages, raisedHands, reactions, status, hasOlder, loadingOlder, actionError, refresh, ingestRemoteMessage, sendMessage, retryMessage, loadOlder, react, setOwnHand, lowerHand };
 }
