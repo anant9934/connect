@@ -94,10 +94,8 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompletionRequest) (*
 	}
 
 	modelName := req.Model
-	if strings.HasPrefix(modelName, "gemini-") {
-		// Use exact model name
-	} else {
-		modelName = "gemini-2.0-flash"
+	if !strings.HasPrefix(modelName, "gemini-") {
+		return nil, fmt.Errorf("%w: model %q is not served by %s", ErrModelNotFound, modelName, p.id)
 	}
 
 	maxAttempts := p.keyPool.Size()
@@ -354,8 +352,8 @@ func (p *OpenAICompatibleProvider) Complete(ctx context.Context, req CompletionR
 	}
 
 	modelName := req.Model
-	if p.id == "groq" && (modelName == "" || !strings.Contains(modelName, "llama") && !strings.Contains(modelName, "gpt-oss")) {
-		modelName = "llama-3.3-70b-versatile"
+	if modelName == "" {
+		return nil, fmt.Errorf("%w: empty model for %s", ErrModelNotFound, p.id)
 	}
 
 	maxAttempts := p.keyPool.Size()

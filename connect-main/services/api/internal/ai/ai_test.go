@@ -26,26 +26,26 @@ func TestModelRegistry(t *testing.T) {
 		t.Errorf("expected at least 4 default models, got %d", len(models))
 	}
 
-	info, ok := reg.Get("gemini-2.0-flash")
+	info, ok := reg.Get(ModelGeminiFlash)
 	if !ok || info.ProviderID != "gemini" || !info.IsFreeTierEligible {
-		t.Errorf("expected valid gemini-2.0-flash config, got %+v", info)
+		t.Errorf("expected valid gemini-2.5-flash config, got %+v", info)
 	}
 
 	// 2. Verify Cost Computation (micro-USD)
-	// gemini-2.0-flash: 100_000 micro-USD per MTok input ($0.10), 400_000 output ($0.40)
-	// For 1,000,000 input tokens and 1,000,000 output tokens: 100_000 + 400_000 = 500_000 micro-USD ($0.50)
-	cost, err := reg.CalculateCostMicroUSD("gemini-2.0-flash", 1_000_000, 1_000_000)
+	// gemini-2.5-flash: 300_000 micro-USD per MTok input ($0.30), 2_500_000 output ($2.50)
+	// For 1,000,000 input tokens and 1,000,000 output tokens: 2_800_000 micro-USD ($2.80)
+	cost, err := reg.CalculateCostMicroUSD(ModelGeminiFlash, 1_000_000, 1_000_000)
 	if err != nil {
 		t.Fatalf("unexpected cost error: %v", err)
 	}
-	if cost != 500_000 {
-		t.Errorf("expected cost 500_000 micro-USD, got %d", cost)
+	if cost != 2_800_000 {
+		t.Errorf("expected cost 2_800_000 micro-USD, got %d", cost)
 	}
 
 	// Rounding up check for small tokens
-	smallCost, err := reg.CalculateCostMicroUSD("gemini-2.0-flash", 1, 1)
-	if err != nil || smallCost != 1 {
-		t.Errorf("expected small fraction to round up to 1 micro-USD, got %d, err %v", smallCost, err)
+	smallCost, err := reg.CalculateCostMicroUSD(ModelGeminiFlash, 1, 1)
+	if err != nil || smallCost != 3 {
+		t.Errorf("expected 2.8 micro-USD to round up to 3, got %d, err %v", smallCost, err)
 	}
 
 	// 3. Unknown model
@@ -205,13 +205,13 @@ func TestRouter_CompletionAndFallback(t *testing.T) {
 	router.RegisterProvider(primaryMock)
 	router.RegisterProvider(fallbackMock)
 
-	// Configure fallback: gemini-2.0-flash -> llama-3.3-70b-versatile
-	router.SetFallback("gemini-2.0-flash", "llama-3.3-70b-versatile")
+	// Configure fallback: gemini-2.5-flash -> gpt-oss-120b (groq)
+	router.SetFallback(ModelGeminiFlash, ModelGroqLarge)
 
 	t.Run("Direct primary completion success", func(t *testing.T) {
 		primaryMock.SetResponse("Response from Gemini primary")
 		res, err := router.Complete(context.Background(), CompletionRequest{
-			Model:      "gemini-2.0-flash",
+			Model:      ModelGeminiFlash,
 			UserPrompt: "Explain Paxos",
 		})
 		if err != nil {
@@ -230,7 +230,7 @@ func TestRouter_CompletionAndFallback(t *testing.T) {
 		fallbackMock.SetResponse("Response from Groq LLaMA fallback")
 
 		res, err := router.Complete(context.Background(), CompletionRequest{
-			Model:      "gemini-2.0-flash",
+			Model:      ModelGeminiFlash,
 			UserPrompt: "Explain Raft",
 		})
 		if err != nil {
@@ -308,8 +308,8 @@ func TestService_AcademicWorkflows(t *testing.T) {
 	router.RegisterProvider(mock)
 
 	svc := NewService(router, reg, nil, ServiceConfig{
-		DefaultModel:     "gemini-2.0-flash",
-		DefaultFastModel: "gemini-1.5-flash",
+		DefaultModel:     ModelGeminiFlash,
+		DefaultFastModel: ModelGeminiFlashLite,
 		RateLimitRPM:     60,
 	})
 
@@ -401,8 +401,8 @@ func TestService_BudgetsAndRateLimits(t *testing.T) {
 
 	t.Run("Rejects request when monthly spend limit is reached", func(t *testing.T) {
 		svc := NewService(router, reg, nil, ServiceConfig{
-			DefaultModel:     "gemini-2.0-flash",
-			DefaultFastModel: "gemini-1.5-flash",
+			DefaultModel:     ModelGeminiFlash,
+			DefaultFastModel: ModelGeminiFlashLite,
 		})
 
 		// Set budget to 10 micro-USD and exhaust it
@@ -417,8 +417,8 @@ func TestService_BudgetsAndRateLimits(t *testing.T) {
 
 	t.Run("Rejects request when rate limiter denies request", func(t *testing.T) {
 		svc := NewService(router, reg, &mockLimiter{allow: false}, ServiceConfig{
-			DefaultModel:     "gemini-2.0-flash",
-			DefaultFastModel: "gemini-1.5-flash",
+			DefaultModel:     ModelGeminiFlash,
+			DefaultFastModel: ModelGeminiFlashLite,
 		})
 
 		_, _, err := svc.SummarizeLecture(context.Background(), orgID, userID, "CS101", "Lecture transcript text...")
@@ -432,12 +432,12 @@ func TestRouter_NoSilentMockFallback(t *testing.T) {
 	reg := NewDefaultModelRegistry()
 	router := NewRouter(reg, &RouterConfig{DefaultTimeout: 1 * time.Second})
 
-	// Configure real fallback: gemini-2.0-flash -> llama-3.3-70b-versatile
-	router.SetFallback("gemini-2.0-flash", "llama-3.3-70b-versatile")
+	// Configure real fallback: gemini-2.5-flash -> gpt-oss-120b (groq)
+	router.SetFallback(ModelGeminiFlash, ModelGroqLarge)
 
 	// Neither provider is registered
 	_, err := router.Complete(context.Background(), CompletionRequest{
-		Model:      "gemini-2.0-flash",
+		Model:      ModelGeminiFlash,
 		UserPrompt: "Calculate eigenvalues",
 	})
 	if err == nil {

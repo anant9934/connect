@@ -41,7 +41,7 @@ func TestPolicyEngine_BudgetModesAndConcurrency(t *testing.T) {
 		}
 
 		// Free tier model should be authorized
-		cost, err := pe.AuthorizeRequest(context.Background(), orgID, "gemini-2.0-flash", 1000)
+		cost, err := pe.AuthorizeRequest(context.Background(), orgID, ModelGeminiFlash, 1000)
 		if err != nil {
 			t.Fatalf("expected free model authorized, got %v", err)
 		}
@@ -75,7 +75,7 @@ func TestPolicyEngine_BudgetModesAndConcurrency(t *testing.T) {
 			OrganizationID:        cappedOrgID,
 			BudgetMode:            BudgetModeCapped,
 			MonthlyBudgetMicroUSD: 1000, // 1000 micro-USD
-			AllowedModels:         []string{"gpt-4o-mini", "gemini-2.0-flash"},
+			AllowedModels:         []string{"gpt-4o-mini", ModelGeminiFlash},
 		})
 		if err != nil {
 			t.Fatalf("failed to set capped policy: %v", err)

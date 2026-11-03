@@ -27,22 +27,23 @@ const (
 
 // DefaultAllowedModels represents the default safe free-tier models permitted for every tenant.
 var DefaultAllowedModels = []string{
-	"gemini-2.0-flash",
-	"gemini-1.5-flash",
-	"llama-3.3-70b-versatile",
-	"openrouter-llama-3.3-70b",
-	"mock-academic-v1",
+	ModelGeminiFlash,
+	ModelGeminiFlashLite,
+	ModelGroqLarge,
+	ModelGroqSmall,
+	ModelOpenRouterFree,
+	ModelMock,
 }
 
 // OrgPolicy represents the living AI governance state for a specific tenant.
 type OrgPolicy struct {
-	OrganizationID          string     `json:"organizationId"`
-	BudgetMode              BudgetMode `json:"budgetMode"`
-	MonthlyBudgetMicroUSD   int64      `json:"monthlyBudgetMicroUSD"`
-	CurrentSpendMicroUSD    int64      `json:"currentSpendMicroUSD"`
-	BillingCycleAnchor      time.Time  `json:"billingCycleAnchor"`
-	AllowedModels           []string   `json:"allowedModels"`
-	UpdatedAt               time.Time  `json:"updatedAt"`
+	OrganizationID        string     `json:"organizationId"`
+	BudgetMode            BudgetMode `json:"budgetMode"`
+	MonthlyBudgetMicroUSD int64      `json:"monthlyBudgetMicroUSD"`
+	CurrentSpendMicroUSD  int64      `json:"currentSpendMicroUSD"`
+	BillingCycleAnchor    time.Time  `json:"billingCycleAnchor"`
+	AllowedModels         []string   `json:"allowedModels"`
+	UpdatedAt             time.Time  `json:"updatedAt"`
 }
 
 // NewDefaultOrgPolicy returns the initial safe configuration for a new organization.

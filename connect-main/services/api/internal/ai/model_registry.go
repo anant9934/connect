@@ -5,6 +5,16 @@ import (
 	"sync"
 )
 
+// Exact upstream model IDs used for routing.
+const (
+	ModelGeminiFlash     = "gemini-2.5-flash"
+	ModelGeminiFlashLite = "gemini-3.5-flash-lite"
+	ModelGroqLarge       = "openai/gpt-oss-120b"
+	ModelGroqSmall       = "openai/gpt-oss-20b"
+	ModelOpenRouterFree  = "nvidia/nemotron-3.5-super-vl:free"
+	ModelMock            = "mock-academic-v1"
+)
+
 // ModelInfo describes capabilities, limits, and pricing for an LLM.
 type ModelInfo struct {
 	ID                    string `json:"id"`
@@ -31,44 +41,62 @@ func NewDefaultModelRegistry() *ModelRegistry {
 		models: make(map[string]ModelInfo),
 	}
 
-	// 1. Google Gemini 2.0 Flash (Free tier available)
+	// Model IDs are the exact upstream model names sent to each provider.
+	// Verified available on 2026-11-03 with the configured free-tier keys.
+	// Prices are list-price estimates for reporting only; free-tier usage is billed at 0.
+
+	// 1. Google Gemini 2.5 Flash (quality default)
 	r.Register(ModelInfo{
-		ID:                    "gemini-2.0-flash",
+		ID:                    ModelGeminiFlash,
 		ProviderID:            "gemini",
-		DisplayName:           "Gemini 2.0 Flash",
+		DisplayName:           "Gemini 2.5 Flash",
 		ContextWindowTokens:   1_048_576,
 		MaxOutputTokens:       8_192,
-		InputMicroUSDPerMTok:  100_000,  // $0.10 / MTok
-		OutputMicroUSDPerMTok: 400_000,  // $0.40 / MTok
-		IsFreeTierEligible:    true,     // 15 RPM free tier
+		InputMicroUSDPerMTok:  300_000,   // $0.30 / MTok
+		OutputMicroUSDPerMTok: 2_500_000, // $2.50 / MTok
+		IsFreeTierEligible:    true,
 		SupportsStreaming:     true,
 		SupportsJSONMode:      true,
 	})
 
-	// 2. Google Gemini 1.5 Flash (Free tier available)
+	// 2. Google Gemini 3.5 Flash Lite (fast default)
 	r.Register(ModelInfo{
-		ID:                    "gemini-1.5-flash",
+		ID:                    ModelGeminiFlashLite,
 		ProviderID:            "gemini",
-		DisplayName:           "Gemini 1.5 Flash",
+		DisplayName:           "Gemini 3.5 Flash Lite",
 		ContextWindowTokens:   1_048_576,
 		MaxOutputTokens:       8_192,
-		InputMicroUSDPerMTok:  75_000,   // $0.075 / MTok
-		OutputMicroUSDPerMTok: 300_000,  // $0.30 / MTok
-		IsFreeTierEligible:    true,     // 15 RPM free tier
+		InputMicroUSDPerMTok:  100_000, // $0.10 / MTok
+		OutputMicroUSDPerMTok: 400_000, // $0.40 / MTok
+		IsFreeTierEligible:    true,
 		SupportsStreaming:     true,
 		SupportsJSONMode:      true,
 	})
 
-	// 3. Meta LLaMA 3.3 70B via Groq (Free tier available)
+	// 3. OpenAI GPT-OSS 120B via Groq
 	r.Register(ModelInfo{
-		ID:                    "llama-3.3-70b-versatile",
+		ID:                    ModelGroqLarge,
 		ProviderID:            "groq",
-		DisplayName:           "LLaMA 3.3 70B (Groq)",
+		DisplayName:           "GPT-OSS 120B (Groq)",
 		ContextWindowTokens:   131_072,
 		MaxOutputTokens:       8_192,
-		InputMicroUSDPerMTok:  590_000,  // $0.59 / MTok
-		OutputMicroUSDPerMTok: 790_000,  // $0.79 / MTok
-		IsFreeTierEligible:    true,     // 30 RPM free tier
+		InputMicroUSDPerMTok:  150_000, // $0.15 / MTok
+		OutputMicroUSDPerMTok: 600_000, // $0.60 / MTok
+		IsFreeTierEligible:    true,
+		SupportsStreaming:     true,
+		SupportsJSONMode:      true,
+	})
+
+	// 3b. OpenAI GPT-OSS 20B via Groq
+	r.Register(ModelInfo{
+		ID:                    ModelGroqSmall,
+		ProviderID:            "groq",
+		DisplayName:           "GPT-OSS 20B (Groq)",
+		ContextWindowTokens:   131_072,
+		MaxOutputTokens:       8_192,
+		InputMicroUSDPerMTok:  75_000,  // $0.075 / MTok
+		OutputMicroUSDPerMTok: 300_000, // $0.30 / MTok
+		IsFreeTierEligible:    true,
 		SupportsStreaming:     true,
 		SupportsJSONMode:      true,
 	})
@@ -80,22 +108,22 @@ func NewDefaultModelRegistry() *ModelRegistry {
 		DisplayName:           "GPT-4o mini",
 		ContextWindowTokens:   128_000,
 		MaxOutputTokens:       16_384,
-		InputMicroUSDPerMTok:  150_000,  // $0.15 / MTok
-		OutputMicroUSDPerMTok: 600_000,  // $0.60 / MTok
+		InputMicroUSDPerMTok:  150_000, // $0.15 / MTok
+		OutputMicroUSDPerMTok: 600_000, // $0.60 / MTok
 		IsFreeTierEligible:    false,
 		SupportsStreaming:     true,
 		SupportsJSONMode:      true,
 	})
 
-	// 5. OpenRouter LLaMA 3.3 70B (Fallback aggregator)
+	// 5. NVIDIA Nemotron 3.5 Super via OpenRouter (free model, last-resort fallback)
 	r.Register(ModelInfo{
-		ID:                    "openrouter-llama-3.3-70b",
+		ID:                    ModelOpenRouterFree,
 		ProviderID:            "openrouter",
-		DisplayName:           "LLaMA 3.3 70B (OpenRouter)",
+		DisplayName:           "Nemotron 3.5 Super (OpenRouter free)",
 		ContextWindowTokens:   131_072,
 		MaxOutputTokens:       8_192,
-		InputMicroUSDPerMTok:  400_000,
-		OutputMicroUSDPerMTok: 400_000,
+		InputMicroUSDPerMTok:  0,
+		OutputMicroUSDPerMTok: 0,
 		IsFreeTierEligible:    true,
 		SupportsStreaming:     true,
 		SupportsJSONMode:      true,

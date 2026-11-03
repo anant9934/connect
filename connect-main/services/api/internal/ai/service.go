@@ -38,10 +38,10 @@ func NewService(
 	cfg ServiceConfig,
 ) *Service {
 	if cfg.DefaultModel == "" {
-		cfg.DefaultModel = "gemini-2.0-flash"
+		cfg.DefaultModel = ModelGeminiFlash
 	}
 	if cfg.DefaultFastModel == "" {
-		cfg.DefaultFastModel = "gemini-1.5-flash"
+		cfg.DefaultFastModel = ModelGeminiFlashLite
 	}
 	if cfg.RateLimitRPM <= 0 {
 		cfg.RateLimitRPM = 30 // Conservative default for free tier

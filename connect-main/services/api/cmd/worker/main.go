@@ -83,12 +83,10 @@ func main() {
 	worker.RegisterDefaultHandlers(registry, db.Pool, filesStorage, logger)
 
 	aiRegistry := ai.NewDefaultModelRegistry()
-	aiRouter := ai.NewRouter(aiRegistry, nil)
-	aiMock := ai.NewMockProvider("mock")
-	aiRouter.RegisterProvider(aiMock)
+	aiRouter := ai.BuildRouter(aiRegistry, ai.LoadKeyPoolsFromEnv(), false)
 	aiService := ai.NewService(aiRouter, aiRegistry, nil, ai.ServiceConfig{
-		DefaultModel:     "gemini-2.0-flash",
-		DefaultFastModel: "gemini-1.5-flash",
+		DefaultModel:     ai.ModelGeminiFlash,
+		DefaultFastModel: ai.ModelGeminiFlashLite,
 	})
 	ai.RegisterAIHandlers(registry, db.Pool, aiService, ai.NewRepository(), logger)
 
