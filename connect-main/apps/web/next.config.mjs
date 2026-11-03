@@ -2,6 +2,23 @@
 // proxied request fail with DNS_HOSTNAME_RESOLVED_PRIVATE.
 const apiOrigin = process.env.INTERNAL_API_URL || (process.env.VERCEL ? 'https://connect-a2fi.onrender.com' : 'http://localhost:8080');
 
+// One Content-Security-Policy, varied only in script-src per route.
+const csp = (scriptSrc) =>
+  [
+    "default-src 'self'",
+    `script-src ${scriptSrc}`,
+    "worker-src 'self' blob:",
+    "frame-src 'self' blob: data:",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "img-src 'self' data: blob: https: http://localhost:8080",
+    "connect-src 'self' http://localhost:8080 ws://localhost:8080 http://localhost:7880 ws://localhost:7880 wss://localhost:7880 https: wss: data: blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "base-uri 'self'",
+  ].join('; ');
+const CDN = 'https://cdn.jsdelivr.net https://cdnjs.cloudflare.com';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -55,19 +72,8 @@ const nextConfig = {
         },
         {
           key: 'Content-Security-Policy',
-          value: [
-            "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com", // Next.js hydration
-            "worker-src 'self' blob:",
-            "frame-src 'self' blob: data:",
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com",
-            "font-src 'self' https://fonts.gstatic.com data:",
-            "img-src 'self' data: blob: https: http://localhost:8080",
-            "connect-src 'self' http://localhost:8080 ws://localhost:8080 http://localhost:7880 ws://localhost:7880 wss://localhost:7880 https: wss: data: blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
-            "frame-ancestors 'none'",
-            "object-src 'none'",
-            "base-uri 'self'",
-          ].join('; '),
+          // Next.js hydration
+          value: csp(`'self' 'unsafe-inline' ${CDN}`),
         },
       ],
     },
@@ -76,25 +82,20 @@ const nextConfig = {
       headers: [
         {
           key: 'Content-Security-Policy',
-          value: [
-            "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com", // WebAssembly runtime in lab
-            "worker-src 'self' blob:",
-            "frame-src 'self' blob: data:",
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com",
-            "font-src 'self' https://fonts.gstatic.com data:",
-            "img-src 'self' data: blob: https: http://localhost:8080",
-            "connect-src 'self' http://localhost:8080 ws://localhost:8080 http://localhost:7880 ws://localhost:7880 wss://localhost:7880 https: wss: data: blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
-            "frame-ancestors 'none'",
-            "object-src 'none'",
-            "base-uri 'self'",
-          ].join('; '),
+          // Lab pages run Python/SQL WebAssembly runtimes.
+          value: csp(`'self' 'unsafe-inline' 'unsafe-eval' ${CDN}`),
         },
       ],
     },
     {
       source: '/room/:path*',
       headers: [
+        {
+          // In-class coding problems run the Python/SQL WebAssembly runtimes inside the meeting.
+          // 'wasm-unsafe-eval' permits compiling WebAssembly only, not evaluating JS strings.
+          key: 'Content-Security-Policy',
+          value: csp(`'self' 'unsafe-inline' 'wasm-unsafe-eval' ${CDN}`),
+        },
         {
           key: 'Permissions-Policy',
           value: 'camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=()',
