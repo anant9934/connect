@@ -58,6 +58,9 @@ export const LiveActivity: React.FC<LiveActivityProps> = ({ roomCode, canManage,
       .catch(() => setOrgId(null));
   }, []);
 
+  const [openProblem, setOpenProblemState] = useState<CodingAnnouncement | null>(null);
+  const [showAssign, setShowAssign] = useState(false);
+
   // ---------- Polls ----------
   const [polls, setPolls] = useState<Poll[]>([]);
   const refreshPolls = useCallback(async () => {
@@ -79,7 +82,9 @@ export const LiveActivity: React.FC<LiveActivityProps> = ({ roomCode, canManage,
 
   const pollSeenKey = `tc_poll_seen_${roomCode}`;
   const [dismissedPolls, setDismissedPolls] = useState<Set<string>>(() => (typeof window === 'undefined' ? new Set() : readSeen(pollSeenKey)));
-  const activePoll = canManage ? null : polls.find((p) => !p.closed && !p.myResponse && !dismissedPolls.has(p.id)) ?? null;
+  // Pop-ups never cover an open coding panel or form; they show once it is closed.
+  const overlayOpen = openProblem !== null || showAssign;
+  const activePoll = canManage || overlayOpen ? null : polls.find((p) => !p.closed && !p.myResponse && !dismissedPolls.has(p.id)) ?? null;
   const dismissPoll = (id: string) => {
     const next = new Set(dismissedPolls).add(id);
     setDismissedPolls(next);
@@ -104,16 +109,19 @@ export const LiveActivity: React.FC<LiveActivityProps> = ({ roomCode, canManage,
     setSeenProblems(next);
     writeSeen(codingSeenKey, next);
   };
+  const setOpenProblem = (problem: CodingAnnouncement | null) => {
+    if (problem) markProblemSeen(problem.assignmentId);
+    setOpenProblemState(problem);
+  };
   const problemPopup =
     !canManage &&
+    !overlayOpen &&
     latestProblem &&
     !seenProblems.has(latestProblem.coding.assignmentId) &&
     Date.now() - latestProblem.message.timestamp < POPUP_MAX_AGE_MS
       ? latestProblem.coding
       : null;
 
-  const [openProblem, setOpenProblem] = useState<CodingAnnouncement | null>(null);
-  const [showAssign, setShowAssign] = useState(false);
 
   return (
     <>
