@@ -114,6 +114,15 @@ const nextConfig = {
       ],
     },
     {
+      source: '/diagnostics',
+      headers: [
+        {
+          key: 'Permissions-Policy',
+          value: 'camera=(self), microphone=(self), display-capture=(), geolocation=(), payment=()',
+        },
+      ],
+    },
+    {
       source: '/admin/:path*',
       headers: [
         {
