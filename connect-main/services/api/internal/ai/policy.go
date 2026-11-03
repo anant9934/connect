@@ -30,6 +30,7 @@ var DefaultAllowedModels = []string{
 	"gemini-2.0-flash",
 	"gemini-1.5-flash",
 	"llama-3.3-70b-versatile",
+	"openrouter-llama-3.3-70b",
 	"mock-academic-v1",
 }
 

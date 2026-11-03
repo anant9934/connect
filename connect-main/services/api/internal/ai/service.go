@@ -147,6 +147,7 @@ Return only valid JSON.`
 	}
 
 	res.Usage.EstimatedCostMicroUSD = res.Usage.CostMicroUSD
+	res.Usage.IsMock = res.IsMock
 	modelInfo, _ := s.registry.GetModel(req.Model)
 	if modelInfo != nil && modelInfo.IsFreeTierEligible {
 		res.Usage.BilledCostMicroUSD = 0
@@ -213,6 +214,7 @@ Return only valid JSON.`
 	}
 
 	res.Usage.EstimatedCostMicroUSD = res.Usage.CostMicroUSD
+	res.Usage.IsMock = res.IsMock
 	modelInfo, _ := s.registry.GetModel(req.Model)
 	if modelInfo != nil && modelInfo.IsFreeTierEligible {
 		res.Usage.BilledCostMicroUSD = 0
@@ -271,6 +273,7 @@ Return only valid JSON.`
 	}
 
 	res.Usage.EstimatedCostMicroUSD = res.Usage.CostMicroUSD
+	res.Usage.IsMock = res.IsMock
 	modelInfo, _ := s.registry.GetModel(req.Model)
 	if modelInfo != nil && modelInfo.IsFreeTierEligible {
 		res.Usage.BilledCostMicroUSD = 0

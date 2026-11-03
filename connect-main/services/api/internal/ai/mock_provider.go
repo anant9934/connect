@@ -95,7 +95,11 @@ func (m *MockProvider) Complete(ctx context.Context, req CompletionRequest) (*Co
 
 	text := customResp
 	if text == "" {
-		text = "Mock completion generated for prompt: " + req.UserPrompt
+		if req.ResponseFormat == "json" {
+			text = `{"_mock_warning":"[SIMULATED AI / MOCK OUTPUT - NOT A REAL MODEL RESPONSE]","title":"Mock Lecture Summary","overview":"Simulated summary for prompt: ` + req.UserPrompt + `","keyConcepts":["Mock Concept 1","Mock Concept 2"],"takeaways":["Mock Takeaway 1"],"actionItems":["Mock Action Item"]}`
+		} else {
+			text = "[SIMULATED AI / MOCK OUTPUT - NOT A REAL MODEL RESPONSE]\nMock completion generated for prompt: " + req.UserPrompt
+		}
 	}
 
 	inputTokens := len(strings.Fields(req.SystemPrompt + " " + req.UserPrompt))
@@ -111,7 +115,12 @@ func (m *MockProvider) Complete(ctx context.Context, req CompletionRequest) (*Co
 			TotalTokens:  inputTokens + outputTokens,
 		},
 		Latency:      latency,
-		FinishReason: "stop",
+		FinishReason: "mock_simulation",
+		IsMock:       true,
+		Metadata: map[string]string{
+			"is_mock":    "true",
+			"mock_label": "SIMULATED AI - NOT A REAL MODEL RESPONSE",
+		},
 	}, nil
 }
 

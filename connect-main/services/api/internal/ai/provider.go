@@ -52,6 +52,7 @@ type Usage struct {
 	CostMicroUSD          int64 `json:"costMicroUSD"`          // backward-compat: mirrors EstimatedCostMicroUSD
 	EstimatedCostMicroUSD int64 `json:"estimatedCostMicroUSD"` // provider theoretical cost
 	BilledCostMicroUSD    int64 `json:"billedCostMicroUSD"`    // actual amount billed to organization (0 for free tier)
+	IsMock                bool  `json:"isMock,omitempty"`
 }
 
 // CompletionRequest is a provider-neutral request for text generation.
@@ -68,12 +69,14 @@ type CompletionRequest struct {
 
 // CompletionResult is a provider-neutral response from text generation.
 type CompletionResult struct {
-	Provider       string        `json:"provider"`
-	Model          string        `json:"model"`
-	Content        string        `json:"content"`
-	Usage          Usage         `json:"usage"`
-	Latency        time.Duration `json:"latency"`
-	FinishReason   string        `json:"finishReason"` // "stop", "length", "filter"
+	Provider       string            `json:"provider"`
+	Model          string            `json:"model"`
+	Content        string            `json:"content"`
+	Usage          Usage             `json:"usage"`
+	Latency        time.Duration     `json:"latency"`
+	FinishReason   string            `json:"finishReason"` // "stop", "length", "filter", "mock_simulation"
+	IsMock         bool              `json:"isMock,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
 }
 
 // StreamChunk represents a streamed chunk of an AI completion.

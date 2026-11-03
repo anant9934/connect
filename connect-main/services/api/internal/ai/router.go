@@ -107,7 +107,10 @@ func (r *Router) Complete(ctx context.Context, req CompletionRequest) (*Completi
 		lastErr = err
 	}
 
-	return nil, fmt.Errorf("all providers in fallback chain failed: %w", lastErr)
+	if lastErr == nil {
+		lastErr = ErrProviderUnavailable
+	}
+	return nil, fmt.Errorf("%w: all providers in fallback chain failed: %v", ErrProviderUnavailable, lastErr)
 }
 
 // Stream initiates a streaming completion with timeout.

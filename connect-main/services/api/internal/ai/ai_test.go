@@ -427,3 +427,63 @@ func TestService_BudgetsAndRateLimits(t *testing.T) {
 		}
 	})
 }
+
+func TestRouter_NoSilentMockFallback(t *testing.T) {
+	reg := NewDefaultModelRegistry()
+	router := NewRouter(reg, &RouterConfig{DefaultTimeout: 1 * time.Second})
+
+	// Configure real fallback: gemini-2.0-flash -> llama-3.3-70b-versatile
+	router.SetFallback("gemini-2.0-flash", "llama-3.3-70b-versatile")
+
+	// Neither provider is registered
+	_, err := router.Complete(context.Background(), CompletionRequest{
+		Model:      "gemini-2.0-flash",
+		UserPrompt: "Calculate eigenvalues",
+	})
+	if err == nil {
+		t.Fatal("expected error when real providers fail, got nil")
+	}
+	if !errors.Is(err, ErrProviderUnavailable) {
+		t.Errorf("expected ErrProviderUnavailable, got %v", err)
+	}
+}
+
+func TestMockProvider_ExplicitLabeling(t *testing.T) {
+	mock := NewMockProvider("mock")
+
+	t.Run("Default mock response is prominently labeled", func(t *testing.T) {
+		res, err := mock.Complete(context.Background(), CompletionRequest{
+			Model:      "mock-academic-v1",
+			UserPrompt: "Explain Quicksort",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !res.IsMock {
+			t.Errorf("expected IsMock to be true")
+		}
+		if res.FinishReason != "mock_simulation" {
+			t.Errorf("expected FinishReason 'mock_simulation', got %s", res.FinishReason)
+		}
+		if !strings.Contains(res.Content, "SIMULATED AI") && !strings.Contains(res.Content, "MOCK OUTPUT") {
+			t.Errorf("expected mock output to contain clear simulation banner, got %s", res.Content)
+		}
+		if res.Metadata["is_mock"] != "true" {
+			t.Errorf("expected is_mock metadata to be 'true'")
+		}
+	})
+
+	t.Run("JSON mock response contains mock disclaimer", func(t *testing.T) {
+		res, err := mock.Complete(context.Background(), CompletionRequest{
+			Model:          "mock-academic-v1",
+			UserPrompt:     "Data Structures",
+			ResponseFormat: "json",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(res.Content, "_mock_warning") {
+			t.Errorf("expected JSON mock to include _mock_warning, got %s", res.Content)
+		}
+	})
+}

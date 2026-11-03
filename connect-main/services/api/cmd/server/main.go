@@ -255,10 +255,33 @@ func main() {
 
 		aiRegistry := ai.NewDefaultModelRegistry()
 		aiRouter := ai.NewRouter(aiRegistry, nil)
-		aiMock := ai.NewMockProvider("mock")
-		aiRouter.RegisterProvider(aiMock)
-		aiRouter.SetFallback("gemini-2.0-flash", "mock-academic-v1")
-		aiRouter.SetFallback("gemini-1.5-flash", "mock-academic-v1")
+		keyManager := ai.LoadKeyPoolsFromEnv()
+
+		// 1. Register real AI providers backed by rotating key pools
+		geminiPool := keyManager.GetKeyPool("gemini")
+		if geminiPool != nil && geminiPool.Size() > 0 {
+			aiRouter.RegisterProvider(ai.NewGeminiProvider("gemini", geminiPool, nil))
+		}
+		groqPool := keyManager.GetKeyPool("groq")
+		if groqPool != nil && groqPool.Size() > 0 {
+			aiRouter.RegisterProvider(ai.NewGroqProvider("groq", groqPool, nil))
+		}
+		openRouterPool := keyManager.GetKeyPool("openrouter")
+		if openRouterPool != nil && openRouterPool.Size() > 0 {
+			aiRouter.RegisterProvider(ai.NewOpenRouterProvider("openrouter", openRouterPool, nil))
+		}
+
+		// 2. Real fallback routing: retry across real models, never silent mock fallback
+		aiRouter.SetFallback("gemini-2.0-flash", "gemini-1.5-flash", "llama-3.3-70b-versatile", "openrouter-llama-3.3-70b")
+		aiRouter.SetFallback("gemini-1.5-flash", "gemini-2.0-flash", "llama-3.3-70b-versatile", "openrouter-llama-3.3-70b")
+		aiRouter.SetFallback("llama-3.3-70b-versatile", "gemini-2.0-flash", "gemini-1.5-flash", "openrouter-llama-3.3-70b")
+
+		// 3. Register mock provider exclusively for explicit mock requests in non-production environments
+		if cfg.AppEnv != config.EnvProduction {
+			aiMock := ai.NewMockProvider("mock")
+			aiRouter.RegisterProvider(aiMock)
+		}
+
 		aiService = ai.NewService(aiRouter, aiRegistry, limiter, ai.ServiceConfig{
 			DefaultModel:     "gemini-2.0-flash",
 			DefaultFastModel: "gemini-1.5-flash",

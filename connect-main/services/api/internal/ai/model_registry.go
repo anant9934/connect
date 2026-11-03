@@ -87,7 +87,21 @@ func NewDefaultModelRegistry() *ModelRegistry {
 		SupportsJSONMode:      true,
 	})
 
-	// 5. Offline Mock Model (Zero-cost test runner)
+	// 5. OpenRouter LLaMA 3.3 70B (Fallback aggregator)
+	r.Register(ModelInfo{
+		ID:                    "openrouter-llama-3.3-70b",
+		ProviderID:            "openrouter",
+		DisplayName:           "LLaMA 3.3 70B (OpenRouter)",
+		ContextWindowTokens:   131_072,
+		MaxOutputTokens:       8_192,
+		InputMicroUSDPerMTok:  400_000,
+		OutputMicroUSDPerMTok: 400_000,
+		IsFreeTierEligible:    true,
+		SupportsStreaming:     true,
+		SupportsJSONMode:      true,
+	})
+
+	// 6. Offline Mock Model (Zero-cost test runner)
 	r.Register(ModelInfo{
 		ID:                    "mock-academic-v1",
 		ProviderID:            "mock",

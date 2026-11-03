@@ -96,6 +96,13 @@ func (m *KeyPoolManager) GetKey(providerName string) string {
 	return pool.NextKey()
 }
 
+// GetKeyPool returns the key pool for a provider, or nil if none configured.
+func (m *KeyPoolManager) GetKeyPool(providerName string) *KeyPool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.pools[strings.ToLower(providerName)]
+}
+
 // ProviderStatus reports safe, redacted status of available providers.
 type ProviderStatus struct {
 	ProviderName string `json:"providerName"`
