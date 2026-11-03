@@ -7,7 +7,7 @@ import (
 
 // Exact upstream model IDs used for routing.
 const (
-	ModelGeminiFlash     = "gemini-2.5-flash"
+	ModelGeminiFlash     = "gemini-3.5-flash"
 	ModelGeminiFlashLite = "gemini-3.5-flash-lite"
 	ModelGroqLarge       = "openai/gpt-oss-120b"
 	ModelGroqSmall       = "openai/gpt-oss-20b"
@@ -45,11 +45,11 @@ func NewDefaultModelRegistry() *ModelRegistry {
 	// Verified available on 2026-11-03 with the configured free-tier keys.
 	// Prices are list-price estimates for reporting only; free-tier usage is billed at 0.
 
-	// 1. Google Gemini 2.5 Flash (quality default)
+	// 1. Google Gemini 3.5 Flash (quality default; 2.5 Flash is retired for new projects)
 	r.Register(ModelInfo{
 		ID:                    ModelGeminiFlash,
 		ProviderID:            "gemini",
-		DisplayName:           "Gemini 2.5 Flash",
+		DisplayName:           "Gemini 3.5 Flash",
 		ContextWindowTokens:   1_048_576,
 		MaxOutputTokens:       8_192,
 		InputMicroUSDPerMTok:  300_000,   // $0.30 / MTok

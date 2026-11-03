@@ -80,11 +80,11 @@ func TestModelRegistry(t *testing.T) {
 
 	info, ok := reg.Get(ModelGeminiFlash)
 	if !ok || info.ProviderID != "gemini" || !info.IsFreeTierEligible {
-		t.Errorf("expected valid gemini-2.5-flash config, got %+v", info)
+		t.Errorf("expected valid gemini-3.5-flash config, got %+v", info)
 	}
 
 	// 2. Verify Cost Computation (micro-USD)
-	// gemini-2.5-flash: 300_000 micro-USD per MTok input ($0.30), 2_500_000 output ($2.50)
+	// gemini-3.5-flash: 300_000 micro-USD per MTok input ($0.30), 2_500_000 output ($2.50)
 	// For 1,000,000 input tokens and 1,000,000 output tokens: 2_800_000 micro-USD ($2.80)
 	cost, err := reg.CalculateCostMicroUSD(ModelGeminiFlash, 1_000_000, 1_000_000)
 	if err != nil {
@@ -257,7 +257,7 @@ func TestRouter_CompletionAndFallback(t *testing.T) {
 	router.RegisterProvider(primaryMock)
 	router.RegisterProvider(fallbackMock)
 
-	// Configure fallback: gemini-2.5-flash -> gpt-oss-120b (groq)
+	// Configure fallback: gemini-3.5-flash -> gpt-oss-120b (groq)
 	router.SetFallback(ModelGeminiFlash, ModelGroqLarge)
 
 	t.Run("Direct primary completion success", func(t *testing.T) {
@@ -484,7 +484,7 @@ func TestRouter_NoSilentMockFallback(t *testing.T) {
 	reg := NewDefaultModelRegistry()
 	router := NewRouter(reg, &RouterConfig{DefaultTimeout: 1 * time.Second})
 
-	// Configure real fallback: gemini-2.5-flash -> gpt-oss-120b (groq)
+	// Configure real fallback: gemini-3.5-flash -> gpt-oss-120b (groq)
 	router.SetFallback(ModelGeminiFlash, ModelGroqLarge)
 
 	// Neither provider is registered
