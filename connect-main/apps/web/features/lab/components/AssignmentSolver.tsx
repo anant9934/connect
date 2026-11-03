@@ -23,9 +23,13 @@ import { executeSqlQuery } from '../runtimes/sqlRunner';
 interface AssignmentSolverProps {
   assignment: LabAssignment;
   orgId: string;
+  /** Called after a successful submission (e.g. to tell the teacher's view to refresh). */
+  onSubmitted?: () => void;
+  /** Compact layout without page navigation, for use inside a live meeting. */
+  embedded?: boolean;
 }
 
-export const AssignmentSolver: React.FC<AssignmentSolverProps> = ({ assignment, orgId }) => {
+export const AssignmentSolver: React.FC<AssignmentSolverProps> = ({ assignment, orgId, onSubmitted, embedded = false }) => {
   const allowed: SupportedLanguage[] = (assignment.allowed_languages && assignment.allowed_languages.length > 0)
     ? (assignment.allowed_languages as SupportedLanguage[])
     : ['cpp', 'python', 'java'];
@@ -147,6 +151,7 @@ export const AssignmentSolver: React.FC<AssignmentSolverProps> = ({ assignment, 
         totalCount: res.submission.total_count,
         results: res.submission.test_results,
       });
+      onSubmitted?.();
     } catch (err: any) {
       alert(`Submission failed: ${err.message || String(err)}`);
     } finally {
@@ -155,9 +160,9 @@ export const AssignmentSolver: React.FC<AssignmentSolverProps> = ({ assignment, 
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <div className={embedded ? 'p-4 space-y-4' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6'}>
       {/* Back button */}
-      <div>
+      <div className={embedded ? 'hidden' : undefined}>
         <Link
           href="/lab/assignments"
           className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#5E5A50] hover:text-[#17151F] transition-colors"
