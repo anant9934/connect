@@ -11,6 +11,21 @@ import (
 	"time"
 )
 
+// providerUserAgent identifies Connect to upstream APIs. Some edge networks reject default
+// library user agents.
+const providerUserAgent = "TathastuConnect/1.0 (+https://connect-alpha-seven.vercel.app)"
+
+// upstreamSnippet bounds upstream error bodies kept in error chains so large payloads or
+// echoed request content are not carried into logs.
+func upstreamSnippet(b []byte) string {
+	const max = 200
+	s := strings.TrimSpace(string(b))
+	if len(s) > max {
+		return s[:max] + "..."
+	}
+	return s
+}
+
 // GeminiProvider connects to Google's Generative Language API.
 type GeminiProvider struct {
 	id         string
@@ -140,12 +155,16 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompletionRequest) (*
 			return nil, fmt.Errorf("failed to encode gemini request: %w", err)
 		}
 
-		url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", p.baseURL, modelName, apiKey)
+		// The key travels in a header, never the URL, so transport errors (which embed the
+		// URL) cannot leak it into logs or responses.
+		url := fmt.Sprintf("%s/models/%s:generateContent", p.baseURL, modelName)
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create http request: %w", err)
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("User-Agent", providerUserAgent)
+		httpReq.Header.Set("x-goog-api-key", apiKey)
 
 		resp, err := p.httpClient.Do(httpReq)
 		if err != nil {
@@ -173,7 +192,7 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompletionRequest) (*
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("%w: gemini api returned status %d: %s", ErrProviderUnavailable, resp.StatusCode, string(respBody))
+			lastErr = fmt.Errorf("%w: gemini api returned status %d: %s", ErrProviderUnavailable, resp.StatusCode, upstreamSnippet(respBody))
 			continue
 		}
 
@@ -298,7 +317,7 @@ func NewOpenRouterProvider(id string, keyPool *KeyPool, client *http.Client) *Op
 		keyPool:    keyPool,
 		httpClient: client,
 		extraHeader: map[string]string{
-			"HTTP-Referer": "https://connect.tathastu.edu",
+			"HTTP-Referer": "https://connect-alpha-seven.vercel.app",
 			"X-Title":      "Connect Classroom",
 		},
 	}
@@ -398,6 +417,7 @@ func (p *OpenAICompatibleProvider) Complete(ctx context.Context, req CompletionR
 			return nil, fmt.Errorf("failed to create http request: %w", err)
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("User-Agent", providerUserAgent)
 		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 		for k, v := range p.extraHeader {
 			httpReq.Header.Set(k, v)
@@ -429,7 +449,7 @@ func (p *OpenAICompatibleProvider) Complete(ctx context.Context, req CompletionR
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("%w: provider %s returned status %d: %s", ErrProviderUnavailable, p.id, resp.StatusCode, string(respBody))
+			lastErr = fmt.Errorf("%w: provider %s returned status %d: %s", ErrProviderUnavailable, p.id, resp.StatusCode, upstreamSnippet(respBody))
 			continue
 		}
 
