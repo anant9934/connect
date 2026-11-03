@@ -128,6 +128,12 @@ func (m *DevMemoryLimiter) Allow(_ context.Context, key string, limit int, windo
 func Middleware(limiter Limiter, limit int, window time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Bypass health and liveness probes to prevent external Redis latency from impacting status monitoring
+			if r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			clientIP := extractClientIP(r)
 			allowed, err := limiter.Allow(r.Context(), clientIP, limit, window)
 			if err != nil {

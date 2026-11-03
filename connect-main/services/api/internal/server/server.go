@@ -85,7 +85,7 @@ func BuildRouter(
 		r.Use(ratelimit.Middleware(limiter, cfg.RateLimitRPS, time.Second))
 	}
 
-	// Health Endpoints (Lightweight, non-leaking probes)
+	// Health Endpoints (Lightweight, non-leaking probes, uninhibited by Redis rate limiting)
 	r.Get("/health/live", healthHandler.Live)
 	r.Get("/health/ready", healthHandler.Ready)
 
