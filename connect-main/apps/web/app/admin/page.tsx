@@ -124,7 +124,9 @@ export default function AdminPage() {
     setNotice(null);
     try {
       await api.updateMember(orgId, member.userId, role, status);
-      setNotice(`${member.displayName} is now ${ROLE_LABELS[role]}, ${STATUS_LABELS[status].toLowerCase()}.`);
+      const roleLabel = ROLE_LABELS[role] || role;
+      const statusLabel = (STATUS_LABELS[status] || status).toLowerCase();
+      setNotice(`${member.displayName} is now ${roleLabel}, ${statusLabel}.`);
       await loadState();
     } catch (err) {
       setError(messageOf(err, 'Could not change this person.'));

@@ -70,12 +70,24 @@ export default function SchedulePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
+
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    if (!start || !end || isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      setFormError('Please select valid start and end dates and times.');
+      return;
+    }
+    if (startDate >= endDate) {
+      setFormError('End time must be after the start time.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       await scheduleMeeting({
         title: title.trim(),
-        scheduledStart: new Date(start).toISOString(),
-        scheduledEnd: new Date(end).toISOString(),
+        scheduledStart: startDate.toISOString(),
+        scheduledEnd: endDate.toISOString(),
         timeZone,
         passcode: passcode.trim() || undefined,
         waitingRoomEnabled: waitingRoom,

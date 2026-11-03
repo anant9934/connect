@@ -257,6 +257,8 @@ func main() {
 		aiRouter := ai.NewRouter(aiRegistry, nil)
 		aiMock := ai.NewMockProvider("mock")
 		aiRouter.RegisterProvider(aiMock)
+		aiRouter.SetFallback("gemini-2.0-flash", "mock-academic-v1")
+		aiRouter.SetFallback("gemini-1.5-flash", "mock-academic-v1")
 		aiService = ai.NewService(aiRouter, aiRegistry, limiter, ai.ServiceConfig{
 			DefaultModel:     "gemini-2.0-flash",
 			DefaultFastModel: "gemini-1.5-flash",
