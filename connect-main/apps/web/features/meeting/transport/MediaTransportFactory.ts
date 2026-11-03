@@ -14,6 +14,10 @@ export class MediaTransportFactory {
    * to instantiate either the P2PTransport or LiveKitTransport.
    */
   static async createTransport(options: TransportFactoryOptions): Promise<MediaTransport> {
+    if (typeof window !== 'undefined' && (window as any).__TC_MOCK_TRANSPORT_FACTORY) {
+      return (window as any).__TC_MOCK_TRANSPORT_FACTORY(options);
+    }
+
     if (options.forceLiveKit) {
       return new LiveKitTransport();
     }

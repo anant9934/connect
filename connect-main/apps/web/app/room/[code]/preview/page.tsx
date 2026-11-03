@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Loader2, Video, AlertTriangle, VolumeX } from 'lucide-react';
+import { ArrowLeft, Loader2, Video, AlertTriangle, VolumeX, Sparkles } from 'lucide-react';
 import { getRoom, joinRoom } from '@/features/rooms/api';
 import { getSession } from '@/features/auth/api';
 import { Room } from '@/features/rooms/types';
@@ -17,6 +17,14 @@ import { DevicePreview } from '@/components/meeting/DevicePreview';
 import { DeviceSelector } from '@/components/meeting/DeviceSelector';
 import { PermissionHelpSheet } from '@/components/meeting/PermissionHelpSheet';
 import { ApiError } from '@/lib/api/client';
+
+const DEVICE_PREFS_KEY = 'connect_device_prefs';
+
+interface StoredDevicePrefs {
+  videoId?: string;
+  audioId?: string;
+  outputId?: string;
+}
 
 export default function RoomPreviewPage() {
   const params = useParams();
@@ -50,6 +58,31 @@ export default function RoomPreviewPage() {
   const mediaPerms = useMediaPermissions();
   const [showHelpSheet, setShowHelpSheet] = useState(false);
   const [helpSheetDevice, setHelpSheetDevice] = useState<TargetMediaDevice>('camera');
+
+  // Load stored preferences safely from localStorage
+  const loadDevicePrefs = useCallback((): StoredDevicePrefs => {
+    try {
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem(DEVICE_PREFS_KEY);
+        if (stored) return JSON.parse(stored);
+      }
+    } catch {
+      // safe ignore
+    }
+    return {};
+  }, []);
+
+  // Save stored preferences
+  const saveDevicePrefs = useCallback((prefs: Partial<StoredDevicePrefs>) => {
+    try {
+      if (typeof window !== 'undefined') {
+        const current = loadDevicePrefs();
+        localStorage.setItem(DEVICE_PREFS_KEY, JSON.stringify({ ...current, ...prefs }));
+      }
+    } catch {
+      // safe ignore
+    }
+  }, [loadDevicePrefs]);
 
   // 1. Initial Room & Session Resolution
   useEffect(() => {
@@ -101,24 +134,27 @@ export default function RoomPreviewPage() {
     setAudioInputDevices(devs.audioInputDevices);
     setAudioOutputDevices(devs.audioOutputDevices);
 
-    if (devs.videoDevices.length > 0 && !selectedVideoId) {
-      setSelectedVideoId(devs.videoDevices[0].deviceId);
+    const savedPrefs = loadDevicePrefs();
+
+    if (devs.videoDevices.length > 0) {
+      const matchSaved = devs.videoDevices.find((d) => d.deviceId === savedPrefs.videoId);
+      setSelectedVideoId((prev) => prev || matchSaved?.deviceId || devs.videoDevices[0].deviceId);
     }
-    if (devs.audioInputDevices.length > 0 && !selectedAudioId) {
-      setSelectedAudioId(devs.audioInputDevices[0].deviceId);
+    if (devs.audioInputDevices.length > 0) {
+      const matchSaved = devs.audioInputDevices.find((d) => d.deviceId === savedPrefs.audioId);
+      setSelectedAudioId((prev) => prev || matchSaved?.deviceId || devs.audioInputDevices[0].deviceId);
     }
-    if (devs.audioOutputDevices.length > 0 && !selectedOutputId) {
-      setSelectedOutputId(devs.audioOutputDevices[0].deviceId);
+    if (devs.audioOutputDevices.length > 0) {
+      const matchSaved = devs.audioOutputDevices.find((d) => d.deviceId === savedPrefs.outputId);
+      setSelectedOutputId((prev) => prev || matchSaved?.deviceId || devs.audioOutputDevices[0].deviceId);
     }
 
     if (typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype) {
       setHasAudioOutputSupport(true);
     }
-  }, [selectedVideoId, selectedAudioId, selectedOutputId]);
+  }, [loadDevicePrefs]);
 
-  // FIX P0.2: Camera and microphone remain strictly OFF when entering prejoin by default.
-  // Previous browser permission state does NOT trigger capture unprompted.
-  // Explicit user activation is required unless the user has opted into an explicit auto-preview preference.
+  // Initialize devices on mount
   useEffect(() => {
     let isMounted = true;
 
@@ -161,6 +197,32 @@ export default function RoomPreviewPage() {
       isMounted = false;
     };
   }, []);
+
+  // Update selected devices in localStorage when changed
+  const handleSelectVideo = (id: string) => {
+    setSelectedVideoId(id);
+    saveDevicePrefs({ videoId: id });
+    if (videoEnabled) {
+      mediaPerms.requestCamera(id).then((res) => {
+        if (res.track) setVideoEnabled(true);
+      });
+    }
+  };
+
+  const handleSelectAudio = (id: string) => {
+    setSelectedAudioId(id);
+    saveDevicePrefs({ audioId: id });
+    if (audioEnabled) {
+      mediaPerms.requestMicrophone(id).then((res) => {
+        if (res.track) setAudioEnabled(true);
+      });
+    }
+  };
+
+  const handleSelectOutput = (id: string) => {
+    setSelectedOutputId(id);
+    saveDevicePrefs({ outputId: id });
+  };
 
   // Toggle Video (Camera)
   const handleToggleVideo = async () => {
@@ -214,6 +276,14 @@ export default function RoomPreviewPage() {
     }
   };
 
+  // Explicit "Enable camera & microphone" action
+  const handleEnableDevices = async () => {
+    const res = await mediaPerms.requestBoth(selectedVideoId || undefined, selectedAudioId || undefined);
+    if (res.videoTrack) setVideoEnabled(true);
+    if (res.audioTrack) setAudioEnabled(true);
+    await refreshDevices();
+  };
+
   // Open device help sheet
   const handleRequestHelp = (device: 'camera' | 'microphone') => {
     setHelpSheetDevice(device);
@@ -255,11 +325,12 @@ export default function RoomPreviewPage() {
     const nextIndex = (currentIndex + 1) % videoDevices.length;
     const nextDeviceId = videoDevices[nextIndex].deviceId;
     setSelectedVideoId(nextDeviceId);
+    saveDevicePrefs({ videoId: nextDeviceId });
 
     if (videoEnabled) {
       await mediaPerms.requestCamera(nextDeviceId);
     }
-  }, [videoDevices, selectedVideoId, videoEnabled, mediaPerms]);
+  }, [videoDevices, selectedVideoId, videoEnabled, mediaPerms, saveDevicePrefs]);
 
   // Join meeting handler
   const handleJoin = async (e?: React.FormEvent, joinMuted = false) => {
@@ -276,8 +347,20 @@ export default function RoomPreviewPage() {
     setJoining(true);
 
     try {
-      const finalVideo = joinMuted ? false : videoEnabled;
-      const finalAudio = joinMuted ? false : audioEnabled;
+      let finalVideo = joinMuted ? false : videoEnabled;
+      let finalAudio = joinMuted ? false : audioEnabled;
+
+      // Google Meet-style initialization: If user clicks Join Meeting and media has not yet been requested,
+      // request camera and microphone permissions automatically on the join user action.
+      if (!joinMuted && !videoEnabled && !audioEnabled && (mediaPerms.cameraState === 'prompt' || mediaPerms.cameraState === 'unknown' || mediaPerms.micState === 'prompt' || mediaPerms.micState === 'unknown')) {
+        try {
+          const permsRes = await mediaPerms.requestBoth(selectedVideoId || undefined, selectedAudioId || undefined);
+          if (permsRes.videoTrack) finalVideo = true;
+          if (permsRes.audioTrack) finalAudio = true;
+        } catch {
+          // Gracefully continue with available configuration
+        }
+      }
 
       const joinRes = await joinRoom(roomCode, user ? undefined : effectiveName, passcode.trim());
 
@@ -352,6 +435,7 @@ export default function RoomPreviewPage() {
 
   const isCameraBlocked = mediaPerms.cameraState === 'denied';
   const isMicBlocked = mediaPerms.micState === 'denied';
+  const isPromptState = !videoEnabled && !audioEnabled && (mediaPerms.cameraState === 'prompt' || mediaPerms.micState === 'prompt');
 
   return (
     <div className="min-h-screen min-h-dvh bg-[#FCFCFA] flex flex-col overflow-x-hidden">
@@ -376,7 +460,7 @@ export default function RoomPreviewPage() {
       <main className="flex-1 max-w-5xl mx-auto w-full p-3 sm:p-6 md:p-8 flex items-center justify-center">
         <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-8 items-center">
           {/* Left Column: Device Preview (Clean, no overlays, independent controls) */}
-          <div className="lg:col-span-7">
+          <div className="lg:col-span-7 space-y-3">
             <DevicePreview
               stream={mediaPerms.mediaStream}
               videoEnabled={videoEnabled && Boolean(mediaPerms.cameraTrack)}
@@ -385,11 +469,30 @@ export default function RoomPreviewPage() {
               micBlocked={isMicBlocked}
               onToggleVideo={handleToggleVideo}
               onToggleAudio={handleToggleAudio}
+              onOpenSettings={() => setShowDeviceSettings(!showDeviceSettings)}
               onRequestHelp={handleRequestHelp}
               onSwitchCamera={handleSwitchCamera}
               canSwitchCamera={videoDevices.length > 1}
               displayName={user ? user.displayName : guestName}
             />
+
+            {/* Google Meet-Style Quick Device Activation Prompt */}
+            {isPromptState && (
+              <div className="p-3 rounded-xl bg-purple-50/70 border border-purple-100 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Sparkles className="w-4 h-4 text-[#7258E8] shrink-0" />
+                  <span className="text-xs text-[#5B48B8]">Check how you look and sound before joining</span>
+                </div>
+                <button
+                  type="button"
+                  id="enable-devices-btn"
+                  onClick={handleEnableDevices}
+                  className="px-3 py-1.5 rounded-lg bg-[#7258E8] hover:bg-[#6045D8] text-white text-xs font-medium whitespace-nowrap transition-colors shadow-xs"
+                >
+                  Enable camera & mic
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Right Column: Identity, Selectors & Join Action */}
@@ -473,9 +576,9 @@ export default function RoomPreviewPage() {
                         selectedVideoId={selectedVideoId}
                         selectedAudioId={selectedAudioId}
                         selectedOutputId={selectedOutputId}
-                        onSelectVideo={setSelectedVideoId}
-                        onSelectAudio={setSelectedAudioId}
-                        onSelectOutput={setSelectedOutputId}
+                        onSelectVideo={handleSelectVideo}
+                        onSelectAudio={handleSelectAudio}
+                        onSelectOutput={handleSelectOutput}
                         hasAudioOutputSupport={hasAudioOutputSupport}
                       />
                     </div>

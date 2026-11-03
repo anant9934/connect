@@ -32,6 +32,8 @@ import {
   decideAdmission,
 } from '@/features/rooms/api';
 import { MeetingStage } from './MeetingStage';
+import { InMeetingDeviceModal } from './InMeetingDeviceModal';
+import { getMediaDevices, DeviceInfo } from '@/features/meeting/media';
 import { Loader2, AlertCircle, UserX, Clock, Volume2, X } from 'lucide-react';
 import { ChatMessage } from '@/features/chat/types';
 import { useMeetingInteraction } from '@/features/chat/useMeetingInteraction';
@@ -95,6 +97,42 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [showHelpSheet, setShowHelpSheet] = useState(false);
   const [helpSheetDevice, setHelpSheetDevice] = useState<TargetMediaDevice>('camera');
   const [canPlaybackAudio, setCanPlaybackAudio] = useState(true);
+  const [showDeviceModal, setShowDeviceModal] = useState(false);
+  const [videoDevices, setVideoDevices] = useState<DeviceInfo[]>([]);
+  const [audioInputDevices, setAudioInputDevices] = useState<DeviceInfo[]>([]);
+  const [audioOutputDevices, setAudioOutputDevices] = useState<DeviceInfo[]>([]);
+  const [currentVideoId, setCurrentVideoId] = useState(videoDeviceId);
+  const [currentAudioId, setCurrentAudioId] = useState(audioDeviceId);
+  const [currentOutputId, setCurrentOutputId] = useState('');
+  const [hasAudioOutputSupport, setHasAudioOutputSupport] = useState(false);
+
+  // Enumerate devices for in-meeting device switcher
+  useEffect(() => {
+    let active = true;
+    async function loadDevices() {
+      try {
+        const { videoDevices: v, audioInputDevices: ai, audioOutputDevices: ao } = await getMediaDevices();
+        if (!active) return;
+        setVideoDevices(v);
+        setAudioInputDevices(ai);
+        setAudioOutputDevices(ao);
+        setHasAudioOutputSupport('setSinkId' in HTMLMediaElement.prototype);
+      } catch {
+        // Non-blocking
+      }
+    }
+    loadDevices();
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.addEventListener) {
+      navigator.mediaDevices.addEventListener('devicechange', loadDevices);
+      return () => {
+        active = false;
+        navigator.mediaDevices.removeEventListener('devicechange', loadDevices);
+      };
+    }
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
@@ -654,6 +692,69 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
+  const handleSelectVideoInRoom = async (deviceId: string) => {
+    setCurrentVideoId(deviceId);
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = localStorage.getItem('connect_device_prefs');
+        const prev = raw ? JSON.parse(raw) : {};
+        localStorage.setItem('connect_device_prefs', JSON.stringify({ ...prev, videoDeviceId: deviceId }));
+      }
+    } catch {
+      // Ignored
+    }
+    const transport = transportRef.current;
+    if (transport) {
+      try {
+        await transport.switchCamera(deviceId);
+      } catch (err) {
+        console.warn('Failed to switch camera:', err);
+      }
+    }
+  };
+
+  const handleSelectAudioInRoom = async (deviceId: string) => {
+    setCurrentAudioId(deviceId);
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = localStorage.getItem('connect_device_prefs');
+        const prev = raw ? JSON.parse(raw) : {};
+        localStorage.setItem('connect_device_prefs', JSON.stringify({ ...prev, audioDeviceId: deviceId }));
+      }
+    } catch {
+      // Ignored
+    }
+    const transport = transportRef.current;
+    if (transport) {
+      try {
+        if (!isMicMuted) {
+          await transport.setMicrophoneEnabled(true, deviceId);
+        }
+      } catch (err) {
+        console.warn('Failed to switch microphone:', err);
+      }
+    }
+  };
+
+  const handleSelectOutputInRoom = async (deviceId: string) => {
+    setCurrentOutputId(deviceId);
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = localStorage.getItem('connect_device_prefs');
+        const prev = raw ? JSON.parse(raw) : {};
+        localStorage.setItem('connect_device_prefs', JSON.stringify({ ...prev, audioOutputId: deviceId }));
+        const audioElements = document.querySelectorAll('audio');
+        audioElements.forEach((el) => {
+          if ('setSinkId' in el && typeof (el as any).setSinkId === 'function') {
+            (el as any).setSinkId(deviceId).catch(() => {});
+          }
+        });
+      }
+    } catch {
+      // Ignored
+    }
+  };
+
   const handleToggleScreenShare = async () => {
     const transport = transportRef.current;
     if (!transport) return;
@@ -1018,6 +1119,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         onSendMessage={handleSendMessage}
         onSendReaction={handleSendReaction}
         onToggleHandRaise={handleToggleHandRaise}
+        onOpenDeviceSettings={() => setShowDeviceModal(true)}
         onTogglePanel={handleTogglePanel}
         onClosePanel={() => setActivePanel(null)}
         onToggleMic={handleToggleMic}
@@ -1030,6 +1132,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         onDenyGuest={handleDenyGuest}
         onLeave={handleLeave}
         onEndMeetingForEveryone={handleEndMeetingForEveryone}
+      />
+
+      {/* In-Meeting Device Switcher Modal */}
+      <InMeetingDeviceModal
+        isOpen={showDeviceModal}
+        onClose={() => setShowDeviceModal(false)}
+        videoDevices={videoDevices}
+        audioInputDevices={audioInputDevices}
+        audioOutputDevices={audioOutputDevices}
+        selectedVideoId={currentVideoId || ''}
+        selectedAudioId={currentAudioId || ''}
+        selectedOutputId={currentOutputId}
+        onSelectVideo={handleSelectVideoInRoom}
+        onSelectAudio={handleSelectAudioInRoom}
+        onSelectOutput={handleSelectOutputInRoom}
+        hasAudioOutputSupport={hasAudioOutputSupport}
       />
 
       {/* Permission Help Sheet (Modal/Bottom Sheet outside the video area) */}

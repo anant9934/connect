@@ -6,6 +6,7 @@ import { detectBrowserEnvironment, BrowserEnvironmentInfo } from './browserDetec
 import {
   acquireCameraTrack,
   acquireMicrophoneTrack,
+  createLocalMediaStream,
   stopMediaStream,
 } from '../media';
 
@@ -22,6 +23,13 @@ export interface UseMediaPermissionsReturn {
   queryPermissions: () => Promise<void>;
   requestCamera: (videoId?: string) => Promise<{ track: MediaStreamTrack | null; state: DevicePermissionState; error?: string }>;
   requestMicrophone: (audioId?: string) => Promise<{ track: MediaStreamTrack | null; state: DevicePermissionState; error?: string }>;
+  requestBoth: (videoId?: string, audioId?: string) => Promise<{
+    videoTrack: MediaStreamTrack | null;
+    audioTrack: MediaStreamTrack | null;
+    cameraState: DevicePermissionState;
+    micState: DevicePermissionState;
+    error?: string;
+  }>;
   stopCamera: () => void;
   stopMicrophone: () => void;
   stopAll: () => void;
@@ -228,6 +236,75 @@ export function useMediaPermissions(): UseMediaPermissionsReturn {
     }
   }, []);
 
+  // Request both camera and microphone with independent resilience
+  const requestBoth = useCallback(async (videoId?: string, audioId?: string): Promise<{
+    videoTrack: MediaStreamTrack | null;
+    audioTrack: MediaStreamTrack | null;
+    cameraState: DevicePermissionState;
+    micState: DevicePermissionState;
+    error?: string;
+  }> => {
+    const camReqId = ++cameraRequestIdRef.current;
+    const micReqId = ++micRequestIdRef.current;
+
+    setCameraState('requesting');
+    setMicState('requesting');
+    setCameraError(null);
+    setMicError(null);
+
+    const res = await createLocalMediaStream({
+      video: true,
+      audio: true,
+      videoId,
+      audioId,
+    });
+
+    if (!isMountedRef.current) {
+      if (res.cameraTrack) try { res.cameraTrack.stop(); } catch {}
+      if (res.audioTrack) try { res.audioTrack.stop(); } catch {}
+      return {
+        videoTrack: null,
+        audioTrack: null,
+        cameraState: 'unknown',
+        micState: 'unknown',
+      };
+    }
+
+    if (camReqId === cameraRequestIdRef.current) {
+      if (res.cameraTrack) {
+        if (cameraTrackRef.current && cameraTrackRef.current !== res.cameraTrack) {
+          try { cameraTrackRef.current.stop(); } catch {}
+        }
+        setCameraTrack(res.cameraTrack);
+        setCameraState('granted');
+      } else {
+        setCameraState(res.cameraState || 'denied');
+        setCameraError(res.cameraError || 'Camera could not be accessed');
+      }
+    }
+
+    if (micReqId === micRequestIdRef.current) {
+      if (res.audioTrack) {
+        if (micTrackRef.current && micTrackRef.current !== res.audioTrack) {
+          try { micTrackRef.current.stop(); } catch {}
+        }
+        setMicTrack(res.audioTrack);
+        setMicState('granted');
+      } else {
+        setMicState(res.microphoneState || 'denied');
+        setMicError(res.microphoneError || 'Microphone could not be accessed');
+      }
+    }
+
+    return {
+      videoTrack: res.cameraTrack || null,
+      audioTrack: res.audioTrack || null,
+      cameraState: res.cameraState || (res.cameraTrack ? 'granted' : 'denied'),
+      micState: res.microphoneState || (res.audioTrack ? 'granted' : 'denied'),
+      error: res.error,
+    };
+  }, []);
+
   // Stop camera track independently
   const stopCamera = useCallback(() => {
     // Invalidate pending camera requests
@@ -327,6 +404,7 @@ export function useMediaPermissions(): UseMediaPermissionsReturn {
     queryPermissions,
     requestCamera,
     requestMicrophone,
+    requestBoth,
     stopCamera,
     stopMicrophone,
     stopAll,

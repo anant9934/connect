@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useRef, useEffect } from 'react';
-import { Camera, CameraOff, Mic, MicOff, RefreshCw, AlertCircle } from 'lucide-react';
+import React, { useRef, useEffect, useState } from 'react';
+import { Camera, CameraOff, Mic, MicOff, RefreshCw, AlertCircle, Settings, Volume2 } from 'lucide-react';
+import { createAudioMeter } from '@/features/meeting/audioMeter';
 
 interface DevicePreviewProps {
   stream: MediaStream | null;
@@ -11,6 +12,7 @@ interface DevicePreviewProps {
   onToggleAudio: () => void;
   onSwitchCamera?: () => void;
   canSwitchCamera?: boolean;
+  onOpenSettings?: () => void;
   displayName?: string;
   isFrontCamera?: boolean;
   cameraBlocked?: boolean;
@@ -26,6 +28,7 @@ export const DevicePreview: React.FC<DevicePreviewProps> = ({
   onToggleAudio,
   onSwitchCamera,
   canSwitchCamera = false,
+  onOpenSettings,
   displayName,
   isFrontCamera = true,
   cameraBlocked = false,
@@ -33,7 +36,9 @@ export const DevicePreview: React.FC<DevicePreviewProps> = ({
   onRequestHelp,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [audioVolume, setAudioVolume] = useState<number>(0);
 
+  // Sync stream to video element
   useEffect(() => {
     if (videoRef.current) {
       if (stream && videoEnabled) {
@@ -43,6 +48,29 @@ export const DevicePreview: React.FC<DevicePreviewProps> = ({
       }
     }
   }, [stream, videoEnabled]);
+
+  // Google Meet-style Live Audio Level Meter
+  useEffect(() => {
+    if (!stream || !audioEnabled || micBlocked) {
+      setAudioVolume(0);
+      return;
+    }
+
+    const audioTrack = stream.getAudioTracks()[0];
+    if (!audioTrack || audioTrack.readyState !== 'live') {
+      setAudioVolume(0);
+      return;
+    }
+
+    const meter = createAudioMeter(audioTrack, (vol) => {
+      setAudioVolume(vol);
+    });
+
+    return () => {
+      meter.stop();
+      setAudioVolume(0);
+    };
+  }, [stream, audioEnabled, micBlocked]);
 
   const initials = displayName
     ? displayName
@@ -78,6 +106,8 @@ export const DevicePreview: React.FC<DevicePreviewProps> = ({
       {/* Live Video Element */}
       {videoEnabled && stream ? (
         <video
+          id="camera-preview-video"
+          data-testid="camera-preview-video"
           ref={videoRef}
           autoPlay
           playsInline
@@ -93,25 +123,85 @@ export const DevicePreview: React.FC<DevicePreviewProps> = ({
             {initials}
           </div>
           <p className="text-xs text-[#A0A0A0]">
-            {cameraBlocked ? 'Camera blocked' : 'Camera is off'}
+            {cameraBlocked ? 'Camera access is blocked' : 'Camera is off'}
           </p>
+          {cameraBlocked && onRequestHelp && (
+            <button
+              type="button"
+              onClick={() => onRequestHelp('camera')}
+              className="text-[11px] font-medium text-[#A78BFA] hover:text-white underline mt-1"
+            >
+              How to enable in browser
+            </button>
+          )}
         </div>
       )}
 
-      {/* Switch Camera Button (Front/Rear on mobile) */}
-      {canSwitchCamera && onSwitchCamera && videoEnabled && stream && (
-        <button
-          type="button"
-          onClick={onSwitchCamera}
-          className="absolute top-3 right-3 p-2.5 rounded-full bg-black/60 hover:bg-black/80 text-white backdrop-blur-md transition-all shadow-md z-10 active:scale-90"
-          title="Switch camera"
-          aria-label="Switch camera"
-        >
-          <RefreshCw className="w-4 h-4" />
-        </button>
-      )}
+      {/* Top Left: Live Status & Audio Meter */}
+      <div className="absolute top-3 left-3 flex items-center gap-2 z-10">
+        {videoEnabled && stream && (
+          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md text-white text-[11px] font-medium border border-white/10">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            Camera on
+          </span>
+        )}
 
-      {/* Floating Preview Controls (Dedicated bottom control zone, never covering video) */}
+        {/* Real-time Google Meet Microphone Volume Wave Indicator */}
+        {audioEnabled && !micBlocked && (
+          <div
+            className="flex items-center gap-0.5 px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md text-white text-[11px] font-medium border border-white/10"
+            title={`Mic volume: ${audioVolume}%`}
+          >
+            <Mic className="w-3 h-3 text-emerald-400 mr-1" />
+            <div className="flex items-end gap-[2px] h-3">
+              <span
+                className={`w-1 rounded-full transition-all duration-75 ${
+                  audioVolume > 5 ? 'h-3 bg-emerald-400' : 'h-1.5 bg-white/30'
+                }`}
+              />
+              <span
+                className={`w-1 rounded-full transition-all duration-75 ${
+                  audioVolume > 25 ? 'h-3 bg-emerald-400' : 'h-1.5 bg-white/30'
+                }`}
+              />
+              <span
+                className={`w-1 rounded-full transition-all duration-75 ${
+                  audioVolume > 55 ? 'h-3.5 bg-emerald-400' : 'h-1.5 bg-white/30'
+                }`}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Top Right: Switch Camera & Settings Buttons */}
+      <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
+        {canSwitchCamera && onSwitchCamera && videoEnabled && stream && (
+          <button
+            type="button"
+            onClick={onSwitchCamera}
+            className="p-2.5 rounded-full bg-black/60 hover:bg-black/80 text-white backdrop-blur-md transition-all shadow-md active:scale-90"
+            title="Switch camera"
+            aria-label="Switch camera"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        )}
+
+        {onOpenSettings && (
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="p-2.5 rounded-full bg-black/60 hover:bg-black/80 text-white backdrop-blur-md transition-all shadow-md active:scale-90"
+            title="Audio & video settings"
+            aria-label="Audio & video settings"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Floating Preview Controls (Dedicated bottom control zone) */}
       <div className="absolute bottom-3 inset-x-0 flex items-center justify-center gap-3 z-10">
         {/* Microphone Control */}
         <div className="relative">

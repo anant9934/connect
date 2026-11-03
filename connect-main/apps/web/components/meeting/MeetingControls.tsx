@@ -22,6 +22,7 @@ import {
   Smile,
   X,
   AlertCircle,
+  Settings,
 } from 'lucide-react';
 import { ReactionPicker } from './ReactionPicker';
 
@@ -46,6 +47,7 @@ interface MeetingControlsProps {
   onToggleLock: () => void;
   onSendReaction: (emoji: string) => void;
   onToggleHandRaise: () => void;
+  onOpenDeviceSettings?: () => void;
   onLeave: () => void;
   onEndMeetingForEveryone: () => void;
 }
@@ -71,6 +73,7 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
   onToggleLock,
   onSendReaction,
   onToggleHandRaise,
+  onOpenDeviceSettings,
   onLeave,
   onEndMeetingForEveryone,
 }) => {
@@ -293,6 +296,18 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
               <GraduationCap className="w-5 h-5" />
             </button>
 
+            {/* Device Settings (Desktop) */}
+            {onOpenDeviceSettings && (
+              <button
+                onClick={onOpenDeviceSettings}
+                className="hidden md:flex relative min-w-[46px] min-h-[46px] p-3 rounded-2xl transition-all shadow-xs border items-center justify-center active:scale-95 bg-white border-[#E5E5E3] text-[#1C1C1C] hover:bg-[#F2F2F0]"
+                aria-label="Audio and video settings"
+                title="Device settings"
+              >
+                <Settings className="w-5 h-5 text-[#666664]" />
+              </button>
+            )}
+
             {/* 9. Mobile More Options Button */}
             <button
               id="toolbar-more-btn"
@@ -488,6 +503,23 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
                   <div className="text-[10px] text-[#666664]">Share meeting</div>
                 </div>
               </button>
+
+              {/* In-Meeting Audio & Video Settings */}
+              {onOpenDeviceSettings && (
+                <button
+                  onClick={() => {
+                    onOpenDeviceSettings();
+                    setShowMoreSheet(false);
+                  }}
+                  className="p-3 rounded-2xl border border-[#E5E5E3] bg-[#FAFAF8] hover:bg-[#F2F2F0] text-left flex items-center gap-3 transition-colors min-h-[48px]"
+                >
+                  <Settings className="w-5 h-5 text-[#7658E8] shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-semibold truncate">Audio & Video Settings</div>
+                    <div className="text-[10px] text-[#666664]">Switch mic, camera, speaker</div>
+                  </div>
+                </button>
+              )}
             </div>
 
             {/* Quick Reactions Bar in Sheet */}

@@ -73,6 +73,7 @@ interface MeetingStageProps {
   onSendMessage: (text: string, kind: 'chat' | 'announcement') => void;
   onSendReaction: (emoji: string) => void;
   onToggleHandRaise: () => void;
+  onOpenDeviceSettings?: () => void;
   onTogglePanel: (panel: 'chat' | 'participants' | 'notes' | 'files' | 'classroom') => void;
   onClosePanel: () => void;
   onToggleMic: () => void;
@@ -122,6 +123,7 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
   onSendMessage,
   onSendReaction,
   onToggleHandRaise,
+  onOpenDeviceSettings,
   onTogglePanel,
   onClosePanel,
   onToggleMic,
@@ -457,6 +459,7 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
         onToggleLock={onToggleLock}
         onSendReaction={onSendReaction}
         onToggleHandRaise={onToggleHandRaise}
+        onOpenDeviceSettings={onOpenDeviceSettings}
         onLeave={onLeave}
         onEndMeetingForEveryone={onEndMeetingForEveryone}
       />

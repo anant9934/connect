@@ -488,6 +488,20 @@ export class LiveKitTransport implements MediaTransport {
   async startScreenShare(_options?: ScreenShareOptions): Promise<void> {
     if (!this.room) return;
     await this.room.localParticipant.setScreenShareEnabled(true);
+
+    // Attach native track.onended listener for browser's native "Stop sharing" button
+    const pub = this.room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+    const mediaTrack = pub?.track?.mediaStreamTrack;
+    if (mediaTrack) {
+      mediaTrack.addEventListener(
+        'ended',
+        () => {
+          this.stopScreenShare().catch(() => {});
+        },
+        { once: true }
+      );
+    }
+
     this.updateScreenShareState();
     this.emit('participants_changed');
   }
