@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { LiveActivity } from './LiveActivity';
+import { displayMessageText } from '@/features/meeting/codingMarker';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { DisconnectReason,
@@ -206,8 +208,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const interaction = useMeetingInteraction(
     roomCode,
     initialIdentity || '',
-    () => {
-      transportRef.current?.sendData('tc-sync', {}).catch(() => {
+    (payload) => {
+      transportRef.current?.sendData('tc-sync', payload ?? {}).catch(() => {
         // Others catch up on their next poll.
       });
     },
@@ -225,14 +227,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const isLocalHandRaised = raisedHands.has(initialIdentity || '');
   const refreshInteractionRef = useRef(interaction.refresh);
   refreshInteractionRef.current = interaction.refresh;
+  const ingestRemoteMessageRef = useRef(interaction.ingestRemoteMessage);
+  ingestRemoteMessageRef.current = interaction.ingestRemoteMessage;
 
   const handleDataPayload = useCallback((payload: Uint8Array, participant?: any, topic?: string) => {
     try {
       const text = new TextDecoder().decode(payload);
       const data = JSON.parse(text);
 
-      // Never trusted as content: it only says the stored state may have changed.
+      // A sync hint says stored state changed. It may carry a message the server already
+      // accepted; it is shown only if its sender matches LiveKit's authenticated participant.
       if (topic === 'tc-sync') {
+        if (data && data.message) ingestRemoteMessageRef.current(data.message, participant?.identity);
         refreshInteractionRef.current();
         setSyncTick((tick) => tick + 1);
       } else if (topic === 'tc-notes') {
@@ -1052,11 +1058,25 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         </div>
       )}
 
+      {/* Live polls and coding problems pop up for students; teachers assign and review here. */}
+      <LiveActivity
+        roomCode={roomCode}
+        canManage={isHost || myRole === 'co-host'}
+        syncTick={syncTick}
+        chatMessages={chatMessages}
+        sendHint={() => {
+          transportRef.current?.sendData('tc-sync', {}).catch(() => {
+            // Others catch up on their next poll.
+          });
+        }}
+        announce={(text) => interaction.sendMessage(text, 'announcement')}
+      />
+
       {latestAnnouncement && (
         <div role="status" data-testid="announcement-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-50 w-[min(92vw,560px)] flex items-start gap-3 rounded-xl border border-amber-300 bg-[#FFF2BE] px-4 py-2.5 text-sm text-amber-950 shadow-lg">
           <p className="min-w-0 break-words">
             <span className="font-semibold">{latestAnnouncement.senderName}: </span>
-            {latestAnnouncement.text}
+            {displayMessageText(latestAnnouncement.text)}
           </p>
           <button type="button" onClick={() => setLatestAnnouncement(null)} className="shrink-0 text-xs font-semibold underline min-h-[24px]">
             Dismiss

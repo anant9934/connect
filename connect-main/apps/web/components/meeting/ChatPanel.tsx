@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { displayMessageText } from '@/features/meeting/codingMarker';
 import { Send, X, MessageSquare, ShieldAlert, Megaphone, RotateCcw, Loader2 } from 'lucide-react';
 import { ChatMessage } from '@/features/chat/types';
 import { InteractionStatus } from '@/features/chat/useMeetingInteraction';
@@ -159,7 +160,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     <Megaphone className="w-3 h-3" aria-hidden="true" /> Announcement
                   </span>
                 )}
-                {msg.text}
+                {displayMessageText(msg.text)}
               </div>
               {msg.status === 'sending' && <span className="text-[10px] text-[#9CA3AF] px-1 mt-0.5">Sending…</span>}
               {msg.status === 'error' && (
