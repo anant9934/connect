@@ -16,6 +16,9 @@ var (
 	// ErrRateLimitExceeded is returned when an organization or user exceeds their AI rate limit.
 	ErrRateLimitExceeded = errors.New("ai request rate limit exceeded")
 
+	// ErrRateLimiterUnavailable is returned when the rate limiter cannot be reached; AI fails closed.
+	ErrRateLimiterUnavailable = errors.New("ai rate limiter unavailable")
+
 	// ErrBudgetExceeded is returned when the organization's monthly spend limit is reached.
 	ErrBudgetExceeded = errors.New("ai monthly budget limit exceeded")
 

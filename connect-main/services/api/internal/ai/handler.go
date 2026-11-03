@@ -699,6 +699,9 @@ func (h *Handler) handleError(w http.ResponseWriter, r *http.Request, err error)
 		model.SendJSONError(w, r, http.StatusNotFound, "NOT_FOUND", "Requested resource not found")
 	case errors.Is(err, ErrRateLimitExceeded):
 		model.SendJSONError(w, r, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "AI request limit exceeded. Please wait before retrying.")
+	case errors.Is(err, ErrRateLimiterUnavailable):
+		logAIFailure(r, err)
+		model.SendJSONError(w, r, http.StatusServiceUnavailable, "AI_RATE_LIMITER_UNAVAILABLE", "AI is temporarily unavailable. Please retry shortly.")
 	case errors.Is(err, ErrBudgetExceeded):
 		model.SendJSONError(w, r, http.StatusPaymentRequired, "BUDGET_EXCEEDED", "Organization monthly AI budget reached")
 	case errors.Is(err, ErrNonFreeModelBlocked):

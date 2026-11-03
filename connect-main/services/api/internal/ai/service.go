@@ -13,7 +13,10 @@ import (
 type ServiceConfig struct {
 	DefaultModel       string
 	DefaultFastModel   string
-	RateLimitRPM       int
+	RateLimitRPM       int // per-organization requests per minute
+	UserRPM            int // per-user requests per minute
+	UserDailyLimit     int // per-user requests per rolling 24 hours
+	OrgDailyLimit      int // per-organization requests per rolling 24 hours
 	MonthlyBudgetMicro int64
 }
 
@@ -43,8 +46,18 @@ func NewService(
 	if cfg.DefaultFastModel == "" {
 		cfg.DefaultFastModel = ModelGeminiFlashLite
 	}
+	// Conservative defaults sized to the shared free-tier provider quotas.
 	if cfg.RateLimitRPM <= 0 {
-		cfg.RateLimitRPM = 30 // Conservative default for free tier
+		cfg.RateLimitRPM = 30
+	}
+	if cfg.UserRPM <= 0 {
+		cfg.UserRPM = 6
+	}
+	if cfg.UserDailyLimit <= 0 {
+		cfg.UserDailyLimit = 60
+	}
+	if cfg.OrgDailyLimit <= 0 {
+		cfg.OrgDailyLimit = 600
 	}
 
 	pe := NewPolicyEngine(registry)
@@ -87,12 +100,27 @@ func (s *Service) GetOrgSpend(orgID string) (spend int64, budget int64) {
 }
 
 func (s *Service) checkLimits(ctx context.Context, orgID, userID, model string, estimatedTokens int) (int64, error) {
-	// 1. Rate Limit Check
+	// 1. Per-user and per-organization rate limits. Fails closed: if the limiter cannot be
+	// reached, AI requests are refused rather than allowed to drain shared free quota.
 	if s.limiter != nil {
-		key := fmt.Sprintf("ai:ratelimit:org:%s", orgID)
-		allowed, err := s.limiter.Allow(ctx, key, s.cfg.RateLimitRPM, time.Minute)
-		if err == nil && !allowed {
-			return 0, ErrRateLimitExceeded
+		checks := []struct {
+			key    string
+			limit  int
+			window time.Duration
+		}{
+			{fmt.Sprintf("ai:rl:user:min:%s", userID), s.cfg.UserRPM, time.Minute},
+			{fmt.Sprintf("ai:rl:org:min:%s", orgID), s.cfg.RateLimitRPM, time.Minute},
+			{fmt.Sprintf("ai:rl:user:day:%s", userID), s.cfg.UserDailyLimit, 24 * time.Hour},
+			{fmt.Sprintf("ai:rl:org:day:%s", orgID), s.cfg.OrgDailyLimit, 24 * time.Hour},
+		}
+		for _, c := range checks {
+			allowed, err := s.limiter.Allow(ctx, c.key, c.limit, c.window)
+			if err != nil {
+				return 0, fmt.Errorf("%w: %v", ErrRateLimiterUnavailable, err)
+			}
+			if !allowed {
+				return 0, ErrRateLimitExceeded
+			}
 		}
 	}
 

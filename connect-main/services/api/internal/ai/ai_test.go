@@ -18,6 +18,57 @@ func (m *mockLimiter) Allow(ctx context.Context, key string, limit int, window t
 	return m.allow, nil
 }
 
+// keyedLimiter counts requests per key and denies once a key reaches its limit.
+type keyedLimiter struct {
+	counts map[string]int
+	err    error
+}
+
+func (k *keyedLimiter) Allow(_ context.Context, key string, limit int, _ time.Duration) (bool, error) {
+	if k.err != nil {
+		return false, k.err
+	}
+	k.counts[key]++
+	return k.counts[key] <= limit, nil
+}
+
+func TestService_PerUserAndOrgLimits(t *testing.T) {
+	reg := NewDefaultModelRegistry()
+	router := NewRouter(reg, nil)
+	mock := NewMockProvider("gemini")
+	router.RegisterProvider(mock)
+	mock.SetResponse(`{"title":"T","overview":"O","keyConcepts":["a"],"takeaways":["b"],"actionItems":["c"]}`)
+	orgID := "33b4a67f-64fe-4410-bec0-579be3a780ee"
+
+	lim := &keyedLimiter{counts: map[string]int{}}
+	svc := NewService(router, reg, lim, ServiceConfig{UserRPM: 2, RateLimitRPM: 3})
+
+	call := func(user string) error {
+		_, _, err := svc.SummarizeLecture(context.Background(), orgID, user, "CS1", "A short lecture about graphs.")
+		return err
+	}
+	if err := call("u1"); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := call("u1"); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if err := call("u1"); !errors.Is(err, ErrRateLimitExceeded) {
+		t.Fatalf("third call by same user should hit the per-user limit, got %v", err)
+	}
+	if err := call("u2"); err != nil {
+		t.Fatalf("another user should still be allowed: %v", err)
+	}
+	if err := call("u3"); !errors.Is(err, ErrRateLimitExceeded) {
+		t.Fatalf("org limit of 3 should now apply, got %v", err)
+	}
+
+	failing := NewService(router, reg, &keyedLimiter{err: errors.New("redis down")}, ServiceConfig{})
+	if _, _, err := failing.SummarizeLecture(context.Background(), orgID, "u9", "CS1", "A short lecture."); !errors.Is(err, ErrRateLimiterUnavailable) {
+		t.Fatalf("limiter errors must fail closed, got %v", err)
+	}
+}
+
 func TestModelRegistry(t *testing.T) {
 	reg := NewDefaultModelRegistry()
 
