@@ -18,6 +18,9 @@ id_ed25519*
 credentials.json
 serviceAccountKey.json
 
+# Local-only private material (demo credentials). Never commit.
+private/
+
 # Logs and databases
 *.log
 npm-debug.log*
