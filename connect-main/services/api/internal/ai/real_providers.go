@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,6 +25,41 @@ func upstreamSnippet(b []byte) string {
 		return s[:max] + "..."
 	}
 	return s
+}
+
+// classifyHTTPFailure maps an upstream HTTP failure to a sentinel. Short-window 429s are rate
+// limits; 402s and 429s that name a daily or credit quota are quota exhaustion.
+func classifyHTTPFailure(provider string, status int, body []byte) error {
+	lower := strings.ToLower(string(body))
+	quota := status == http.StatusPaymentRequired
+	for _, marker := range []string{"per day", "perday", "per-day", "daily", "insufficient_quota", "credits"} {
+		if strings.Contains(lower, marker) {
+			quota = true
+		}
+	}
+	switch {
+	case quota && (status == http.StatusTooManyRequests || status == http.StatusPaymentRequired):
+		return fmt.Errorf("%w: %s quota (%d)", ErrProviderQuotaExhausted, provider, status)
+	case status == http.StatusTooManyRequests:
+		return fmt.Errorf("%w: %s rate limit (429)", ErrProviderOverloaded, provider)
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return fmt.Errorf("%w: %s auth error (%d)", ErrUnauthorizedProvider, provider, status)
+	case status == http.StatusGatewayTimeout:
+		return fmt.Errorf("%w: %s upstream timeout (504)", ErrProviderTimeout, provider)
+	case status >= 500:
+		return fmt.Errorf("%w: %s server error (%d)", ErrProviderUnavailable, provider, status)
+	default:
+		return fmt.Errorf("%w: %s returned status %d: %s", ErrProviderUnavailable, provider, status, upstreamSnippet(body))
+	}
+}
+
+// classifyTransportError distinguishes timeouts from other network failures.
+func classifyTransportError(provider string, err error) error {
+	var netErr interface{ Timeout() bool }
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+		return fmt.Errorf("%w: %s request timed out", ErrProviderTimeout, provider)
+	}
+	return fmt.Errorf("%w: %s network error: %v", ErrProviderUnavailable, provider, err)
 }
 
 // GeminiProvider connects to Google's Generative Language API.
@@ -105,7 +141,7 @@ type geminiResponse struct {
 
 func (p *GeminiProvider) Complete(ctx context.Context, req CompletionRequest) (*CompletionResult, error) {
 	if p.keyPool == nil || p.keyPool.Size() == 0 {
-		return nil, fmt.Errorf("%w: no active API keys configured for %s", ErrProviderUnavailable, p.id)
+		return nil, fmt.Errorf("%w: no active API keys configured for %s", ErrProviderNotConfigured, p.id)
 	}
 
 	modelName := req.Model
@@ -168,31 +204,22 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompletionRequest) (*
 
 		resp, err := p.httpClient.Do(httpReq)
 		if err != nil {
-			lastErr = fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
+			lastErr = classifyTransportError(p.id, err)
+			if ctx.Err() != nil {
+				break
+			}
 			continue
 		}
 
 		respBody, readErr := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if readErr != nil {
-			lastErr = fmt.Errorf("failed to read gemini response body: %w", readErr)
+			lastErr = classifyTransportError(p.id, readErr)
 			continue
 		}
 
-		if resp.StatusCode == http.StatusTooManyRequests {
-			lastErr = fmt.Errorf("%w: gemini rate limit (429)", ErrProviderOverloaded)
-			continue
-		}
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			lastErr = fmt.Errorf("%w: gemini auth error (%d)", ErrUnauthorizedProvider, resp.StatusCode)
-			continue
-		}
-		if resp.StatusCode >= 500 {
-			lastErr = fmt.Errorf("%w: gemini server error (%d)", ErrProviderUnavailable, resp.StatusCode)
-			continue
-		}
 		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("%w: gemini api returned status %d: %s", ErrProviderUnavailable, resp.StatusCode, upstreamSnippet(respBody))
+			lastErr = classifyHTTPFailure(p.id, resp.StatusCode, respBody)
 			continue
 		}
 
@@ -203,7 +230,7 @@ func (p *GeminiProvider) Complete(ctx context.Context, req CompletionRequest) (*
 		}
 
 		if gResp.Error != nil {
-			lastErr = fmt.Errorf("%w: gemini error: %s (code %d)", ErrProviderUnavailable, gResp.Error.Message, gResp.Error.Code)
+			lastErr = fmt.Errorf("%w: gemini error: %s (code %d)", ErrProviderUnavailable, upstreamSnippet([]byte(gResp.Error.Message)), gResp.Error.Code)
 			continue
 		}
 
@@ -273,7 +300,7 @@ func (p *GeminiProvider) Stream(ctx context.Context, req CompletionRequest) (<-c
 
 func (p *GeminiProvider) HealthCheck(ctx context.Context) error {
 	if p.keyPool == nil || p.keyPool.Size() == 0 {
-		return fmt.Errorf("%w: no gemini keys configured", ErrProviderUnavailable)
+		return fmt.Errorf("%w: no gemini keys configured", ErrProviderNotConfigured)
 	}
 	return nil
 }
@@ -367,7 +394,7 @@ type openAIResponse struct {
 
 func (p *OpenAICompatibleProvider) Complete(ctx context.Context, req CompletionRequest) (*CompletionResult, error) {
 	if p.keyPool == nil || p.keyPool.Size() == 0 {
-		return nil, fmt.Errorf("%w: no active API keys configured for %s", ErrProviderUnavailable, p.id)
+		return nil, fmt.Errorf("%w: no active API keys configured for %s", ErrProviderNotConfigured, p.id)
 	}
 
 	modelName := req.Model
@@ -425,31 +452,22 @@ func (p *OpenAICompatibleProvider) Complete(ctx context.Context, req CompletionR
 
 		resp, err := p.httpClient.Do(httpReq)
 		if err != nil {
-			lastErr = fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
+			lastErr = classifyTransportError(p.id, err)
+			if ctx.Err() != nil {
+				break
+			}
 			continue
 		}
 
 		respBody, readErr := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if readErr != nil {
-			lastErr = fmt.Errorf("failed to read response body: %w", readErr)
+			lastErr = classifyTransportError(p.id, readErr)
 			continue
 		}
 
-		if resp.StatusCode == http.StatusTooManyRequests {
-			lastErr = fmt.Errorf("%w: provider %s rate limit (429)", ErrProviderOverloaded, p.id)
-			continue
-		}
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			lastErr = fmt.Errorf("%w: provider %s auth error (%d)", ErrUnauthorizedProvider, p.id, resp.StatusCode)
-			continue
-		}
-		if resp.StatusCode >= 500 {
-			lastErr = fmt.Errorf("%w: provider %s server error (%d)", ErrProviderUnavailable, p.id, resp.StatusCode)
-			continue
-		}
 		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("%w: provider %s returned status %d: %s", ErrProviderUnavailable, p.id, resp.StatusCode, upstreamSnippet(respBody))
+			lastErr = classifyHTTPFailure(p.id, resp.StatusCode, respBody)
 			continue
 		}
 
@@ -460,7 +478,7 @@ func (p *OpenAICompatibleProvider) Complete(ctx context.Context, req CompletionR
 		}
 
 		if oResp.Error != nil {
-			lastErr = fmt.Errorf("%w: provider error: %s", ErrProviderUnavailable, oResp.Error.Message)
+			lastErr = fmt.Errorf("%w: %s error: %s", ErrProviderUnavailable, p.id, upstreamSnippet([]byte(oResp.Error.Message)))
 			continue
 		}
 
@@ -526,7 +544,7 @@ func (p *OpenAICompatibleProvider) Stream(ctx context.Context, req CompletionReq
 
 func (p *OpenAICompatibleProvider) HealthCheck(ctx context.Context) error {
 	if p.keyPool == nil || p.keyPool.Size() == 0 {
-		return fmt.Errorf("%w: no keys configured for %s", ErrProviderUnavailable, p.id)
+		return fmt.Errorf("%w: no keys configured for %s", ErrProviderNotConfigured, p.id)
 	}
 	return nil
 }

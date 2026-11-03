@@ -148,7 +148,9 @@ func NewAILectureSummaryHandler(
 		)
 		if err != nil {
 			// Distinguish permanent validation / format errors from transient 429/503/timeout
-			if errors.Is(err, ErrPromptTooLarge) || errors.Is(err, ErrPromptInjectionDetected) || errors.Is(err, ErrInvalidStructuredOutput) {
+			if errors.Is(err, ErrPromptTooLarge) || errors.Is(err, ErrPromptInjectionDetected) || errors.Is(err, ErrInvalidStructuredOutput) ||
+				errors.Is(err, ErrProviderNotConfigured) || errors.Is(err, ErrUnauthorizedProvider) ||
+				errors.Is(err, ErrNonFreeModelBlocked) || errors.Is(err, ErrModelNotAllowed) || errors.Is(err, ErrBudgetExceeded) {
 				return worker.MarkPermanent(err)
 			}
 			// Rate limits, provider timeouts or overload are retryable

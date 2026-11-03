@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -443,8 +444,55 @@ func TestRouter_NoSilentMockFallback(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when real providers fail, got nil")
 	}
-	if !errors.Is(err, ErrProviderUnavailable) {
-		t.Errorf("expected ErrProviderUnavailable, got %v", err)
+	if !errors.Is(err, ErrProviderNotConfigured) {
+		t.Errorf("expected ErrProviderNotConfigured, got %v", err)
+	}
+}
+
+func TestClassifyHTTPFailure(t *testing.T) {
+	cases := []struct {
+		status int
+		body   string
+		want   error
+	}{
+		{429, `{"error":{"message":"Quota exceeded for metric generate_content_free_tier_requests, limit: 10 PerMinute"}}`, ErrProviderOverloaded},
+		{429, `{"error":{"message":"Quota exceeded for metric generate_content_free_tier_requests, limit: 250 PerDay"}}`, ErrProviderQuotaExhausted},
+		{429, `{"error":{"message":"Rate limit reached for model on tokens per day (TPD)"}}`, ErrProviderQuotaExhausted},
+		{402, `{"error":{"message":"Insufficient credits"}}`, ErrProviderQuotaExhausted},
+		{401, `{}`, ErrUnauthorizedProvider},
+		{403, `{}`, ErrUnauthorizedProvider},
+		{504, `{}`, ErrProviderTimeout},
+		{503, `{}`, ErrProviderUnavailable},
+		{404, `{"error":"model not found"}`, ErrProviderUnavailable},
+	}
+	for _, c := range cases {
+		if got := classifyHTTPFailure("p", c.status, []byte(c.body)); !errors.Is(got, c.want) {
+			t.Errorf("status %d body %q: want %v, got %v", c.status, c.body, c.want, got)
+		}
+	}
+}
+
+func TestClassifyFailures(t *testing.T) {
+	quota := fmt.Errorf("%w: x", ErrProviderQuotaExhausted)
+	rate := fmt.Errorf("%w: x", ErrProviderOverloaded)
+	auth := fmt.Errorf("%w: x", ErrUnauthorizedProvider)
+	down := fmt.Errorf("%w: x", ErrProviderUnavailable)
+	missing := fmt.Errorf("%w: x", ErrProviderNotConfigured)
+	cases := []struct {
+		name string
+		errs []error
+		want error
+	}{
+		{"nothing configured", []error{missing, missing}, ErrProviderNotConfigured},
+		{"all quota, unconfigured ignored", []error{quota, missing, quota}, ErrProviderQuotaExhausted},
+		{"quota and rate limit", []error{quota, rate}, ErrProviderOverloaded},
+		{"all auth", []error{auth, auth}, ErrUnauthorizedProvider},
+		{"mixed outage", []error{rate, down}, ErrProviderUnavailable},
+	}
+	for _, c := range cases {
+		if got := classifyFailures(c.errs); got != c.want {
+			t.Errorf("%s: want %v, got %v", c.name, c.want, got)
+		}
 	}
 }
 

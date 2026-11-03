@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -465,15 +466,15 @@ func (h *Handler) getJobStatus(w http.ResponseWriter, r *http.Request) {
 			WHERE id = $1;
 		`
 		var (
-			id           uuid.UUID
-			queue        string
-			status       string
-			attempts     int
-			maxAttempts  int
-			scheduledAt  time.Time
-			lastError    *string
-			createdAt    time.Time
-			updatedAt    time.Time
+			id          uuid.UUID
+			queue       string
+			status      string
+			attempts    int
+			maxAttempts int
+			scheduledAt time.Time
+			lastError   *string
+			createdAt   time.Time
+			updatedAt   time.Time
 		)
 
 		err := tx.QueryRow(r.Context(), query, jobID).Scan(
@@ -708,11 +709,29 @@ func (h *Handler) handleError(w http.ResponseWriter, r *http.Request, err error)
 		model.SendJSONError(w, r, http.StatusBadRequest, "PROMPT_INJECTION_DETECTED", "Input rejected: adversarial instruction patterns detected")
 	case errors.Is(err, ErrInvalidStructuredOutput):
 		model.SendJSONError(w, r, http.StatusBadGateway, "MODEL_OUTPUT_INVALID", "AI model response could not be validated against academic schema")
-	case errors.Is(err, ErrProviderUnavailable) || errors.Is(err, ErrProviderOverloaded):
-		model.SendJSONError(w, r, http.StatusServiceUnavailable, "PROVIDER_OVERLOADED", "AI provider is temporarily overloaded. Please retry later.")
+	case errors.Is(err, ErrProviderNotConfigured):
+		model.SendJSONError(w, r, http.StatusServiceUnavailable, "AI_PROVIDER_NOT_CONFIGURED", "AI is not configured on this server.")
+	case errors.Is(err, ErrProviderQuotaExhausted):
+		model.SendJSONError(w, r, http.StatusServiceUnavailable, "AI_PROVIDER_QUOTA_EXHAUSTED", "The free AI quota is used up for now. Please try again later.")
+	case errors.Is(err, ErrProviderOverloaded):
+		w.Header().Set("Retry-After", "60")
+		model.SendJSONError(w, r, http.StatusServiceUnavailable, "AI_PROVIDER_RATE_LIMITED", "AI providers are rate limiting requests. Please retry in a minute.")
+	case errors.Is(err, ErrUnauthorizedProvider):
+		logAIFailure(r, err)
+		model.SendJSONError(w, r, http.StatusServiceUnavailable, "AI_PROVIDER_AUTH_FAILED", "AI providers rejected the server credentials.")
 	case errors.Is(err, ErrProviderTimeout):
-		model.SendJSONError(w, r, http.StatusGatewayTimeout, "PROVIDER_TIMEOUT", "AI provider request timed out")
+		model.SendJSONError(w, r, http.StatusGatewayTimeout, "AI_PROVIDER_TIMEOUT", "AI provider request timed out.")
+	case errors.Is(err, ErrProviderUnavailable):
+		logAIFailure(r, err)
+		model.SendJSONError(w, r, http.StatusServiceUnavailable, "AI_PROVIDER_UNAVAILABLE", "AI providers are currently unavailable. Please retry later.")
 	default:
+		logAIFailure(r, err)
 		model.SendJSONError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "An error occurred processing the request")
 	}
+}
+
+// logAIFailure records server-side failures. Error chains carry provider, status and a bounded
+// upstream snippet only; prompts and keys are never part of them.
+func logAIFailure(r *http.Request, err error) {
+	slog.Error("ai_request_failed", slog.String("path", r.URL.Path), slog.String("error", err.Error()))
 }

@@ -2,7 +2,9 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -70,12 +72,12 @@ func (r *Router) Complete(ctx context.Context, req CompletionRequest) (*Completi
 	}
 	r.mu.RUnlock()
 
-	var lastErr error
+	var failures []error
 
 	for _, modelID := range modelsToTry {
 		modelInfo, ok := r.registry.Get(modelID)
 		if !ok {
-			lastErr = fmt.Errorf("%w: %s", ErrModelNotFound, modelID)
+			failures = append(failures, fmt.Errorf("%w: %s", ErrModelNotFound, modelID))
 			continue
 		}
 
@@ -84,7 +86,7 @@ func (r *Router) Complete(ctx context.Context, req CompletionRequest) (*Completi
 		r.mu.RUnlock()
 
 		if !hasProvider {
-			lastErr = fmt.Errorf("%w: provider %s for model %s", ErrProviderUnavailable, modelInfo.ProviderID, modelID)
+			failures = append(failures, fmt.Errorf("%w: provider %s for model %s", ErrProviderNotConfigured, modelInfo.ProviderID, modelID))
 			continue
 		}
 
@@ -96,7 +98,7 @@ func (r *Router) Complete(ctx context.Context, req CompletionRequest) (*Completi
 		cancel()
 
 		if err == nil {
-			// Calculate cost accurately using registry
+			result.Model = modelID
 			cost, costErr := r.registry.CalculateCostMicroUSD(modelID, result.Usage.InputTokens, result.Usage.OutputTokens)
 			if costErr == nil {
 				result.Usage.CostMicroUSD = cost
@@ -104,13 +106,69 @@ func (r *Router) Complete(ctx context.Context, req CompletionRequest) (*Completi
 			return result, nil
 		}
 
-		lastErr = err
+		// Never log prompts or keys: only the model, provider and error class.
+		slog.Warn("ai_provider_attempt_failed",
+			slog.String("model", modelID),
+			slog.String("provider", modelInfo.ProviderID),
+			slog.String("class", failureClass(err).Error()),
+		)
+		failures = append(failures, err)
+		if ctx.Err() != nil {
+			break // caller gave up; do not burn quota on further fallbacks
+		}
 	}
 
-	if lastErr == nil {
-		lastErr = ErrProviderUnavailable
+	return nil, fmt.Errorf("%w: all providers in fallback chain failed: %v", classifyFailures(failures), errors.Join(failures...))
+}
+
+// failureClass returns the sentinel that best describes a single provider failure.
+func failureClass(err error) error {
+	for _, sentinel := range []error{
+		ErrProviderNotConfigured, ErrModelNotFound, ErrProviderQuotaExhausted, ErrProviderOverloaded,
+		ErrUnauthorizedProvider, ErrProviderTimeout, ErrInvalidStructuredOutput,
+	} {
+		if errors.Is(err, sentinel) {
+			return sentinel
+		}
 	}
-	return nil, fmt.Errorf("%w: all providers in fallback chain failed: %v", ErrProviderUnavailable, lastErr)
+	return ErrProviderUnavailable
+}
+
+// classifyFailures reduces every attempt in a fallback chain to one truthful sentinel.
+// Models without a configured provider are ignored unless nothing else was attempted.
+func classifyFailures(failures []error) error {
+	var attempted []error
+	for _, err := range failures {
+		class := failureClass(err)
+		if class != ErrProviderNotConfigured && class != ErrModelNotFound {
+			attempted = append(attempted, class)
+		}
+	}
+	if len(attempted) == 0 {
+		return ErrProviderNotConfigured
+	}
+	all := func(ok func(error) bool) bool {
+		for _, c := range attempted {
+			if !ok(c) {
+				return false
+			}
+		}
+		return true
+	}
+	switch {
+	case all(func(c error) bool { return c == ErrProviderQuotaExhausted }):
+		return ErrProviderQuotaExhausted
+	case all(func(c error) bool { return c == ErrProviderQuotaExhausted || c == ErrProviderOverloaded }):
+		return ErrProviderOverloaded
+	case all(func(c error) bool { return c == ErrUnauthorizedProvider }):
+		return ErrUnauthorizedProvider
+	case all(func(c error) bool { return c == ErrProviderTimeout }):
+		return ErrProviderTimeout
+	case all(func(c error) bool { return c == ErrInvalidStructuredOutput }):
+		return ErrInvalidStructuredOutput
+	default:
+		return ErrProviderUnavailable
+	}
 }
 
 // Stream initiates a streaming completion with timeout.
@@ -125,7 +183,7 @@ func (r *Router) Stream(ctx context.Context, req CompletionRequest) (<-chan Stre
 	r.mu.RUnlock()
 
 	if !hasProvider {
-		return nil, fmt.Errorf("%w: provider %s for model %s", ErrProviderUnavailable, modelInfo.ProviderID, req.Model)
+		return nil, fmt.Errorf("%w: provider %s for model %s", ErrProviderNotConfigured, modelInfo.ProviderID, req.Model)
 	}
 
 	return provider.Stream(ctx, req)

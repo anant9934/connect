@@ -31,8 +31,15 @@ var (
 	// ErrUnauthorizedProvider is returned when provider credentials or keys are rejected (HTTP 401/403).
 	ErrUnauthorizedProvider = errors.New("ai provider authorization failed")
 
-	// ErrProviderOverloaded is returned when provider returns 429 (rate limit) or 503 (overloaded).
-	ErrProviderOverloaded = errors.New("ai provider capacity exhausted or overloaded")
+	// ErrProviderOverloaded is returned when a provider rate-limits the request (short-window 429).
+	ErrProviderOverloaded = errors.New("ai provider rate limit reached")
+
+	// ErrProviderNotConfigured is returned when no credentials are configured for any provider
+	// able to serve the request.
+	ErrProviderNotConfigured = errors.New("ai provider not configured")
+
+	// ErrProviderQuotaExhausted is returned when a provider reports a daily or credit quota is used up.
+	ErrProviderQuotaExhausted = errors.New("ai provider quota exhausted")
 
 	// ErrProviderTimeout is returned when provider times out.
 	ErrProviderTimeout = errors.New("ai provider request timed out")
@@ -69,14 +76,14 @@ type CompletionRequest struct {
 
 // CompletionResult is a provider-neutral response from text generation.
 type CompletionResult struct {
-	Provider       string            `json:"provider"`
-	Model          string            `json:"model"`
-	Content        string            `json:"content"`
-	Usage          Usage             `json:"usage"`
-	Latency        time.Duration     `json:"latency"`
-	FinishReason   string            `json:"finishReason"` // "stop", "length", "filter", "mock_simulation"
-	IsMock         bool              `json:"isMock,omitempty"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
+	Provider     string            `json:"provider"`
+	Model        string            `json:"model"`
+	Content      string            `json:"content"`
+	Usage        Usage             `json:"usage"`
+	Latency      time.Duration     `json:"latency"`
+	FinishReason string            `json:"finishReason"` // "stop", "length", "filter", "mock_simulation"
+	IsMock       bool              `json:"isMock,omitempty"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
 }
 
 // StreamChunk represents a streamed chunk of an AI completion.
