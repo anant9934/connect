@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tathastu/connect/services/api/internal/ai"
 	"github.com/tathastu/connect/services/api/internal/attendance"
 	"github.com/tathastu/connect/services/api/internal/audit"
 	"github.com/tathastu/connect/services/api/internal/auth"
@@ -243,14 +244,27 @@ func main() {
 	var notificationsHandler *notifications.Handler
 	var meetingsHandler *meetings.Handler
 	var labHandler *lab.Handler
+	var aiHandler *ai.Handler
+	var aiService *ai.Service
 	if db != nil {
 		institutionHandler = institution.NewHandler(db.Pool, auditService)
 		interactionHandler = interaction.NewHandler(db.Pool, roomService, limiter, auditService)
 		notificationsHandler = notifications.NewHandler(db.Pool)
 		meetingsHandler = meetings.NewHandler(db.Pool, cfg.PublicAppOrigin)
 		labHandler = lab.NewHandler(db.Pool, auditService)
+
+		aiRegistry := ai.NewDefaultModelRegistry()
+		aiRouter := ai.NewRouter(aiRegistry, nil)
+		aiMock := ai.NewMockProvider("mock")
+		aiRouter.RegisterProvider(aiMock)
+		aiService = ai.NewService(aiRouter, aiRegistry, limiter, ai.ServiceConfig{
+			DefaultModel:     "gemini-2.0-flash",
+			DefaultFastModel: "gemini-1.5-flash",
+			RateLimitRPM:     cfg.RateLimitRPS * 60,
+		})
+		aiHandler = ai.NewHandler(db.Pool, aiService)
 	}
-	router := server.BuildRouter(cfg, logger, limiter, healthHandler, systemHandler, assertionHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler, livekitWebhook, institutionHandler, interactionHandler, notificationsHandler, meetingsHandler, avatars.NewHandler(authService, filesStorage), labHandler)
+	router := server.BuildRouter(cfg, logger, limiter, healthHandler, systemHandler, assertionHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler, livekitWebhook, institutionHandler, interactionHandler, notificationsHandler, meetingsHandler, avatars.NewHandler(authService, filesStorage), labHandler, aiHandler)
 	srv := server.New(cfg, logger, router)
 
 	// 7. Initialize In-Process Background Worker (if enabled)
@@ -273,6 +287,9 @@ func main() {
 
 		workerRegistry := worker.NewRegistry()
 		worker.RegisterDefaultHandlers(workerRegistry, workerDB.Pool, filesStorage, logger)
+		if aiService != nil {
+			ai.RegisterAIHandlers(workerRegistry, workerDB.Pool, aiService, ai.NewRepository(), logger)
+		}
 
 		var err error
 		workerRunner, err = worker.NewRunner(workerDB.Pool, workerRegistry, logger, runnerCfg)

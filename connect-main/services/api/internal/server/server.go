@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/tathastu/connect/services/api/internal/ai"
 	"github.com/tathastu/connect/services/api/internal/auth"
 	"github.com/tathastu/connect/services/api/internal/avatars"
 	"github.com/tathastu/connect/services/api/internal/config"
@@ -52,6 +53,7 @@ func BuildRouter(
 	meetingsHandler *meetings.Handler,
 	avatarsHandler *avatars.Handler,
 	labHandler *lab.Handler,
+	aiHandler ...*ai.Handler,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -145,6 +147,19 @@ func BuildRouter(
 				g.Use(appmw.CSRFProtection(cfg.CORSAllowedOrigins))
 				g.Use(appmw.RequireAuth(authService))
 				labHandler.RegisterRoutes(g)
+			})
+		}
+
+		// AI Learning Intelligence Routes
+		var activeAIHandler *ai.Handler
+		if len(aiHandler) > 0 {
+			activeAIHandler = aiHandler[0]
+		}
+		if activeAIHandler != nil && authService != nil {
+			api.Group(func(g chi.Router) {
+				g.Use(appmw.CSRFProtection(cfg.CORSAllowedOrigins))
+				g.Use(appmw.RequireAuth(authService))
+				activeAIHandler.RegisterRoutes(g)
 			})
 		}
 

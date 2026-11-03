@@ -27,14 +27,31 @@ var (
 
 	// ErrInvalidStructuredOutput is returned when an AI completion fails schema validation.
 	ErrInvalidStructuredOutput = errors.New("ai completion failed schema validation")
+
+	// ErrUnauthorizedProvider is returned when provider credentials or keys are rejected (HTTP 401/403).
+	ErrUnauthorizedProvider = errors.New("ai provider authorization failed")
+
+	// ErrProviderOverloaded is returned when provider returns 429 (rate limit) or 503 (overloaded).
+	ErrProviderOverloaded = errors.New("ai provider capacity exhausted or overloaded")
+
+	// ErrProviderTimeout is returned when provider times out.
+	ErrProviderTimeout = errors.New("ai provider request timed out")
+
+	// ErrNonFreeModelBlocked is returned when an organization in free_only budget mode attempts to call a paid model.
+	ErrNonFreeModelBlocked = errors.New("paid model blocked: organization is configured in free_only budget mode")
+
+	// ErrModelNotAllowed is returned when a requested model is not in the organization's allowed models list.
+	ErrModelNotAllowed = errors.New("model not permitted by organization policy")
 )
 
-// Usage tracks tokens consumed by an AI operation.
+// Usage tracks tokens consumed by an AI operation with separate estimated and billed costs.
 type Usage struct {
-	InputTokens  int   `json:"inputTokens"`
-	OutputTokens int   `json:"outputTokens"`
-	TotalTokens  int   `json:"totalTokens"`
-	CostMicroUSD int64 `json:"costMicroUSD"`
+	InputTokens           int   `json:"inputTokens"`
+	OutputTokens          int   `json:"outputTokens"`
+	TotalTokens           int   `json:"totalTokens"`
+	CostMicroUSD          int64 `json:"costMicroUSD"`          // backward-compat: mirrors EstimatedCostMicroUSD
+	EstimatedCostMicroUSD int64 `json:"estimatedCostMicroUSD"` // provider theoretical cost
+	BilledCostMicroUSD    int64 `json:"billedCostMicroUSD"`    // actual amount billed to organization (0 for free tier)
 }
 
 // CompletionRequest is a provider-neutral request for text generation.

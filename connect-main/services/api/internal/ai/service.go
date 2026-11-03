@@ -19,16 +19,15 @@ type ServiceConfig struct {
 
 // Service is the primary interface for AI capabilities across Connect.
 type Service struct {
-	router    *Router
-	registry  *ModelRegistry
-	sanitizer *Sanitizer
-	validator *Validator
-	limiter   ratelimit.Limiter
-	cfg       ServiceConfig
+	router       *Router
+	registry     *ModelRegistry
+	sanitizer    *Sanitizer
+	validator    *Validator
+	limiter      ratelimit.Limiter
+	cfg          ServiceConfig
+	policyEngine *PolicyEngine
 
-	mu           sync.RWMutex
-	orgSpendMap  map[string]int64 // orgID -> micro-USD spend this month
-	orgBudgetMap map[string]int64 // orgID -> monthly spend limit in micro-USD
+	mu sync.RWMutex
 }
 
 // NewService constructs a fully wired AI service.
@@ -48,6 +47,8 @@ func NewService(
 		cfg.RateLimitRPM = 30 // Conservative default for free tier
 	}
 
+	pe := NewPolicyEngine(registry)
+
 	return &Service{
 		router:       router,
 		registry:     registry,
@@ -55,31 +56,37 @@ func NewService(
 		validator:    NewValidator(),
 		limiter:      limiter,
 		cfg:          cfg,
-		orgSpendMap:  make(map[string]int64),
-		orgBudgetMap: make(map[string]int64),
+		policyEngine: pe,
 	}
 }
 
-// SetOrgBudget sets a custom monthly budget in micro-USD for an organization.
+// PolicyEngine returns the policy engine for org budget and permission management.
+func (s *Service) PolicyEngine() *PolicyEngine {
+	return s.policyEngine
+}
+
+// SetOrgBudget sets a custom monthly budget in micro-USD for an organization under capped mode.
 func (s *Service) SetOrgBudget(orgID string, limitMicroUSD int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.orgBudgetMap[orgID] = limitMicroUSD
+	if limitMicroUSD > 0 {
+		_ = s.policyEngine.SetPolicy(&OrgPolicy{
+			OrganizationID:        orgID,
+			BudgetMode:            BudgetModeCapped,
+			MonthlyBudgetMicroUSD: limitMicroUSD,
+			AllowedModels:         append([]string(nil), DefaultAllowedModels...),
+			BillingCycleAnchor:    time.Now().UTC().Truncate(24 * time.Hour),
+		})
+	} else {
+		_ = s.policyEngine.SetPolicy(NewDefaultOrgPolicy(orgID))
+	}
 }
 
 // GetOrgSpend retrieves the total spend for an organization this month.
 func (s *Service) GetOrgSpend(orgID string) (spend int64, budget int64) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	spend = s.orgSpendMap[orgID]
-	budget = s.orgBudgetMap[orgID]
-	if budget == 0 {
-		budget = s.cfg.MonthlyBudgetMicro
-	}
-	return spend, budget
+	policy := s.policyEngine.GetPolicy(orgID)
+	return policy.CurrentSpendMicroUSD, policy.MonthlyBudgetMicroUSD
 }
 
-func (s *Service) checkLimits(ctx context.Context, orgID, userID string) error {
+func (s *Service) checkLimits(ctx context.Context, orgID, userID, model string, estimatedTokens int) error {
 	// 1. Rate Limit Check
 	if s.limiter != nil {
 		key := fmt.Sprintf("ai:ratelimit:org:%s", orgID)
@@ -89,35 +96,22 @@ func (s *Service) checkLimits(ctx context.Context, orgID, userID string) error {
 		}
 	}
 
-	// 2. Spend Limit Check
-	s.mu.RLock()
-	spend := s.orgSpendMap[orgID]
-	budget := s.orgBudgetMap[orgID]
-	s.mu.RUnlock()
-
-	if budget == 0 {
-		budget = s.cfg.MonthlyBudgetMicro
-	}
-
-	if budget > 0 && spend >= budget {
-		return ErrBudgetExceeded
+	// 2. Policy and Spend Limit Check via PolicyEngine
+	_, err := s.policyEngine.AuthorizeRequest(ctx, orgID, model, estimatedTokens)
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func (s *Service) recordSpend(orgID string, costMicroUSD int64) {
-	if costMicroUSD <= 0 {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.orgSpendMap[orgID] += costMicroUSD
+func (s *Service) recordSpend(orgID string, billedMicroUSD int64) {
+	s.policyEngine.CommitSpend(orgID, billedMicroUSD)
 }
 
 // SummarizeLecture generates a structured summary from an authoritative classroom transcript.
 func (s *Service) SummarizeLecture(ctx context.Context, orgID, userID, courseCode, transcriptText string) (*LectureSummary, *Usage, error) {
-	if err := s.checkLimits(ctx, orgID, userID); err != nil {
+	if err := s.checkLimits(ctx, orgID, userID, s.cfg.DefaultFastModel, 2048); err != nil {
 		return nil, nil, err
 	}
 
@@ -152,7 +146,15 @@ Return only valid JSON.`
 		return nil, nil, err
 	}
 
-	s.recordSpend(orgID, res.Usage.CostMicroUSD)
+	res.Usage.EstimatedCostMicroUSD = res.Usage.CostMicroUSD
+	modelInfo, _ := s.registry.GetModel(req.Model)
+	if modelInfo != nil && modelInfo.IsFreeTierEligible {
+		res.Usage.BilledCostMicroUSD = 0
+	} else {
+		res.Usage.BilledCostMicroUSD = res.Usage.CostMicroUSD
+	}
+
+	s.recordSpend(orgID, res.Usage.BilledCostMicroUSD)
 
 	summary, err := s.validator.ValidateLectureSummary(res.Content)
 	if err != nil {
@@ -164,7 +166,7 @@ Return only valid JSON.`
 
 // GeneratePracticeQuiz creates multiple-choice revision questions for students.
 func (s *Service) GeneratePracticeQuiz(ctx context.Context, orgID, userID, courseTitle, topic string, count int) (*PracticeQuiz, *Usage, error) {
-	if err := s.checkLimits(ctx, orgID, userID); err != nil {
+	if err := s.checkLimits(ctx, orgID, userID, s.cfg.DefaultModel, 4096); err != nil {
 		return nil, nil, err
 	}
 
@@ -210,7 +212,15 @@ Return only valid JSON.`
 		return nil, nil, err
 	}
 
-	s.recordSpend(orgID, res.Usage.CostMicroUSD)
+	res.Usage.EstimatedCostMicroUSD = res.Usage.CostMicroUSD
+	modelInfo, _ := s.registry.GetModel(req.Model)
+	if modelInfo != nil && modelInfo.IsFreeTierEligible {
+		res.Usage.BilledCostMicroUSD = 0
+	} else {
+		res.Usage.BilledCostMicroUSD = res.Usage.CostMicroUSD
+	}
+
+	s.recordSpend(orgID, res.Usage.BilledCostMicroUSD)
 
 	quiz, err := s.validator.ValidatePracticeQuiz(res.Content)
 	if err != nil {
@@ -222,7 +232,7 @@ Return only valid JSON.`
 
 // GenerateFlashcards creates a revision deck for a study topic.
 func (s *Service) GenerateFlashcards(ctx context.Context, orgID, userID, deckTitle, notesText string) (*FlashcardSet, *Usage, error) {
-	if err := s.checkLimits(ctx, orgID, userID); err != nil {
+	if err := s.checkLimits(ctx, orgID, userID, s.cfg.DefaultFastModel, 2048); err != nil {
 		return nil, nil, err
 	}
 
@@ -260,7 +270,15 @@ Return only valid JSON.`
 		return nil, nil, err
 	}
 
-	s.recordSpend(orgID, res.Usage.CostMicroUSD)
+	res.Usage.EstimatedCostMicroUSD = res.Usage.CostMicroUSD
+	modelInfo, _ := s.registry.GetModel(req.Model)
+	if modelInfo != nil && modelInfo.IsFreeTierEligible {
+		res.Usage.BilledCostMicroUSD = 0
+	} else {
+		res.Usage.BilledCostMicroUSD = res.Usage.CostMicroUSD
+	}
+
+	s.recordSpend(orgID, res.Usage.BilledCostMicroUSD)
 
 	cards, err := s.validator.ValidateFlashcards(res.Content)
 	if err != nil {

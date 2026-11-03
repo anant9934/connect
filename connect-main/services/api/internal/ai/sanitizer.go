@@ -16,7 +16,10 @@ var (
 		regexp.MustCompile(`(?i)\bignore\s+(?:all\s+)?previous\s+instructions\b`),
 		regexp.MustCompile(`(?i)\bdisregard\s+(?:all\s+)?prior\s+(?:system\s+)?prompts?\b`),
 		regexp.MustCompile(`(?i)\bsystem\s+override\b`),
+		regexp.MustCompile(`(?i)\b(?:enable|activate|switch\s+to)\s+developer\s+mode\b`),
 		regexp.MustCompile(`(?i)\byou\s+are\s+now\s+(?:in\s+)?(?:developer|dan|jailbreak)\s+mode\b`),
+		regexp.MustCompile(`(?i)\byou\s+are\s+now\s+(?:unrestricted|jailbroken)\b`),
+		regexp.MustCompile(`(?i)\bbypass\s+(?:all\s+)?(?:ethical|safety|system)\s+filters?\b`),
 		regexp.MustCompile(`(?i)\bprint\s+(?:your\s+)?system\s+prompt\b`),
 		regexp.MustCompile(`(?i)\brepeat\s+the\s+words\s+above\b`),
 	}

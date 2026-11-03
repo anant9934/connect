@@ -119,6 +119,17 @@ func (r *ModelRegistry) Get(modelID string) (ModelInfo, bool) {
 	return m, ok
 }
 
+// GetModel retrieves model metadata or returns ErrModelNotFound.
+func (r *ModelRegistry) GetModel(modelID string) (*ModelInfo, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	m, ok := r.models[modelID]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrModelNotFound, modelID)
+	}
+	return &m, nil
+}
+
 // List returns all registered models.
 func (r *ModelRegistry) List() []ModelInfo {
 	r.mu.RLock()

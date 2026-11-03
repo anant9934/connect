@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tathastu/connect/services/api/internal/ai"
 	"github.com/tathastu/connect/services/api/internal/config"
 	"github.com/tathastu/connect/services/api/internal/database"
 	"github.com/tathastu/connect/services/api/internal/files"
@@ -80,6 +81,16 @@ func main() {
 	}
 	registry := worker.NewRegistry()
 	worker.RegisterDefaultHandlers(registry, db.Pool, filesStorage, logger)
+
+	aiRegistry := ai.NewDefaultModelRegistry()
+	aiRouter := ai.NewRouter(aiRegistry, nil)
+	aiMock := ai.NewMockProvider("mock")
+	aiRouter.RegisterProvider(aiMock)
+	aiService := ai.NewService(aiRouter, aiRegistry, nil, ai.ServiceConfig{
+		DefaultModel:     "gemini-2.0-flash",
+		DefaultFastModel: "gemini-1.5-flash",
+	})
+	ai.RegisterAIHandlers(registry, db.Pool, aiService, ai.NewRepository(), logger)
 
 	// 5. Configure Runner
 	runnerCfg := worker.DefaultRunnerConfig()
