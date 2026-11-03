@@ -33,6 +33,12 @@ let pyodideReadyPromise = (async () => {
   });
   return py;
 })();
+// Tell the page when the runtime is ready (or failed), so the execution time limit
+// only starts once Python is actually able to run.
+pyodideReadyPromise.then(
+  () => self.postMessage({ type: 'ready' }),
+  (err) => self.postMessage({ type: 'load-error', error: (err && err.message) || String(err) }),
+);
 
 self.onmessage = async (e) => {
   const { id, code, stdin } = e.data;
@@ -71,6 +77,11 @@ __builtins__.input = _mock_input
 
 let workerBlobUrl: string | null = null;
 let activeWorker: Worker | null = null;
+let workerReady: Promise<void> | null = null;
+
+// Downloading the runtime (~10 MB) can take far longer than running code, so loading has
+// its own generous limit, separate from the per-run execution limit.
+const RUNTIME_LOAD_TIMEOUT_MS = 90000;
 
 function getWorker(): Worker {
   if (typeof window === 'undefined') {
@@ -83,7 +94,28 @@ function getWorker(): Worker {
   }
 
   if (!activeWorker) {
-    activeWorker = new Worker(workerBlobUrl);
+    const worker = new Worker(workerBlobUrl);
+    activeWorker = worker;
+    workerReady = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timed out downloading the Python runtime')), RUNTIME_LOAD_TIMEOUT_MS);
+      const onMessage = (e: MessageEvent) => {
+        if (e.data?.type === 'ready') {
+          clearTimeout(timer);
+          worker.removeEventListener('message', onMessage);
+          resolve();
+        } else if (e.data?.type === 'load-error') {
+          clearTimeout(timer);
+          worker.removeEventListener('message', onMessage);
+          reject(new Error(e.data.error || 'failed to load the Python runtime'));
+        }
+      };
+      worker.addEventListener('message', onMessage);
+      worker.addEventListener('error', (err) => {
+        clearTimeout(timer);
+        reject(new Error(err.message || 'failed to start the Python runtime'));
+      }, { once: true });
+    });
+    workerReady.catch(() => undefined); // handled by callers; avoid unhandled rejection noise
   }
 
   return activeWorker;
@@ -97,6 +129,16 @@ function terminateActiveWorker() {
       // ignore
     }
     activeWorker = null;
+    workerReady = null;
+  }
+}
+
+/** Starts downloading the Python runtime in the background so the first Run is fast. */
+export function preloadPython(): void {
+  try {
+    getWorker();
+  } catch {
+    // Not in a browser; nothing to preload.
   }
 }
 
@@ -108,28 +150,33 @@ export async function runPythonCode(
   const startTime = performance.now();
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-  return new Promise<PythonExecutionResult>((resolve) => {
-    let worker: Worker;
-    try {
-      worker = getWorker();
-    } catch (err: any) {
-      resolve({
-        stdout: '',
-        stderr: `Worker Initialization Error: ${err.message || String(err)}`,
-        durationMs: 0,
-        status: 'error',
-        errorMessage: err.message || String(err),
-      });
-      return;
-    }
+  let worker: Worker;
+  try {
+    worker = getWorker();
+    await workerReady;
+  } catch (err: any) {
+    terminateActiveWorker(); // let the next attempt start a fresh download
+    const msg = `Python runtime could not be loaded (${err?.message || String(err)}). Check your internet connection and press Run again.`;
+    return {
+      stdout: '',
+      stderr: msg,
+      durationMs: Math.round(performance.now() - startTime),
+      status: 'error',
+      errorMessage: msg,
+    };
+  }
 
+  // The runtime is ready: measure and limit only the user's code from here.
+  const execStart = performance.now();
+
+  return new Promise<PythonExecutionResult>((resolve) => {
     let isDone = false;
 
     // Hard timeout timer: terminates the worker thread if it loops infinitely
     const timer = setTimeout(() => {
       if (isDone) return;
       isDone = true;
-      const durationMs = Math.round(performance.now() - startTime);
+      const durationMs = Math.round(performance.now() - execStart);
 
       // Kill the spinning thread immediately
       terminateActiveWorker();
@@ -148,7 +195,7 @@ export async function runPythonCode(
       if (e.data && e.data.id === requestId) {
         isDone = true;
         clearTimeout(timer);
-        const durationMs = Math.round(performance.now() - startTime);
+        const durationMs = Math.round(performance.now() - execStart);
 
         if (e.data.status === 'success') {
           const stdout = clampOutput(e.data.stdout);
@@ -177,7 +224,7 @@ export async function runPythonCode(
       if (isDone) return;
       isDone = true;
       clearTimeout(timer);
-      const durationMs = Math.round(performance.now() - startTime);
+      const durationMs = Math.round(performance.now() - execStart);
       terminateActiveWorker();
 
       const errMsg = clampOutput(err.message || 'Worker thread execution error');

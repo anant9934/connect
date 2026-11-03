@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import type { SupportedLanguage } from '../types';
 import { STARTER_CODE_BY_LANGUAGE } from '../runtimes/starterTemplates';
-import { runPythonCode } from '../runtimes/pythonRunner';
+import { runPythonCode, preloadPython } from '../runtimes/pythonRunner';
 import { executeSqlQuery, type SqlQueryResult } from '../runtimes/sqlRunner';
 import { buildSandboxedHtmlDoc } from '../runtimes/htmlPreview';
 
@@ -46,6 +46,11 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   height = '520px',
 }) => {
   const [language, setLanguage] = useState<SupportedLanguage>(initialLanguage);
+
+  // Start downloading the Python runtime as soon as Python is selected, so Run is fast.
+  useEffect(() => {
+    if (language === 'python') preloadPython();
+  }, [language]);
   const [code, setCode] = useState<string>(initialCode || STARTER_CODE_BY_LANGUAGE[initialLanguage] || '');
 
   // HTML/CSS/JS sub-tabs if web preview mode

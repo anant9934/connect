@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   FileCheck2,
   Play,
@@ -17,7 +17,7 @@ import Link from 'next/link';
 import type { LabAssignment, SupportedLanguage, TestCaseResult } from '../types';
 import { CodeEditor } from './CodeEditor';
 import { submitAssignment } from '../api';
-import { runPythonCode } from '../runtimes/pythonRunner';
+import { runPythonCode, preloadPython } from '../runtimes/pythonRunner';
 import { executeSqlQuery } from '../runtimes/sqlRunner';
 
 interface AssignmentSolverProps {
@@ -30,6 +30,11 @@ export const AssignmentSolver: React.FC<AssignmentSolverProps> = ({ assignment, 
     ? (assignment.allowed_languages as SupportedLanguage[])
     : ['cpp', 'python', 'java'];
   const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>(allowed[0]);
+
+  // Start downloading the Python runtime as soon as Python is selected, so Run is fast.
+  useEffect(() => {
+    if (selectedLanguage === 'python') preloadPython();
+  }, [selectedLanguage]);
 
   const initialStarter =
     typeof assignment.starter_code === 'object' && assignment.starter_code !== null
