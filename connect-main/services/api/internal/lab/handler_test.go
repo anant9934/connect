@@ -638,6 +638,17 @@ func TestHandler_ErrorClassifierPrecision(t *testing.T) {
 			sensitiveTokens: []string{"42501", testUserUUID.String(), testOrgUUID.String()},
 		},
 		{
+			name: "42501 row level security WITH CHECK violation",
+			err: &pgconn.PgError{
+				Code:      "42501",
+				Message:   `new row violates row-level security policy for table "lab_assignments"`,
+				TableName: "lab_assignments",
+			},
+			expectedStatus:  http.StatusForbidden,
+			expectedError:   "you do not have permission to modify this resource",
+			sensitiveTokens: []string{"42501", "lab_assignments", "row-level security"},
+		},
+		{
 			name: "Unexpected 42501 system privilege failure - table permission denied",
 			err: &pgconn.PgError{
 				Code:      "42501",

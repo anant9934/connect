@@ -117,6 +117,13 @@ func isTenantMembershipDenial(pgErr *pgconn.PgError) bool {
 		strings.EqualFold(msg, "unauthorized tenant")
 }
 
+// isRowSecurityViolation reports a write refused by a row level security WITH CHECK policy,
+// for example faculty writing to a course they do not manage. This is a normal authorization
+// outcome, unlike a missing GRANT ("permission denied for table"), which stays a 500.
+func isRowSecurityViolation(pgErr *pgconn.PgError) bool {
+	return strings.HasPrefix(strings.TrimSpace(pgErr.Message), "new row violates row-level security policy")
+}
+
 // isRecognizedDomainValidationError checks whether a generic P0001 exception represents
 // a known, documented business validation failure from academic/tenancy triggers.
 func isRecognizedDomainValidationError(pgErr *pgconn.PgError) bool {
@@ -195,6 +202,10 @@ func (h *Handler) handleLabError(w http.ResponseWriter, r *http.Request, err err
 			// fail safely as generic 500 Internal Server Error to avoid concealing DB configuration errors.
 			if isTenantMembershipDenial(pgErr) {
 				writeError(w, http.StatusForbidden, "you do not have permission to access this organization's resources")
+				return
+			}
+			if isRowSecurityViolation(pgErr) {
+				writeError(w, http.StatusForbidden, "you do not have permission to modify this resource")
 				return
 			}
 			writeError(w, http.StatusInternalServerError, "an unexpected internal error occurred")
