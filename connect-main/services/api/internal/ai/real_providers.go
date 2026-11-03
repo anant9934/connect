@@ -282,6 +282,11 @@ func (p *GeminiProvider) Stream(ctx context.Context, req CompletionRequest) (<-c
 		defer close(out)
 		words := strings.Fields(result.Content)
 		for _, w := range words {
+			// Check cancellation first: when both cases are ready, select picks at random.
+			if err := ctx.Err(); err != nil {
+				out <- StreamChunk{Error: err, IsFinal: true}
+				return
+			}
 			select {
 			case <-ctx.Done():
 				out <- StreamChunk{Error: ctx.Err(), IsFinal: true}
@@ -526,6 +531,11 @@ func (p *OpenAICompatibleProvider) Stream(ctx context.Context, req CompletionReq
 		defer close(out)
 		words := strings.Fields(result.Content)
 		for _, w := range words {
+			// Check cancellation first: when both cases are ready, select picks at random.
+			if err := ctx.Err(); err != nil {
+				out <- StreamChunk{Error: err, IsFinal: true}
+				return
+			}
 			select {
 			case <-ctx.Done():
 				out <- StreamChunk{Error: ctx.Err(), IsFinal: true}
