@@ -38,6 +38,33 @@ const roomPath = (code: string, rest: string) => `/api/v1/rooms/${encodeURICompo
 const post = (path: string, body?: unknown) =>
   apiFetch(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
 
+/** One student's live engagement in a meeting (host and co-host only). */
+export interface LiveEngagement {
+  userId: string;
+  displayName: string;
+  present: boolean;
+  connectedSeconds: number;
+  messages: number;
+  reactions: number;
+  hands: number;
+  doubts: number;
+  pollsTotal: number;
+  pollsAnswered: number;
+  quizPoints: number;
+  codingTotal: number;
+  codingSubmitted: number;
+  visibleSeconds: number;
+  hiddenSeconds: number;
+  reported: boolean;
+  pollsRatio: number | null;
+  codingRatio: number | null;
+  interactionRatio: number | null;
+  focusRatio: number | null;
+  score: number;
+}
+export const getRoomEngagement = async (code: string) =>
+  (await apiFetch<{ students: LiveEngagement[] | null }>(roomPath(code, '/engagement'), { method: 'GET' })).students ?? [];
+
 export const listPolls = (code: string) =>
   apiFetch<{ polls: Poll[]; canManage: boolean }>(roomPath(code, '/polls'), { method: 'GET' });
 export const createPoll = (code: string, poll: NewPoll) => post(roomPath(code, '/polls'), poll);

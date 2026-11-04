@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Code2, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { Activity, BarChart3, Code2, Loader2, Plus, Trash2, X } from 'lucide-react';
 import { ApiError } from '@/lib/api/client';
 import * as classroomApi from '@/features/classroom/api';
 import type { Poll } from '@/features/classroom/api';
@@ -11,9 +11,11 @@ import type { LabAssignment, LabCourse, LabSubmission, SupportedLanguage } from 
 import { AssignmentSolver } from '@/features/lab/components/AssignmentSolver';
 import { buildCodingMarker, parseCodingMarker, type CodingAnnouncement } from '@/features/meeting/codingMarker';
 import type { ChatMessage } from '@/features/chat/types';
+import { EngagementExplainer, EngagementTable } from '@/components/engagement/Engagement';
 
 const POLL_REFRESH_MS = 4000;
 const SUBMISSIONS_REFRESH_MS = 5000;
+const ENGAGEMENT_REFRESH_MS = 10000;
 // Problems announced longer ago than this do not pop up for someone joining late.
 const POPUP_MAX_AGE_MS = 3 * 60 * 60 * 1000;
 
@@ -60,6 +62,7 @@ export const LiveActivity: React.FC<LiveActivityProps> = ({ roomCode, canManage,
 
   const [openProblem, setOpenProblemState] = useState<CodingAnnouncement | null>(null);
   const [showAssign, setShowAssign] = useState(false);
+  const [showEngagement, setShowEngagement] = useState(false);
 
   // ---------- Polls ----------
   const [polls, setPolls] = useState<Poll[]>([]);
@@ -83,7 +86,7 @@ export const LiveActivity: React.FC<LiveActivityProps> = ({ roomCode, canManage,
   const pollSeenKey = `tc_poll_seen_${roomCode}`;
   const [dismissedPolls, setDismissedPolls] = useState<Set<string>>(() => (typeof window === 'undefined' ? new Set() : readSeen(pollSeenKey)));
   // Pop-ups never cover an open coding panel or form; they show once it is closed.
-  const overlayOpen = openProblem !== null || showAssign;
+  const overlayOpen = openProblem !== null || showAssign || showEngagement;
   const activePoll = canManage || overlayOpen ? null : polls.find((p) => !p.closed && !p.myResponse && !dismissedPolls.has(p.id)) ?? null;
   const dismissPoll = (id: string) => {
     const next = new Set(dismissedPolls).add(id);
@@ -135,6 +138,16 @@ export const LiveActivity: React.FC<LiveActivityProps> = ({ roomCode, canManage,
             aria-label="Assign coding problem"
           >
             <Code2 className="w-4 h-4" /> Assign coding problem
+          </button>
+        )}
+        {canManage && (
+          <button
+            type="button"
+            onClick={() => setShowEngagement(true)}
+            className="pointer-events-auto inline-flex items-center gap-2 px-3 py-2 rounded-full bg-white border border-[#E4E2DB] text-[#17151F] text-xs font-semibold shadow-lg hover:bg-[#FAF9FC]"
+            aria-label="Class engagement"
+          >
+            <Activity className="w-4 h-4 text-[#7444E8]" /> Class engagement
           </button>
         )}
         {latestProblem && (
@@ -202,6 +215,12 @@ export const LiveActivity: React.FC<LiveActivityProps> = ({ roomCode, canManage,
         </Drawer>
       )}
 
+      {showEngagement && (
+        <Drawer title="Class engagement" subtitle="Live" onClose={() => setShowEngagement(false)}>
+          <LiveEngagementView roomCode={roomCode} syncTick={syncTick} />
+        </Drawer>
+      )}
+
       {showAssign && (
         <AssignCodingModal
           orgId={orgId}
@@ -215,6 +234,60 @@ export const LiveActivity: React.FC<LiveActivityProps> = ({ roomCode, canManage,
         />
       )}
     </>
+  );
+};
+
+// ---------- Live engagement (host and co-host) ----------
+
+const LiveEngagementView: React.FC<{ roomCode: string; syncTick: number }> = ({ roomCode, syncTick }) => {
+  const [rows, setRows] = useState<classroomApi.LiveEngagement[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const refresh = useCallback(async () => {
+    try {
+      setRows(await classroomApi.getRoomEngagement(roomCode));
+      setError(null);
+    } catch (err) {
+      setError(errorText(err, 'Engagement could not be loaded.'));
+    }
+  }, [roomCode]);
+  useEffect(() => {
+    refresh();
+    const timer = setInterval(refresh, ENGAGEMENT_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [refresh]);
+  useEffect(() => {
+    refresh();
+  }, [syncTick, refresh]);
+
+  if (error) return <p className="p-5 text-sm text-[#B42318]">{error}</p>;
+  if (!rows) return <div className="p-8 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-[#7444E8]" /></div>;
+  const here = rows.filter((r) => r.present).length;
+  const average = rows.length > 0 ? Math.round(rows.reduce((sum, r) => sum + r.score, 0) / rows.length) : null;
+  const low = rows.filter((r) => r.score < 40).length;
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          { id: 'average', label: 'Class average', value: average === null ? '—' : String(average) },
+          { id: 'here', label: 'Here now', value: `${here}/${rows.length}` },
+          { id: 'low', label: 'Low (under 40)', value: String(low) },
+        ].map((stat) => (
+          <div key={stat.id} className="p-3 rounded-xl bg-white border border-[#E4E2DB]">
+            <p data-testid={`live-engagement-${stat.id}`} className="text-xl font-bold text-[#17151F] tabular-nums">{stat.value}</p>
+            <p className="text-xs text-[#5E5A50]">{stat.label}</p>
+          </div>
+        ))}
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-sm text-[#5E5A50]">No students yet. Engagement appears as students join and take part.</p>
+      ) : (
+        <div className="rounded-xl bg-white border border-[#E4E2DB] p-3">
+          <EngagementTable live rows={rows} />
+        </div>
+      )}
+      <p className="text-xs text-[#5E5A50]">Updates live · lowest scores first, so students who may need help stand out.</p>
+      <EngagementExplainer />
+    </div>
   );
 };
 
