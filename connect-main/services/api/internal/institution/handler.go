@@ -978,7 +978,7 @@ func (h *Handler) adminEngagement(w http.ResponseWriter, r *http.Request) {
 		}
 		var qErr error
 		raw, qErr = queryJSON(r.Context(), tx, `
-			SELECT ar.student_user_id AS "studentUserId", u.display_name AS "displayName", count(*) AS sessions,
+			SELECT ar.student_user_id AS "studentUserId", COALESCE(m.display_name, 'Student') AS "displayName", count(*) AS sessions,
 			       count(*) FILTER (WHERE ar.attendance_status IN ('present', 'late')) AS attended,
 			       count(*) FILTER (WHERE ar.attendance_status = 'absent') AS absent,
 			       `+engagementScoreSQL+` AS "engagementScore",
@@ -986,10 +986,11 @@ func (h *Handler) adminEngagement(w http.ResponseWriter, r *http.Request) {
 			       max(cs.scheduled_start) AS "lastClass"
 			FROM attendance_records ar
 			JOIN class_sessions cs ON cs.id = ar.class_session_id AND cs.organization_id = ar.organization_id
-			JOIN users u ON u.id = ar.student_user_id
+			-- Names come from org_members(): row level security on users hides other people.
+			LEFT JOIN connect_auth.org_members($1::uuid) m ON m.user_id = ar.student_user_id
 			WHERE ar.organization_id = $1 AND cs.scheduled_start > now() - interval '30 days'
-			GROUP BY ar.student_user_id, u.display_name
-			ORDER BY "engagementScore" ASC NULLS FIRST, u.display_name`, org)
+			GROUP BY ar.student_user_id, m.display_name
+			ORDER BY "engagementScore" ASC NULLS FIRST, m.display_name`, org)
 		return qErr
 	})
 	if err != nil {
