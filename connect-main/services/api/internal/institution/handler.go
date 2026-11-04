@@ -966,21 +966,37 @@ func (h *Handler) sessionEngagement(w http.ResponseWriter, r *http.Request) {
 const engagementScoreSQL = `round(avg(NULLIF(ar.calculation->'engagement'->>'score', '')::numeric), 1)`
 
 // adminEngagement lists every student's engagement and attendance over the last 30 days, lowest
-// engagement first, for institution overseers only.
+// engagement first. Only institution administrators, auditors and platform admins may see it;
+// row level security still limits the rows to this organization.
 func (h *Handler) adminEngagement(w http.ResponseWriter, r *http.Request) {
-	h.list(w, r, "students", `
-		SELECT ar.student_user_id AS "studentUserId", u.display_name AS "displayName", count(*) AS sessions,
-		       count(*) FILTER (WHERE ar.attendance_status IN ('present', 'late')) AS attended,
-		       count(*) FILTER (WHERE ar.attendance_status = 'absent') AS absent,
-		       `+engagementScoreSQL+` AS "engagementScore",
-		       round(avg(ar.score), 3) AS "attendanceScore",
-		       max(cs.scheduled_start) AS "lastClass"
-		FROM attendance_records ar
-		JOIN class_sessions cs ON cs.id = ar.class_session_id AND cs.organization_id = ar.organization_id
-		JOIN users u ON u.id = ar.student_user_id
-		WHERE ar.organization_id = $1 AND cs.scheduled_start > now() - interval '30 days' AND connect_auth.can_oversee_org($1::uuid)
-		GROUP BY ar.student_user_id, u.display_name
-		ORDER BY "engagementScore" ASC NULLS FIRST, u.display_name`, chi.URLParam(r, "org"))
+	org := chi.URLParam(r, "org")
+	var raw json.RawMessage
+	err := h.inOrg(r, func(tx pgx.Tx, auth *database.AuthContext) error {
+		overseer := auth.IsSuperAdmin || (auth.Role != nil && (*auth.Role == "institution_admin" || *auth.Role == "institution_auditor"))
+		if !overseer {
+			return errNotPermitted
+		}
+		var qErr error
+		raw, qErr = queryJSON(r.Context(), tx, `
+			SELECT ar.student_user_id AS "studentUserId", u.display_name AS "displayName", count(*) AS sessions,
+			       count(*) FILTER (WHERE ar.attendance_status IN ('present', 'late')) AS attended,
+			       count(*) FILTER (WHERE ar.attendance_status = 'absent') AS absent,
+			       `+engagementScoreSQL+` AS "engagementScore",
+			       round(avg(ar.score), 3) AS "attendanceScore",
+			       max(cs.scheduled_start) AS "lastClass"
+			FROM attendance_records ar
+			JOIN class_sessions cs ON cs.id = ar.class_session_id AND cs.organization_id = ar.organization_id
+			JOIN users u ON u.id = ar.student_user_id
+			WHERE ar.organization_id = $1 AND cs.scheduled_start > now() - interval '30 days'
+			GROUP BY ar.student_user_id, u.display_name
+			ORDER BY "engagementScore" ASC NULLS FIRST, u.display_name`, org)
+		return qErr
+	})
+	if err != nil {
+		sendError(w, r, err)
+		return
+	}
+	model.SendJSON(w, http.StatusOK, map[string]any{"students": raw})
 }
 
 func (h *Handler) listPolicies(w http.ResponseWriter, r *http.Request) {
