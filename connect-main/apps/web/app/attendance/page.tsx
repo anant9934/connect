@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { EngagementExplainer, EngagementTable, ScoreBadge } from '@/components/engagement/Engagement';
 import Link from 'next/link';
 import { ArrowLeft, Loader2 } from 'lucide-react';
@@ -78,15 +78,23 @@ export default function AttendancePage() {
     api.listMembers(orgId).then(setMembers).catch(() => setMembers([]));
   }, [orgId, isStaff]);
 
+  // Only the response for the batch currently selected may update the page, so a slow
+  // earlier request can never show one course's numbers under another course's name.
+  const latestBatch = useRef('');
   const load = useCallback(async () => {
     if (!orgId || !batchId) return;
+    const requested = `${orgId}:${batchId}`;
+    latestBatch.current = requested;
     setEngagement(null);
+    setStudents([]);
+    setClasses([]);
     try {
       const [nextStudents, nextClasses] = await Promise.all([api.getStudentSummaries(orgId, batchId), api.getClassSummaries(orgId, batchId)]);
+      if (latestBatch.current !== requested) return;
       setStudents(nextStudents);
       setClasses(nextClasses);
     } catch (err) {
-      fail(err, 'Could not load attendance.');
+      if (latestBatch.current === requested) fail(err, 'Could not load attendance.');
     }
   }, [orgId, batchId]);
 
