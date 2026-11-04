@@ -54,7 +54,8 @@ function EngagementSection({ rows, showAll, onToggleAll }: { rows: api.AdminEnga
   const average = scored.length > 0 ? scored.reduce((sum, r) => sum + (r.engagementScore as number), 0) / scored.length : null;
   const count = (band: string) => rows.filter((r) => engagementBand(r.engagementScore) === band).length;
   const attention = rows.filter(needsAttention).slice(0, 10);
-  const top = [...scored].sort((a, b) => (b.engagementScore as number) - (a.engagementScore as number)).slice(0, 5);
+  // Only genuinely engaged students (40+), so low scorers never appear on both lists.
+  const top = scored.filter((r) => (r.engagementScore as number) >= 40).sort((a, b) => (b.engagementScore as number) - (a.engagementScore as number)).slice(0, 5);
   const line = (r: api.AdminEngagementRow) => (
     <li key={r.studentUserId} data-testid="admin-engagement-row" className="flex items-center justify-between gap-2 py-1.5">
       <span className="text-sm text-[#171717] truncate">{r.displayName}</span>
@@ -88,7 +89,7 @@ function EngagementSection({ rows, showAll, onToggleAll }: { rows: api.AdminEnga
             </div>
             <div>
               <h3 className="text-xs font-semibold text-[#1F6B3B] mb-1">Most engaged</h3>
-              {top.length === 0 ? <p className="text-sm text-[#686868]">No scores yet.</p> : <ul className="divide-y divide-[#E9E9E5]">{top.map(line)}</ul>}
+              {top.length === 0 ? <p className="text-sm text-[#686868]">Nobody has scored 40 or more yet.</p> : <ul className="divide-y divide-[#E9E9E5]">{top.map(line)}</ul>}
             </div>
           </div>
           <button type="button" onClick={onToggleAll} className="text-sm font-semibold text-[#7258E8] underline min-h-[44px]">
