@@ -60,10 +60,15 @@ export default function AttendancePage() {
     setBatchId('');
     setBatches([]);
     setError(null);
-    api.listBatches(orgId)
-      .then((list) => {
-        setBatches(list);
-        if (list.length > 0) setBatchId(list[0].id);
+    // Batch names repeat across courses ("Section A"), so label each batch with its course.
+    Promise.all([api.listBatches(orgId), api.listCourses(orgId).catch(() => [] as api.Course[])])
+      .then(([list, courses]) => {
+        const codeOf = new Map(courses.map((c) => [c.id, c.code]));
+        const labelled = list
+          .map((b) => ({ ...b, name: codeOf.has(b.courseId) ? `${codeOf.get(b.courseId)} · ${b.name}` : b.name }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setBatches(labelled);
+        if (labelled.length > 0) setBatchId(labelled[0].id);
       })
       .catch((err) => fail(err, 'Could not load batches.'));
   }, [orgId]);
