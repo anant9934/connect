@@ -204,11 +204,25 @@ func NewAttendanceReconcileHandler(pool *pgxpool.Pool, logger *slog.Logger) Hand
 			cutoff = data.Before
 		}
 
-		// Phase 1: Authoritatively close all open participant intervals for the room
+		// Phase 1: Close every open participant interval in the room and its breakouts. A browser
+		// that crashed never called /leave, so an open interval ends at the earliest of: the same
+		// person's next join, their last activity heartbeat plus 60s (when that heartbeat belongs
+		// to this interval), or the cutoff.
 		closeQuery := `
-			UPDATE room_participants
-			SET left_at = $2
-			WHERE room_id = $1 AND left_at IS NULL;
+			UPDATE room_participants rp
+			SET left_at = GREATEST(rp.joined_at, LEAST(
+				$2::timestamptz,
+				COALESCE((
+					SELECT ba.last_report_at + interval '60 seconds' FROM browser_activity ba
+					WHERE ba.room_id = rp.room_id AND ba.user_id = rp.user_id AND ba.last_report_at >= rp.joined_at
+				), $2::timestamptz),
+				COALESCE((
+					SELECT min(nx.joined_at) FROM room_participants nx
+					WHERE nx.room_id = rp.room_id AND nx.identity = rp.identity AND nx.joined_at > rp.joined_at
+				), $2::timestamptz)
+			))
+			WHERE rp.left_at IS NULL
+			  AND rp.room_id IN (SELECT id FROM rooms WHERE id = $1 OR parent_room_id = $1);
 		`
 		tag, err := pool.Exec(ctx, closeQuery, targetRoomID, cutoff)
 		if err != nil {
@@ -274,6 +288,9 @@ func NewAttendanceReconcileHandler(pool *pgxpool.Pool, logger *slog.Logger) Hand
 				if err := reconcileClassSession(ctx, pool, targetRoomID, classSessionID, orgIDStr, batchIDStr, sessionStart, sessionEnd); err != nil {
 					return fmt.Errorf("failed to reconcile class session %s: %w", classSessionID, err)
 				}
+				if _, err := pool.Exec(ctx, `SELECT connect_auth.mark_attendance_finalized($1::uuid)`, classSessionID); err != nil {
+					return fmt.Errorf("failed to mark attendance final for %s: %w", classSessionID, err)
+				}
 			}
 		}
 
@@ -316,6 +333,10 @@ func reconcileClassSession(ctx context.Context, pool *pgxpool.Pool, roomID, clas
 	if err != nil {
 		return err
 	}
+	engagement, err := loadRoomEngagement(ctx, pool, roomID)
+	if err != nil {
+		return err
+	}
 
 	var policyVersion *int
 	if policy.Version > 0 {
@@ -329,7 +350,7 @@ func reconcileClassSession(ctx context.Context, pool *pgxpool.Pool, roomID, clas
 	defer tx.Rollback(ctx)
 
 	for _, r := range attendance.EvaluateEnrollment(enrolled, intervals, signals, policy, sessionStart, sessionEnd) {
-		calculation, err := json.Marshal(r.Calculation)
+		calculation, err := calculationWithEngagement(r.Calculation, engagement[r.StudentUserID])
 		if err != nil {
 			return err
 		}
@@ -365,6 +386,60 @@ func reconcileClassSession(ctx context.Context, pool *pgxpool.Pool, roomID, clas
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// EngagementBreakdown is one student's engagement score and its parts, stored with the
+// attendance record so dashboards can report it after the class. It is kept separate from the
+// attendance status: it measures activity, not presence.
+type EngagementBreakdown struct {
+	Score            int      `json:"score"`
+	PollsAnswered    int      `json:"pollsAnswered"`
+	PollsTotal       int      `json:"pollsTotal"`
+	CodingSubmitted  int      `json:"codingSubmitted"`
+	CodingTotal      int      `json:"codingTotal"`
+	PollsRatio       *float64 `json:"pollsRatio"`
+	CodingRatio      *float64 `json:"codingRatio"`
+	InteractionRatio float64  `json:"interactionRatio"`
+	FocusRatio       *float64 `json:"focusRatio"`
+}
+
+// loadRoomEngagement reads every student's engagement score for the room and its breakouts.
+func loadRoomEngagement(ctx context.Context, pool *pgxpool.Pool, roomID string) (map[string]EngagementBreakdown, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT user_id::text, score, polls_answered, polls_total, coding_submitted, coding_total,
+		       polls_ratio::float8, coding_ratio::float8, interaction_ratio::float8, focus_ratio::float8
+		FROM connect_auth.room_engagement_data($1::uuid)
+	`, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]EngagementBreakdown)
+	for rows.Next() {
+		var id string
+		var e EngagementBreakdown
+		if err := rows.Scan(&id, &e.Score, &e.PollsAnswered, &e.PollsTotal, &e.CodingSubmitted, &e.CodingTotal,
+			&e.PollsRatio, &e.CodingRatio, &e.InteractionRatio, &e.FocusRatio); err != nil {
+			return nil, err
+		}
+		out[id] = e
+	}
+	return out, rows.Err()
+}
+
+// calculationWithEngagement serialises the attendance calculation with the student's engagement
+// added under "engagement". A student with no engagement row (never joined) scores 0.
+func calculationWithEngagement(calc attendance.Calculation, e EngagementBreakdown) ([]byte, error) {
+	raw, err := json.Marshal(calc)
+	if err != nil {
+		return nil, err
+	}
+	var merged map[string]any
+	if err := json.Unmarshal(raw, &merged); err != nil {
+		return nil, err
+	}
+	merged["engagement"] = e
+	return json.Marshal(merged)
 }
 
 // loadAttendancePolicy returns the organization's latest policy version or the platform default.
