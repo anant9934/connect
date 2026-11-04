@@ -17,7 +17,7 @@ const (
 )
 
 // RequiredMigration is the newest migration this build needs. Update it with each migration.
-const RequiredMigration = "000031_ai_learning_intelligence"
+const RequiredMigration = "000032_live_engagement_and_attendance_sweep"
 
 // rlsExemptTables holds no tenant or user data.
 var rlsExemptTables = map[string]bool{"schema_metadata": true}
