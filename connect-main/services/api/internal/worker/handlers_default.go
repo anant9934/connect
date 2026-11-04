@@ -291,6 +291,16 @@ func NewAttendanceReconcileHandler(pool *pgxpool.Pool, logger *slog.Logger) Hand
 				if _, err := pool.Exec(ctx, `SELECT connect_auth.mark_attendance_finalized($1::uuid)`, classSessionID); err != nil {
 					return fmt.Errorf("failed to mark attendance final for %s: %w", classSessionID, err)
 				}
+				// A class whose teacher simply left never had its room ended, so it stayed "live"
+				// on the admin dashboard forever. Attendance is written, so end the room and its
+				// breakouts; the room trigger then marks the class completed. Already-ended rooms
+				// are untouched.
+				if _, err := pool.Exec(ctx, `
+					UPDATE rooms SET status = 'ended', ended_at = COALESCE(ended_at, clock_timestamp())
+					WHERE (id = $1 OR parent_room_id = $1) AND status = 'active'
+				`, targetRoomID); err != nil {
+					return fmt.Errorf("failed to close finished class room %s: %w", targetRoomID, err)
+				}
 			}
 		}
 
