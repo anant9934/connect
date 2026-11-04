@@ -386,6 +386,7 @@ func BuildRouter(
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/polls", interactionHandler.ListPolls)
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/doubts", interactionHandler.ListDoubts)
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/polls/{id}/scores", interactionHandler.PollScores)
+						roomDetail.With(appmw.OptionalAuth(authService)).Get("/engagement", interactionHandler.RoomEngagement)
 						for path, handler := range map[string]http.HandlerFunc{
 							"/polls":               interactionHandler.CreatePoll,
 							"/polls/{id}/respond":  interactionHandler.RespondPoll,

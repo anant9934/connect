@@ -45,6 +45,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Route("/organizations/{org}", func(o chi.Router) {
 		o.Get("/admin/overview", h.overview)
 		o.Get("/admin/audit", h.auditLog)
+		o.Get("/admin/engagement", h.adminEngagement)
 		o.Get("/members", h.listMembers)
 		o.Post("/members", h.addMember)
 		o.Patch("/members/{user}", h.updateMember)
@@ -918,8 +919,8 @@ func (h *Handler) attendanceSummary(w http.ResponseWriter, r *http.Request) {
 		       count(*) FILTER (WHERE joined_late) AS "joinedLate", count(*) FILTER (WHERE left_early) AS "leftEarly",
 		       count(*) FILTER (WHERE is_overruled) AS corrected,
 		       round(avg(duration_ratio), 3) AS "durationRatio", round(avg(engagement_ratio), 3) AS "engagementRatio",
-		       round(avg(browser_ratio), 3) AS "browserRatio"
-		FROM attendance_records WHERE organization_id = $1 AND batch_id = $2
+		       round(avg(browser_ratio), 3) AS "browserRatio", `+engagementScoreSQL+` AS "engagementScore"
+		FROM attendance_records ar WHERE organization_id = $1 AND batch_id = $2
 		GROUP BY student_user_id ORDER BY student_user_id`, chi.URLParam(r, "org"), batch)
 }
 
@@ -937,23 +938,49 @@ func (h *Handler) attendanceByClass(w http.ResponseWriter, r *http.Request) {
 		       count(ar.id) FILTER (WHERE ar.attendance_status = 'partial') AS partial,
 		       count(ar.id) FILTER (WHERE ar.attendance_status = 'absent') AS absent,
 		       round(avg(ar.duration_ratio), 3) AS "durationRatio", round(avg(ar.engagement_ratio), 3) AS "engagementRatio",
-		       round(avg(ar.browser_ratio), 3) AS "browserRatio"
+		       round(avg(ar.browser_ratio), 3) AS "browserRatio", `+engagementScoreSQL+` AS "engagementScore"
 		FROM class_sessions cs
 		LEFT JOIN attendance_records ar ON ar.organization_id = cs.organization_id AND ar.class_session_id = cs.id
 		WHERE cs.organization_id = $1 AND cs.batch_id = $2
 		GROUP BY cs.id ORDER BY cs.scheduled_start DESC LIMIT 200`, chi.URLParam(r, "org"), batch)
 }
 
-// sessionEngagement reports what each person did in a class. The database limits it to staff.
+// sessionEngagement reports what each student did in a class and their engagement score.
+// The database limits it to the class's teachers and institution overseers.
 func (h *Handler) sessionEngagement(w http.ResponseWriter, r *http.Request) {
 	if _, err := uuid.Parse(chi.URLParam(r, "id")); err != nil {
 		sendError(w, r, invalid("A valid class is required."))
 		return
 	}
 	h.list(w, r, "people", `
-		SELECT user_id AS "userId", display_name AS "displayName", messages, reactions, hands, poll_answers AS "pollAnswers", doubts,
-		       visible_seconds AS "visibleSeconds", hidden_seconds AS "hiddenSeconds", reported
-		FROM connect_auth.session_engagement($1::uuid)`, chi.URLParam(r, "id"))
+		SELECT user_id AS "userId", display_name AS "displayName", present, connected_seconds AS "connectedSeconds",
+		       messages, reactions, hands, polls_answered AS "pollAnswers", polls_total AS "pollsTotal", quiz_points AS "quizPoints",
+		       doubts, coding_submitted AS "codingSubmitted", coding_total AS "codingTotal",
+		       visible_seconds AS "visibleSeconds", hidden_seconds AS "hiddenSeconds", reported,
+		       polls_ratio AS "pollsRatio", coding_ratio AS "codingRatio", interaction_ratio AS "interactionRatio",
+		       focus_ratio AS "focusRatio", score
+		FROM connect_auth.session_engagement_scores($1::uuid)`, chi.URLParam(r, "id"))
+}
+
+// engagementScoreSQL reads the engagement score the attendance worker stored with each record.
+const engagementScoreSQL = `round(avg(NULLIF(ar.calculation->'engagement'->>'score', '')::numeric), 1)`
+
+// adminEngagement lists every student's engagement and attendance over the last 30 days, lowest
+// engagement first, for institution overseers only.
+func (h *Handler) adminEngagement(w http.ResponseWriter, r *http.Request) {
+	h.list(w, r, "students", `
+		SELECT ar.student_user_id AS "studentUserId", u.display_name AS "displayName", count(*) AS sessions,
+		       count(*) FILTER (WHERE ar.attendance_status IN ('present', 'late')) AS attended,
+		       count(*) FILTER (WHERE ar.attendance_status = 'absent') AS absent,
+		       `+engagementScoreSQL+` AS "engagementScore",
+		       round(avg(ar.score), 3) AS "attendanceScore",
+		       max(cs.scheduled_start) AS "lastClass"
+		FROM attendance_records ar
+		JOIN class_sessions cs ON cs.id = ar.class_session_id AND cs.organization_id = ar.organization_id
+		JOIN users u ON u.id = ar.student_user_id
+		WHERE ar.organization_id = $1 AND cs.scheduled_start > now() - interval '30 days' AND connect_auth.can_oversee_org($1::uuid)
+		GROUP BY ar.student_user_id, u.display_name
+		ORDER BY "engagementScore" ASC NULLS FIRST, u.display_name`, chi.URLParam(r, "org"))
 }
 
 func (h *Handler) listPolicies(w http.ResponseWriter, r *http.Request) {
