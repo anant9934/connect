@@ -301,6 +301,9 @@ func main() {
 
 		var workerCtx context.Context
 		workerCtx, workerCancel = context.WithCancel(context.Background())
+		// Finalise attendance for every class that has ended, even if nobody pressed "End for all".
+		go worker.RunAttendanceSweep(workerCtx, workerDB.Pool, logger, worker.AttendanceSweepInterval)
+
 		go func() {
 			defer close(workerDone)
 			logger.Info("inproc_worker_started",

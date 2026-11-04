@@ -134,6 +134,9 @@ func main() {
 		slog.Duration("lease_ttl", runnerCfg.LeaseTTL),
 	)
 
+	// Finalise attendance for every class that has ended, even if nobody pressed "End for all".
+	go worker.RunAttendanceSweep(runCtx, db.Pool, logger, worker.AttendanceSweepInterval)
+
 	// 7. Start runner (blocks until cancelled or stopped)
 	if err := runner.Run(runCtx); err != nil && err != context.Canceled {
 		logger.Error("worker_runner_terminated_with_error", slog.String("error", err.Error()))
