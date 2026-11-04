@@ -71,6 +71,8 @@ export interface StudentSummary {
   durationRatio: number | null;
   engagementRatio: number | null;
   browserRatio: number | null;
+  /** Average 0-100 engagement score across finalised classes; null before any. */
+  engagementScore: number | null;
 }
 export interface ClassSummary {
   id: string;
@@ -85,18 +87,40 @@ export interface ClassSummary {
   durationRatio: number | null;
   engagementRatio: number | null;
   browserRatio: number | null;
+  engagementScore: number | null;
 }
 export interface EngagementRow {
   userId: string;
   displayName: string;
+  present?: boolean;
+  connectedSeconds?: number;
   messages: number;
   reactions: number;
   hands: number;
   pollAnswers: number;
+  pollsTotal?: number;
+  quizPoints?: number;
   doubts: number;
+  codingSubmitted?: number;
+  codingTotal?: number;
   visibleSeconds: number;
   hiddenSeconds: number;
   reported: boolean;
+  pollsRatio?: number | null;
+  codingRatio?: number | null;
+  interactionRatio?: number | null;
+  focusRatio?: number | null;
+  score?: number;
+}
+export interface AdminEngagementRow {
+  studentUserId: string;
+  displayName: string;
+  sessions: number;
+  attended: number;
+  absent: number;
+  engagementScore: number | null;
+  attendanceScore: number | null;
+  lastClass: string | null;
 }
 
 const orgPath = (org: string, rest: string) => `/api/v1/organizations/${encodeURIComponent(org)}${rest}`;
@@ -163,6 +187,8 @@ export interface AuditEvent {
   createdAt: string;
 }
 
+export const getAdminEngagement = async (org: string) =>
+  (await apiFetch<{ students: AdminEngagementRow[] | null }>(orgPath(org, '/admin/engagement'), { method: 'GET' })).students ?? [];
 export const getOverview = async (org: string) =>
   (await apiFetch<{ overview: OrgOverview }>(orgPath(org, '/admin/overview'), { method: 'GET' })).overview;
 export async function listAuditEvents(org: string, search: { event?: string; from?: string; to?: string; limit: number; offset: number }) {

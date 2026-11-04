@@ -6,6 +6,7 @@ import { ArrowLeft, Loader2 } from 'lucide-react';
 import { getSession } from '@/features/auth/api';
 import { ApiError } from '@/lib/api/client';
 import * as api from '@/features/institution/api';
+import { EngagementExplainer, ScoreBadge, engagementBand } from '@/components/engagement/Engagement';
 
 const AUDIT_PAGE_SIZE = 25;
 const AUDIT_REFRESH_MS = 5000;
@@ -44,11 +45,71 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
+const attendanceShare = (r: api.AdminEngagementRow) => (r.sessions > 0 ? r.attended / r.sessions : null);
+const needsAttention = (r: api.AdminEngagementRow) =>
+  engagementBand(r.engagementScore) === 'low' || (attendanceShare(r) ?? 1) < 0.75;
+
+function EngagementSection({ rows, showAll, onToggleAll }: { rows: api.AdminEngagementRow[]; showAll: boolean; onToggleAll: () => void }) {
+  const scored = rows.filter((r) => r.engagementScore !== null);
+  const average = scored.length > 0 ? scored.reduce((sum, r) => sum + (r.engagementScore as number), 0) / scored.length : null;
+  const count = (band: string) => rows.filter((r) => engagementBand(r.engagementScore) === band).length;
+  const attention = rows.filter(needsAttention).slice(0, 10);
+  const top = [...scored].sort((a, b) => (b.engagementScore as number) - (a.engagementScore as number)).slice(0, 5);
+  const line = (r: api.AdminEngagementRow) => (
+    <li key={r.studentUserId} data-testid="admin-engagement-row" className="flex items-center justify-between gap-2 py-1.5">
+      <span className="text-sm text-[#171717] truncate">{r.displayName}</span>
+      <span className="flex items-center gap-2 shrink-0 text-xs text-[#686868]">
+        attended {r.attended}/{r.sessions}
+        <ScoreBadge score={r.engagementScore} />
+      </span>
+    </li>
+  );
+  return (
+    <section className={cardClass} data-testid="admin-engagement">
+      <h2 className="text-sm font-semibold text-[#171717]">Student engagement, last 30 days</h2>
+      {rows.length === 0 ? (
+        <p className="text-sm text-[#686868]">No finalised classes yet. Scores appear about 10 minutes after each class ends.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <div className="p-3 rounded-xl bg-[#FCFCFA] border border-[#E9E9E5]">
+              <p data-testid="stat-engagement-average" className="text-xl font-bold text-[#171717]">{average === null ? '—' : Math.round(average)}</p>
+              <p className="text-xs text-[#686868]">Average score</p>
+            </div>
+            <Stat id="engagement-high" label="High (70+)" value={count('high')} />
+            <Stat id="engagement-medium" label="Medium (40–69)" value={count('medium')} />
+            <Stat id="engagement-low" label="Low (under 40)" value={count('low')} />
+            <Stat id="engagement-none" label="No data" value={count('none')} />
+          </div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <h3 className="text-xs font-semibold text-[#B42318] mb-1">Needs attention</h3>
+              {attention.length === 0 ? <p className="text-sm text-[#686868]">Nobody is below the thresholds.</p> : <ul className="divide-y divide-[#E9E9E5]">{attention.map(line)}</ul>}
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold text-[#1F6B3B] mb-1">Most engaged</h3>
+              {top.length === 0 ? <p className="text-sm text-[#686868]">No scores yet.</p> : <ul className="divide-y divide-[#E9E9E5]">{top.map(line)}</ul>}
+            </div>
+          </div>
+          <button type="button" onClick={onToggleAll} className="text-sm font-semibold text-[#7258E8] underline min-h-[44px]">
+            {showAll ? 'Hide all students' : `Show all ${rows.length} students`}
+          </button>
+          {showAll && <ul className="divide-y divide-[#E9E9E5]">{rows.map(line)}</ul>}
+          <p className="text-xs text-[#686868]">Needs attention means an engagement score under 40 or attendance under 75%.</p>
+        </>
+      )}
+      <EngagementExplainer />
+    </section>
+  );
+}
+
 export default function AdminPage() {
   const [state, setState] = useState<'loading' | 'signed-out' | 'ready'>('loading');
   const [orgs, setOrgs] = useState<api.Organization[]>([]);
   const [orgId, setOrgId] = useState('');
   const [overview, setOverview] = useState<api.OrgOverview | null>(null);
+  const [engagement, setEngagement] = useState<api.AdminEngagementRow[]>([]);
+  const [showAllEngagement, setShowAllEngagement] = useState(false);
   const [members, setMembers] = useState<api.Member[]>([]);
   const [memberFilter, setMemberFilter] = useState('');
   const [events, setEvents] = useState<api.AuditEvent[]>([]);
@@ -89,9 +150,15 @@ export default function AdminPage() {
   const loadState = useCallback(async () => {
     if (!orgId) return;
     try {
-      const [nextOverview, nextMembers] = await Promise.all([api.getOverview(orgId), api.listMembers(orgId)]);
+      const [nextOverview, nextMembers, nextEngagement] = await Promise.all([
+        api.getOverview(orgId),
+        api.listMembers(orgId),
+        // Engagement is supplementary: if it fails, the rest of the dashboard still loads.
+        api.getAdminEngagement(orgId).catch(() => [] as api.AdminEngagementRow[]),
+      ]);
       setOverview(nextOverview);
       setMembers(nextMembers);
+      setEngagement(nextEngagement);
     } catch (err) {
       setError(messageOf(err, 'Could not load this organization.'));
     }
@@ -222,6 +289,7 @@ export default function AdminPage() {
             {counted > 0 && (
               <p className="text-xs text-[#686868]">{Math.round((attended / counted) * 100)}% of {counted} attendance records were present or late.</p>
             )}
+            <EngagementSection rows={engagement} showAll={showAllEngagement} onToggleAll={() => setShowAllEngagement((v) => !v)} />
           </>
         )}
 

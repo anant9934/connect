@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { EngagementExplainer, EngagementTable, ScoreBadge } from '@/components/engagement/Engagement';
 import Link from 'next/link';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { getSession } from '@/features/auth/api';
@@ -169,7 +170,7 @@ export default function AttendancePage() {
               <table className="w-full text-sm text-left">
                 <thead>
                   <tr className="text-xs text-[#686868]">
-                    {['Student', 'Classes', 'Present', 'Late', 'Partial', 'Absent', 'Time connected', 'Engagement', 'Tab visible', 'Joined late', 'Left early', 'Corrected'].map((h) => (
+                    {['Student', 'Engagement score', 'Classes', 'Present', 'Late', 'Partial', 'Absent', 'Time connected', 'Activity', 'Tab visible', 'Joined late', 'Left early', 'Corrected'].map((h) => (
                       <th key={h} className="py-1 pr-3 font-semibold whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -178,6 +179,7 @@ export default function AttendancePage() {
                   {students.map((s) => (
                     <tr key={s.studentUserId} data-testid="student-row" className="border-t border-[#E9E9E5]">
                       <td className="py-1.5 pr-3 whitespace-nowrap">{nameOf(s.studentUserId)}</td>
+                      <td className="py-1.5 pr-3"><ScoreBadge score={s.engagementScore} showLabel /></td>
                       <td className="py-1.5 pr-3">{s.sessions}</td>
                       <td className="py-1.5 pr-3">{s.present}</td>
                       <td className="py-1.5 pr-3">{s.late}</td>
@@ -195,6 +197,7 @@ export default function AttendancePage() {
               </table>
             </div>
           )}
+          <EngagementExplainer />
           <p className="text-xs text-[#686868]">
             These measure different things. Time connected comes from the meeting server, engagement from messages, reactions, raised hands, poll answers and questions, and tab visibility is reported by each browser. None of them shows whether someone was paying attention.
           </p>
@@ -210,8 +213,10 @@ export default function AttendancePage() {
                   <p className="text-sm font-semibold text-[#171717] break-words">{item.title}</p>
                   <p className="text-xs text-[#686868]">
                     {new Date(item.start).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} · {item.status} · present {item.present}, late {item.late}, partial {item.partial}, absent {item.absent}
+                    {!item.attendanceFinalized && new Date(item.start) < new Date() && ' · attendance pending'}
                   </p>
                 </div>
+                {isStaff && <span className="text-xs text-[#686868] flex items-center gap-1">Avg engagement <ScoreBadge score={item.engagementScore} /></span>}
                 {isStaff && (
                   <button type="button" onClick={() => openEngagement(item)} className="text-sm font-semibold text-[#7258E8] underline min-h-[44px]">Engagement</button>
                 )}
@@ -225,31 +230,11 @@ export default function AttendancePage() {
             <h2 className="text-sm font-semibold text-[#171717]">Engagement in {engagement.title}</h2>
             {engagement.people.length === 0 && <p className="text-sm text-[#686868]">No activity recorded.</p>}
             {engagement.people.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                  <thead>
-                    <tr className="text-xs text-[#686868]">
-                      {['Person', 'Messages', 'Reactions', 'Raised hands', 'Poll answers', 'Questions', 'Tab visible'].map((h) => (
-                        <th key={h} className="py-1 pr-3 font-semibold whitespace-nowrap">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {engagement.people.map((p) => (
-                      <tr key={p.userId} data-testid="engagement-row" className="border-t border-[#E9E9E5]">
-                        <td className="py-1.5 pr-3 whitespace-nowrap">{p.displayName}</td>
-                        <td className="py-1.5 pr-3">{p.messages}</td>
-                        <td className="py-1.5 pr-3">{p.reactions}</td>
-                        <td className="py-1.5 pr-3">{p.hands}</td>
-                        <td className="py-1.5 pr-3">{p.pollAnswers}</td>
-                        <td className="py-1.5 pr-3">{p.doubts}</td>
-                        <td className="py-1.5 pr-3">{p.reported ? percent(p.visibleSeconds / Math.max(1, p.visibleSeconds + p.hiddenSeconds)) : 'Not reported'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <EngagementTable
+                rows={engagement.people.map((p) => ({ ...p, pollsAnswered: p.pollAnswers }))}
+              />
             )}
+            <EngagementExplainer />
           </section>
         )}
       </div>
