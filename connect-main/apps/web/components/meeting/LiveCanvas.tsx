@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, ChevronLeft, ChevronRight, Download, Pencil, Play, Presentation, RotateCcw, Send, Sparkles, Users, X } from 'lucide-react';
+import { Archive, Mic, ChevronLeft, ChevronRight, Download, Pencil, Play, Presentation, RotateCcw, Send, Sparkles, Users, X } from 'lucide-react';
 import { ApiError } from '@/lib/api/client';
 import * as api from '@/features/classroom/liveCanvas';
 import type { CanvasState, LiveDeck, LiveSimulation, LiveSlide, SimAnswer, SimParams } from '@/features/classroom/liveCanvas';
@@ -353,6 +353,7 @@ export const LiveCanvas: React.FC<LiveCanvasProps> = ({ roomCode, syncTick, onCh
   const [prompt, setPrompt] = useState('');
   const [context, setContext] = useState('');
   const [showContext, setShowContext] = useState(false);
+  const [useVoice, setUseVoice] = useState(false);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -454,7 +455,7 @@ export const LiveCanvas: React.FC<LiveCanvasProps> = ({ roomCode, syncTick, onCh
     const started = performance.now();
     setElapsed(0);
     const timer = setInterval(() => setElapsed((performance.now() - started) / 1000), 100);
-    const result = await act(() => api.generateCanvas(roomCode, kind, prompt.trim(), context.trim()), 'Could not generate that. Try again.');
+    const result = await act(() => api.generateCanvas(roomCode, kind, prompt.trim(), context.trim(), useVoice), 'Could not generate that. Try again.');
     clearInterval(timer);
     setElapsed(result ? (performance.now() - started) / 1000 : null);
     if (result) setOpen(true);
@@ -492,6 +493,12 @@ export const LiveCanvas: React.FC<LiveCanvasProps> = ({ roomCode, syncTick, onCh
   };
 
   const slideIndex = Math.max(0, Math.min((deck?.slides.length ?? 1) - 1, (state?.slide ?? 1) - 1));
+
+  // A local recording marks each slide and simulation as it appears.
+  const markerLabel = deck ? `Slide ${slideIndex + 1}: ${deck.slides[slideIndex]?.title ?? ''}` : sim ? `Simulation: ${sim.title}` : null;
+  useEffect(() => {
+    if (markerLabel) window.dispatchEvent(new CustomEvent('tc-marker', { detail: { kind: 'slide', label: markerLabel } }));
+  }, [markerLabel]);
 
   useEffect(() => {
     if (!open || !deck || !canManage || editing) return;
@@ -538,6 +545,11 @@ export const LiveCanvas: React.FC<LiveCanvasProps> = ({ roomCode, syncTick, onCh
           <Sparkles className="w-3.5 h-3.5" aria-hidden="true" /> {busy && elapsed !== null ? `${elapsed.toFixed(1)}s` : 'Generate'}
         </button>
       </div>
+      <button type="button" data-testid="use-voice-context" aria-pressed={useVoice} onClick={() => setUseVoice((v) => !v)}
+        title="Adds the last 3 minutes of live captions to the request"
+        className={`neu-pill inline-flex items-center gap-1.5 px-3 min-h-[34px] text-xs font-semibold ${useVoice ? 'text-[#1F6B3B] !bg-[#E4F8EB]' : 'text-[#17171A]'}`}>
+        <Mic className="w-3.5 h-3.5" aria-hidden="true" /> Use live voice context
+      </button>
       <button type="button" className="text-xs font-semibold text-[#5A2FC7] underline" onClick={() => setShowContext((v) => !v)}>
         {showContext ? 'Hide lecture context' : 'Add lecture context'}
       </button>

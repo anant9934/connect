@@ -51,6 +51,8 @@ import { TransportDiagnostics } from './TransportDiagnostics';
 import { PermissionHelpSheet } from './PermissionHelpSheet';
 import type { SimFrame } from './LiveCanvas';
 import type { LaserFrame } from './BoardCanvas';
+import { LiveCaptions, type IncomingCaption } from './LiveCaptions';
+import { LocalRecorder } from './LocalRecorder';
 import { TargetMediaDevice } from '@/features/meeting/permissions';
 
 interface MeetingRoomProps {
@@ -161,6 +163,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [syncTick, setSyncTick] = useState(0);
   const [simFrame, setSimFrame] = useState<SimFrame | null>(null);
   const [laserFrame, setLaserFrame] = useState<(LaserFrame & { from: string; board: string }) | null>(null);
+  const [caption, setCaption] = useState<IncomingCaption | null>(null);
+  const participantRolesRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    participantRolesRef.current = participantRoles;
+  }, [participantRoles]);
   const [pendingAdmissions, setPendingAdmissions] = useState<AdmissionRequest[]>([]);
   const [externalNotesRevision, setExternalNotesRevision] = useState<number>(1);
   const [externalFileEvent, setExternalFileEvent] = useState<{ action: string; fileId: string; filename: string } | undefined>(undefined);
@@ -249,6 +256,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (data && data.message) ingestRemoteMessageRef.current(data.message, participant?.identity);
         refreshInteractionRef.current();
         setSyncTick((tick) => tick + 1);
+      } else if (topic === 'tc-caption') {
+        // Captions come only from the host or a co-host, by LiveKit's authenticated identity.
+        const role = participant?.identity ? participantRolesRef.current[participant.identity] : undefined;
+        if ((role === 'host' || role === 'co-host') && typeof data?.text === 'string' && data.text.length <= 1000) {
+          setCaption({ text: data.text, final: data.final === true, from: participant.identity, at: Date.now() });
+        }
       } else if (topic === 'tc-laser') {
         // Laser pointer: transient, never stored. The board shows it only from the presenter.
         if (data && typeof data.board === 'string' && Number.isFinite(data.x) && Number.isFinite(data.y) && participant?.identity) {
@@ -1099,6 +1112,21 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           <span>Tap anywhere to enable audio playback</span>
         </div>
       )}
+
+      {/* Captions for everyone; hosts also get local recording. Top centre keeps clear of stage launchers. */}
+      <div className="fixed top-16 left-1/2 -translate-x-1/2 z-40 flex items-start gap-2">
+        {(isHost || myRole === 'co-host') && <LocalRecorder roomCode={roomCode} />}
+        <LiveCaptions
+          roomCode={roomCode}
+          canCaption={isHost || myRole === 'co-host'}
+          incoming={caption}
+          sendCaption={(text, final) => {
+            transportRef.current?.sendData('tc-caption', { text, final }).catch(() => {
+              // Captions are best effort; the transcript is saved separately.
+            });
+          }}
+        />
+      </div>
 
       {/* Live polls and coding problems pop up for students; teachers assign and review here. */}
       <LiveActivity

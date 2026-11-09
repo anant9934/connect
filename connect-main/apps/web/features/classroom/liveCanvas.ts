@@ -41,8 +41,8 @@ const path = (code: string, rest = '') => `/api/v1/rooms/${encodeURIComponent(co
 
 export const getCanvas = (code: string) => apiFetch<CanvasState>(path(code), { method: 'GET' });
 
-export const generateCanvas = (code: string, kind: 'slides' | 'simulation', prompt: string, context: string) =>
-  apiFetch<CanvasState>(path(code, '/generate'), { method: 'POST', body: JSON.stringify({ kind, prompt, context }) });
+export const generateCanvas = (code: string, kind: 'slides' | 'simulation', prompt: string, context: string, useVoiceContext = false) =>
+  apiFetch<CanvasState>(path(code, '/generate'), { method: 'POST', body: JSON.stringify({ kind, prompt, context, useVoiceContext }) });
 
 export const updateCanvas = (
   code: string,
