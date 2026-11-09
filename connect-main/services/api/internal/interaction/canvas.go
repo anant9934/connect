@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -131,6 +132,8 @@ func (h *Handler) GenerateCanvas(w http.ResponseWriter, r *http.Request) {
 		Kind    string `json:"kind"`
 		Prompt  string `json:"prompt"`
 		Context string `json:"context"`
+		// UseVoiceContext adds the last few minutes of the live transcript, read on the server.
+		UseVoiceContext bool `json:"useVoiceContext"`
 	}
 	if !decodeStrict(c.r, &req) || (req.Kind != "slides" && req.Kind != "simulation") {
 		model.SendJSONError(w, c.r, http.StatusBadRequest, "INVALID_PAYLOAD", "Choose slides or a simulation and describe it.")
@@ -164,6 +167,21 @@ func (h *Handler) GenerateCanvas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.UseVoiceContext {
+		voice, err := h.recentVoiceContext(c.r.Context(), c.roomID)
+		if err != nil {
+			sendCanvasError(w, c.r, err, "Could not read the live transcript.")
+			return
+		}
+		if voice == "" {
+			model.SendJSONError(w, c.r, http.StatusUnprocessableEntity, "NO_VOICE_CONTEXT", "There is no live transcript from the last few minutes. Turn on captions first.")
+			return
+		}
+		req.Context = strings.TrimSpace("What the teacher just said:\n" + voice + "\n\n" + req.Context)
+		if runes := []rune(req.Context); len(runes) > ai.MaxLiveContextChars {
+			req.Context = string(runes[:ai.MaxLiveContextChars])
+		}
+	}
 	ctx, cancel := context.WithTimeout(c.r.Context(), liveGenerateTimeout)
 	defer cancel()
 	var content, params json.RawMessage

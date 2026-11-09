@@ -344,6 +344,7 @@ func BuildRouter(
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/classroom", interactionHandler.GetClassroom)
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/board", interactionHandler.ListStrokes)
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/canvas", interactionHandler.GetCanvas)
+						roomDetail.With(appmw.OptionalAuth(authService)).Get("/transcript", interactionHandler.ListTranscript)
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/canvas/submissions", interactionHandler.ListSimulationAnswers)
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/breakouts", interactionHandler.GetBreakouts)
 						roomDetail.With(
@@ -382,6 +383,14 @@ func BuildRouter(
 							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
 							appmw.OptionalAuth(authService),
 						).Post("/canvas/save", interactionHandler.SaveCanvasDeck)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Post("/transcript", interactionHandler.PostTranscript)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Post("/recordings", interactionHandler.SaveRecording)
 						roomDetail.With(
 							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
 							appmw.OptionalAuth(authService),
