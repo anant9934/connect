@@ -22,6 +22,7 @@ import { BandwidthControl } from './BandwidthControl';
 import { ClassroomBoard } from './ClassroomBoard';
 import { BreakoutControl } from './BreakoutControl';
 import { LiveCanvas, type SimFrame } from './LiveCanvas';
+import type { LaserFrame } from './BoardCanvas';
 import { FilesPanel } from './FilesPanel';
 import { TransportDiagnostics } from './TransportDiagnostics';
 import { ChatMessage } from '@/features/chat/types';
@@ -50,6 +51,8 @@ interface MeetingStageProps {
     sendHint: () => void;
     simFrame: SimFrame | null;
     sendSimFrame: (params: Record<string, unknown>) => void;
+    laserFrame: (LaserFrame & { from: string; board: string }) | null;
+    sendLaser: (board: string, x: number, y: number) => void;
   };
   isLocked: boolean;
   isMicMuted: boolean;
@@ -358,6 +361,8 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
             selfIdentity={localParticipant?.identity || ''}
             syncTick={interaction.syncTick}
             onChanged={interaction.sendHint}
+            laserFrame={interaction.laserFrame}
+            sendLaser={interaction.sendLaser}
           />
           <LiveCanvas
             roomCode={roomCode}

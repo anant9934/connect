@@ -90,22 +90,26 @@ export interface ClassroomState {
   presenter: string | null;
   version: number;
 }
+export type BoardTool = 'pen' | 'highlighter' | 'text' | 'rect' | 'circle' | 'arrow' | 'note';
 export interface Stroke {
   id: string;
   seq: number;
   authorIdentity: string;
-  tool: 'pen' | 'highlighter';
+  tool: BoardTool;
   color: string;
   width: number;
   points: [number, number][];
+  /** Text of a text box or sticky note. */
+  body?: string;
 }
 export interface NewStroke {
   clientStrokeId: string;
   board: string;
-  tool: 'pen' | 'highlighter';
+  tool: BoardTool;
   color: string;
   width: number;
   points: [number, number][];
+  body?: string;
 }
 
 
@@ -118,6 +122,8 @@ export const listStrokes = async (code: string, board: string, afterSeq: number)
   (await apiFetch<{ strokes: Stroke[] }>(roomPath(code, `/board?board=${encodeURIComponent(board)}&afterSeq=${afterSeq}`), { method: 'GET' })).strokes;
 export const postStroke = (code: string, stroke: NewStroke) =>
   apiFetch<{ seq: number }>(roomPath(code, '/board/strokes'), { method: 'POST', body: JSON.stringify(stroke) });
+export const moveStroke = (code: string, id: string, point: [number, number]) =>
+  apiFetch(roomPath(code, '/board/move'), { method: 'POST', body: JSON.stringify({ id, points: [point] }) });
 export const removeStrokes = (code: string, board: string, all: boolean) =>
   apiFetch<{ removed: number }>(roomPath(code, '/board/remove'), { method: 'POST', body: JSON.stringify({ board, all }) });
 

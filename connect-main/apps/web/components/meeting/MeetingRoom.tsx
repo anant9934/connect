@@ -50,6 +50,7 @@ import {
 import { TransportDiagnostics } from './TransportDiagnostics';
 import { PermissionHelpSheet } from './PermissionHelpSheet';
 import type { SimFrame } from './LiveCanvas';
+import type { LaserFrame } from './BoardCanvas';
 import { TargetMediaDevice } from '@/features/meeting/permissions';
 
 interface MeetingRoomProps {
@@ -159,6 +160,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [myRole, setMyRole] = useState('participant');
   const [syncTick, setSyncTick] = useState(0);
   const [simFrame, setSimFrame] = useState<SimFrame | null>(null);
+  const [laserFrame, setLaserFrame] = useState<(LaserFrame & { from: string; board: string }) | null>(null);
   const [pendingAdmissions, setPendingAdmissions] = useState<AdmissionRequest[]>([]);
   const [externalNotesRevision, setExternalNotesRevision] = useState<number>(1);
   const [externalFileEvent, setExternalFileEvent] = useState<{ action: string; fileId: string; filename: string } | undefined>(undefined);
@@ -247,6 +249,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (data && data.message) ingestRemoteMessageRef.current(data.message, participant?.identity);
         refreshInteractionRef.current();
         setSyncTick((tick) => tick + 1);
+      } else if (topic === 'tc-laser') {
+        // Laser pointer: transient, never stored. The board shows it only from the presenter.
+        if (data && typeof data.board === 'string' && Number.isFinite(data.x) && Number.isFinite(data.y) && participant?.identity) {
+          setLaserFrame({ board: data.board, x: Math.min(1, Math.max(0, data.x)), y: Math.min(1, Math.max(0, data.y)), from: participant.identity, at: Date.now() });
+        }
       } else if (topic === 'tc-sim') {
         // Presenter frames for the live simulation. The sender is LiveKit's authenticated
         // participant; the canvas accepts frames only from the stored presenter.
@@ -1144,6 +1151,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           sendHint: () => {
             transportRef.current?.sendData('tc-sync', {}).catch(() => {
               // Others catch up on their next poll.
+            });
+          },
+          laserFrame,
+          sendLaser: (board, x, y) => {
+            transportRef.current?.sendData('tc-laser', { board, x, y }).catch(() => {
+              // A missed pointer frame is replaced by the next one.
             });
           },
           simFrame,

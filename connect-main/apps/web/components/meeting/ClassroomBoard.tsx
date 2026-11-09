@@ -7,7 +7,7 @@ import * as api from '@/features/classroom/api';
 import { Deck, loadDeck, PPTX_TYPE } from '@/features/classroom/deck';
 import { getDownloadUrl, listFiles, uploadFile } from '@/features/files/api';
 import { MeetingFile } from '@/features/files/types';
-import { BoardCanvas } from './BoardCanvas';
+import { BoardCanvas, type LaserFrame } from './BoardCanvas';
 
 const POLL_INTERVAL_MS = 4000;
 const PRESENTABLE = ['application/pdf', PPTX_TYPE];
@@ -18,6 +18,9 @@ interface ClassroomBoardProps {
   selfIdentity: string;
   syncTick: number;
   onChanged: () => void;
+  /** Latest laser position over the data channel, with LiveKit's authenticated sender. */
+  laserFrame?: (LaserFrame & { from: string; board: string }) | null;
+  sendLaser?: (board: string, x: number, y: number) => void;
 }
 
 const fetchDeck = async (roomCode: string, fileId: string, contentType: string, identity: string) => {
@@ -28,7 +31,7 @@ const fetchDeck = async (roomCode: string, fileId: string, contentType: string, 
 
 // The shared whiteboard and presentation, over the meeting stage. What is shown comes from stored
 // state, so someone joining late or reconnecting lands on the current page with its annotations.
-export const ClassroomBoard: React.FC<ClassroomBoardProps> = ({ roomCode, selfIdentity, syncTick, onChanged }) => {
+export const ClassroomBoard: React.FC<ClassroomBoardProps> = ({ roomCode, selfIdentity, syncTick, onChanged, laserFrame, sendLaser }) => {
   const [state, setState] = useState<api.ClassroomState | null>(null);
   const [view, setView] = useState<'none' | 'whiteboard' | 'presentation'>('none');
   const [dismissedFile, setDismissedFile] = useState<string | null>(null);
@@ -256,14 +259,28 @@ export const ClassroomBoard: React.FC<ClassroomBoardProps> = ({ roomCode, selfId
       {error && <p role="alert" className="text-xs text-red-700 bg-red-50 px-3 py-1">{error}</p>}
       {view === 'whiteboard' ? (
         <div className="relative flex-1 min-h-0">
-          <BoardCanvas roomCode={roomCode} board="whiteboard" state={state} syncTick={syncTick} onChanged={onChanged} />
+          <BoardCanvas roomCode={roomCode} board="whiteboard" state={state} syncTick={syncTick} onChanged={onChanged} selfIdentity={selfIdentity} />
         </div>
       ) : (
         <div className="flex-1 min-h-0 flex items-center justify-center p-2 overflow-auto">
           <div ref={frameRef} className="relative bg-white w-full max-h-full" style={{ aspectRatio: String(aspect), maxWidth: `calc((100dvh - 9rem) * ${aspect})` }}>
             <canvas ref={pageRef} data-testid="presentation-page-canvas" className="absolute inset-0 w-full h-full" />
             {deck?.deck.approximate && <p className="absolute right-1 top-1 text-[10px] text-[#6B7280] bg-white/80 px-1 rounded">PowerPoint layout is approximate</p>}
-            {fileId && <BoardCanvas key={`${fileId}:${page}`} roomCode={roomCode} board={`slide:${fileId}:${page}`} state={state} syncTick={syncTick} onChanged={onChanged} transparent />}
+            {fileId && (
+              <BoardCanvas
+                key={`${fileId}:${page}`}
+                roomCode={roomCode}
+                board={`slide:${fileId}:${page}`}
+                state={state}
+                syncTick={syncTick}
+                onChanged={onChanged}
+                transparent
+                selfIdentity={selfIdentity}
+                // Only the presenter points; others accept the pointer only from the stored presenter.
+                onLaser={state.presenter === selfIdentity && sendLaser ? (x, y) => sendLaser(`slide:${fileId}:${page}`, x, y) : undefined}
+                laser={laserFrame && laserFrame.from === state.presenter && laserFrame.from !== selfIdentity && laserFrame.board === `slide:${fileId}:${page}` ? laserFrame : null}
+              />
+            )}
           </div>
         </div>
       )}
