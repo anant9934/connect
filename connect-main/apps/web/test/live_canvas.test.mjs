@@ -245,3 +245,24 @@ describe('diagram layout', async () => {
     assert.deepStrictEqual(layoutDiagram(d), layoutDiagram(d));
   });
 });
+
+describe('pptx export', async () => {
+  const { buildPptx, xmlEscape } = await import('../features/classroom/pptx.ts');
+  const JSZip = (await import('jszip')).default;
+  test('a deck becomes a complete OpenXML package', async () => {
+    const deck = { title: 'A & B', slides: [{ layout: 'title', title: 'Hello <world>' }, { layout: 'diagram', title: 'Flow', diagram: { nodes: [{ id: 'a', label: 'Start', shape: 'pill' }, { id: 'b', label: 'End', shape: 'rect' }], edges: [{ from: 'a', to: 'b' }] } }] };
+    const zip = await JSZip.loadAsync(await (await buildPptx(deck)).arrayBuffer());
+    for (const part of ['[Content_Types].xml', '_rels/.rels', 'ppt/presentation.xml', 'ppt/slideMasters/slideMaster1.xml', 'ppt/slideLayouts/slideLayout1.xml', 'ppt/theme/theme1.xml', 'ppt/slides/slide1.xml', 'ppt/slides/slide2.xml', 'ppt/slides/_rels/slide2.xml.rels']) {
+      assert.ok(zip.file(part), `missing ${part}`);
+    }
+    const s1 = await zip.file('ppt/slides/slide1.xml').async('string');
+    assert.ok(s1.includes('Hello &lt;world&gt;'));
+    const s2 = await zip.file('ppt/slides/slide2.xml').async('string');
+    assert.ok(s2.includes('prst="flowChartTerminator"') && s2.includes('<p:cxnSp>'));
+    const ids = [...s2.matchAll(/cNvPr id="(\d+)"/g)].map((m) => m[1]);
+    assert.strictEqual(new Set(ids).size, ids.length, 'shape ids must be unique within a slide');
+  });
+  test('escapes XML and strips characters XML forbids', () => {
+    assert.strictEqual(xmlEscape(`a<b>&"'\u0001`), 'a&lt;b&gt;&amp;&quot;&apos;');
+  });
+});

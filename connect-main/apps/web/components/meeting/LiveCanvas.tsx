@@ -9,6 +9,7 @@ import { drawSimulation, type Readout } from '@/features/classroom/simulations/e
 import { ENGINE_SPECS, normalizeParams, RUN_KEY } from '@/features/classroom/simulations/specs';
 import { tokenize, TOKEN_COLORS } from '@/features/classroom/highlight';
 import { DiagramView } from './DiagramView';
+import { downloadPptx } from '@/features/classroom/pptx';
 
 const POLL_INTERVAL_MS = 4000;
 const FRAME_INTERVAL_MS = 33;
@@ -598,6 +599,7 @@ export const LiveCanvas: React.FC<LiveCanvasProps> = ({ roomCode, syncTick, onCh
               {canManage && <button type="button" aria-label="Next slide" className={pill} disabled={busy || slideIndex >= deck.slides.length - 1} onClick={() => act(() => api.updateCanvas(roomCode, { slide: slideIndex + 2 }), 'Could not move the slide.')}><ChevronRight className="w-4 h-4" /></button>}
               {canManage && !editing && <button type="button" data-testid="edit-slide" className={pill} disabled={busy} onClick={() => setEditing(true)}><Pencil className="w-3.5 h-3.5" aria-hidden="true" /> Edit</button>}
               <button type="button" className={pill} onClick={() => printDeck(deck)}><Download className="w-3.5 h-3.5" aria-hidden="true" /> PDF</button>
+              <button type="button" data-testid="download-pptx" className={pill} onClick={() => downloadPptx(deck).catch(() => setError('Could not build the PowerPoint file.'))}><Download className="w-3.5 h-3.5" aria-hidden="true" /> PPTX</button>
               {canManage && (
                 <button type="button" data-testid="save-deck" className={pill} disabled={busy}
                   onClick={async () => { if (await act(() => api.saveDeck(roomCode), 'Could not save the deck.')) setSavedNotice(true); }}>

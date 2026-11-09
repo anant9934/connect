@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Presentation, X } from 'lucide-react';
 import { getSavedDeck, listSavedDecks, type LiveDeck, type SavedDeckSummary } from '@/features/classroom/liveCanvas';
 import { printDeck, SlideCard } from './LiveCanvas';
+import { downloadPptx } from '@/features/classroom/pptx';
 
 // Decks the teacher saved from the live canvas, opened after class from meeting history.
 export function SavedDecks({ meetingId }: { meetingId: string }) {
@@ -54,6 +55,7 @@ export function SavedDecks({ meetingId }: { meetingId: string }) {
               <span className="text-xs font-semibold">Slide {slide + 1} of {open.deck.slides.length}</span>
               <button type="button" aria-label="Next slide" disabled={slide >= open.deck.slides.length - 1} onClick={() => setSlide(slide + 1)} className="neu-pill w-10 h-10 flex items-center justify-center disabled:opacity-50"><ChevronRight className="w-4 h-4" /></button>
               <button type="button" onClick={() => printDeck(open.deck)} className="neu-pill px-3 min-h-[40px] text-xs font-semibold inline-flex items-center gap-1.5"><Download className="w-3.5 h-3.5" aria-hidden="true" /> PDF</button>
+              <button type="button" data-testid="vault-pptx" onClick={() => downloadPptx({ ...open.deck, title: open.deck.title || open.title }).catch(() => setError('Could not build the PowerPoint file.'))} className="neu-pill px-3 min-h-[40px] text-xs font-semibold inline-flex items-center gap-1.5"><Download className="w-3.5 h-3.5" aria-hidden="true" /> PPTX</button>
               <button type="button" aria-label="Close deck" onClick={() => setOpen(null)} className="neu-pill w-10 h-10 flex items-center justify-center"><X className="w-4 h-4" /></button>
             </div>
           </div>
