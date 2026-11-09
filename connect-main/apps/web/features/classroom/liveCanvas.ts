@@ -17,7 +17,7 @@ export interface LiveSlide {
 }
 export interface LiveDeck { title: string; slides: LiveSlide[] }
 
-export type EngineName = 'projectile' | 'pendulum' | 'function' | 'scheduling' | 'sorting' | 'logic' | 'perceptron';
+export type EngineName = 'projectile' | 'pendulum' | 'function' | 'scheduling' | 'sorting' | 'logic' | 'perceptron' | 'tree' | 'graph';
 export interface LiveSimulation { engine: EngineName; title: string; explanation: string; observe: string[] }
 export type SimParams = Record<string, unknown>;
 

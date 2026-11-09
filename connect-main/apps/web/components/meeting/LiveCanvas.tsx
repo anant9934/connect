@@ -272,6 +272,8 @@ function SimControls({ sim, params, disabled, onChange }: { sim: LiveSimulation;
           </select>
         </label>
       ))}
+      {spec.values && <TreeValuesInput params={params} disabled={disabled} onChange={onChange} />}
+      {spec.edges && <EdgeEditor params={params} disabled={disabled} onChange={onChange} />}
       {spec.processes && (
         <div className="space-y-1">
           <p className="text-xs font-semibold text-[#17171A]">Jobs (arrival, burst)</p>
@@ -286,6 +288,56 @@ function SimControls({ sim, params, disabled, onChange }: { sim: LiveSimulation;
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+function TreeValuesInput({ params, disabled, onChange }: { params: SimParams; disabled: boolean; onChange: (p: SimParams) => void }) {
+  const values = Array.isArray(params.values) ? (params.values as number[]) : [];
+  const [text, setText] = useState(values.join(', '));
+  useEffect(() => setText(values.join(', ')), [values.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  const apply = () => onChange({ ...params, values: text.split(/[\s,]+/).map(Number).filter((n) => Number.isFinite(n) && n > 0) });
+  return (
+    <label className="block text-xs font-semibold text-[#17171A]">Values, inserted in order (up to 15, 1–99)
+      <div className="mt-1 flex gap-2">
+        <input value={text} disabled={disabled} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); apply(); } }}
+          data-testid="tree-values" className="flex-1 min-w-0 rounded-lg border border-[#ECECE6] px-2 py-1.5 font-mono text-xs" />
+        <button type="button" disabled={disabled} onClick={apply} className={`${pill} !min-h-[32px]`}>Build</button>
+      </div>
+    </label>
+  );
+}
+
+function EdgeEditor({ params, disabled, onChange }: { params: SimParams; disabled: boolean; onChange: (p: SimParams) => void }) {
+  const nodes = Number(params.nodes) || 0;
+  const edges = Array.isArray(params.edges) ? (params.edges as { from: number; to: number; weight: number }[]) : [];
+  const names = Array.from({ length: nodes }, (_, i) => String.fromCharCode(65 + i));
+  const set = (next: typeof edges) => onChange({ ...params, edges: next });
+  const missing = (() => {
+    for (let a = 0; a < nodes; a++) for (let b = a + 1; b < nodes; b++) if (!edges.some((e) => (e.from === a && e.to === b) || (e.from === b && e.to === a))) return { from: a, to: b, weight: 1 };
+    return null;
+  })();
+  const select = 'rounded-lg border border-[#ECECE6] px-1 py-1 text-xs bg-white';
+  return (
+    <div className="space-y-1" data-testid="edge-editor">
+      <p className="text-xs font-semibold text-[#17171A]">Edges (weight 1–20)</p>
+      {edges.map((e, i) => (
+        <div key={i} className="flex items-center gap-1.5 text-xs">
+          <select aria-label={`Edge ${i + 1} from`} disabled={disabled} value={e.from} className={select} onChange={(ev) => set(edges.map((x, j) => (j === i ? { ...x, from: Number(ev.target.value) } : x)))}>
+            {names.map((n, k) => <option key={k} value={k}>{n}</option>)}
+          </select>
+          <span aria-hidden="true">–</span>
+          <select aria-label={`Edge ${i + 1} to`} disabled={disabled} value={e.to} className={select} onChange={(ev) => set(edges.map((x, j) => (j === i ? { ...x, to: Number(ev.target.value) } : x)))}>
+            {names.map((n, k) => <option key={k} value={k}>{n}</option>)}
+          </select>
+          <input type="number" aria-label={`Edge ${i + 1} weight`} min={1} max={20} disabled={disabled} value={e.weight}
+            onChange={(ev) => set(edges.map((x, j) => (j === i ? { ...x, weight: Number(ev.target.value) } : x)))} className="w-14 rounded-lg border border-[#ECECE6] px-2 py-1" />
+          <button type="button" aria-label={`Remove edge ${i + 1}`} disabled={disabled || edges.length <= 1} onClick={() => set(edges.filter((_, j) => j !== i))} className="p-1 text-[#8B8B93] hover:text-[#9F1D1D]"><X className="w-3.5 h-3.5" /></button>
+        </div>
+      ))}
+      {edges.length < 16 && missing && (
+        <button type="button" disabled={disabled} onClick={() => set([...edges, missing])} className={`${pill} !min-h-[32px] w-full`}>Add edge</button>
       )}
     </div>
   );

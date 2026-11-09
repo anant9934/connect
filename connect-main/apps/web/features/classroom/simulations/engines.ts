@@ -1,7 +1,8 @@
 // Draws each built-in simulation from its settings and the seconds since it was (re)started.
 // Pure functions of (params, t), so every screen shows the same picture for the same state.
 import type { EngineName, SimParams } from '../liveCanvas';
-import { num, readProcesses, str, type Process } from './specs';
+import { num, readEdges, readProcesses, readValues, str, type Process } from './specs';
+import { graphFrames, graphLayout, layoutTree, nodeName, treeFrames } from './structures';
 
 const C = {
   ink: '#17171A', muted: '#5F5F68', faint: '#8B8B93', hairline: '#ECECE6', grid: '#F1F0EC',
@@ -654,6 +655,124 @@ function perceptron(ctx: Ctx, w: number, h: number, p: SimParams): Readout[] {
   ];
 }
 
+// ---------- Search trees ----------
+function tree(ctx: Ctx, w: number, h: number, p: SimParams, t: number): Readout[] {
+  const frames = treeFrames(readValues(p.values), str(p, 'kind'), Math.round(num(p, 'remove')), str(p, 'traversal'));
+  const index = Math.min(frames.length - 1, Math.floor(t * num(p, 'speed')));
+  const frame = frames[index];
+  const nodes = layoutTree(frame.root);
+  const depth = Math.max(1, ...nodes.map((n) => n.depth + 1));
+  const top = 56;
+  const rowH = Math.min(80, (h - top - 30) / depth);
+  const pos = new Map(nodes.map((n) => [n.value, { x: 24 + n.x * (w - 48), y: top + n.depth * rowH }]));
+  ctx.strokeStyle = '#C9C6BD';
+  ctx.lineWidth = 2;
+  for (const n of nodes) {
+    if (n.parent === null) continue;
+    const a = pos.get(n.parent)!;
+    const b = pos.get(n.value)!;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+  const r = Math.max(14, Math.min(22, (w - 48) / (nodes.length + 1) / 2.2));
+  for (const n of nodes) {
+    const { x, y } = pos.get(n.value)!;
+    const focus = frame.focus === n.value;
+    ctx.fillStyle = focus ? C.marigold : frame.visited.includes(n.value) ? C.mint : C.violetTint;
+    ctx.strokeStyle = focus ? C.ink : C.violet;
+    ctx.lineWidth = focus ? 3 : 2;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = C.ink;
+    font(ctx, 13, 700);
+    const label = String(n.value);
+    ctx.fillText(label, x - ctx.measureText(label).width / 2, y + 4.5);
+  }
+  ctx.fillStyle = C.ink;
+  font(ctx, 14, 600);
+  ctx.fillText(frame.caption.slice(0, Math.floor(w / 7.5)), 16, 28);
+  const hgt = nodes.length ? Math.max(...nodes.map((n) => n.depth)) + 1 : 0;
+  return [
+    { label: 'Step', value: `${index} / ${frames.length - 1}` },
+    { label: 'Nodes', value: String(nodes.length) },
+    { label: 'Height', value: String(hgt) },
+    ...(frame.visited.length ? [{ label: 'Visited', value: frame.visited.join(' ') }] : []),
+  ];
+}
+
+// ---------- Graph searches ----------
+function graphSearch(ctx: Ctx, w: number, h: number, p: SimParams, t: number): Readout[] {
+  const nodes = Math.round(num(p, 'nodes'));
+  const edges = readEdges(p.edges, nodes);
+  const algorithm = str(p, 'algorithm');
+  const start = Math.round(num(p, 'start'));
+  const target = Math.round(num(p, 'target'));
+  const frames = graphFrames(nodes, edges, algorithm, start, target);
+  const index = Math.min(frames.length - 1, Math.floor(t * num(p, 'speed')));
+  const frame = frames[index];
+  const size = Math.min(w, h - 40);
+  const ox = (w - size) / 2;
+  const oy = 40;
+  const pts = graphLayout(nodes).map((q) => ({ x: ox + q.x * size, y: oy + q.y * size }));
+  const onPath = (a: number, b: number) => {
+    const i = frame.path.indexOf(a);
+    return i !== -1 && (frame.path[i + 1] === b || frame.path[i - 1] === b);
+  };
+  for (const e of edges) {
+    const a = pts[e.from];
+    const b = pts[e.to];
+    const active = frame.edge && ((frame.edge[0] === e.from && frame.edge[1] === e.to) || (frame.edge[0] === e.to && frame.edge[1] === e.from));
+    ctx.strokeStyle = onPath(e.from, e.to) ? C.marigold : active ? C.violet : '#D9D6CE';
+    ctx.lineWidth = onPath(e.from, e.to) ? 6 : active ? 4 : 2;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    if (algorithm === 'dijkstra') {
+      const mx = (a.x + b.x) / 2;
+      const my = (a.y + b.y) / 2;
+      ctx.fillStyle = C.white;
+      roundRect(ctx, mx - 11, my - 10, 22, 18, 6);
+      ctx.fill();
+      ctx.fillStyle = C.muted;
+      font(ctx, 11, 700);
+      const label = String(e.weight);
+      ctx.fillText(label, mx - ctx.measureText(label).width / 2, my + 3);
+    }
+  }
+  pts.forEach((q, i) => {
+    const current = frame.current === i;
+    ctx.fillStyle = current ? C.marigold : frame.visited.includes(i) ? C.mint : frame.frontier.includes(i) ? C.violetTint : C.white;
+    ctx.strokeStyle = i === target ? C.coral : current ? C.ink : C.violet;
+    ctx.lineWidth = i === target || current ? 3 : 2;
+    ctx.beginPath();
+    ctx.arc(q.x, q.y, 20, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = C.ink;
+    font(ctx, 14, 800);
+    ctx.fillText(nodeName(i), q.x - 5, q.y + 5);
+    if (algorithm === 'dijkstra') {
+      font(ctx, 11, 600, true);
+      ctx.fillStyle = C.muted;
+      const d = frame.dist[i];
+      ctx.fillText(d === Infinity ? '∞' : String(d), q.x - 6, q.y + 36);
+    }
+  });
+  ctx.fillStyle = C.ink;
+  font(ctx, 14, 600);
+  ctx.fillText(frame.caption.slice(0, Math.floor(w / 7.5)), 16, 24);
+  return [
+    { label: 'Step', value: `${index} / ${frames.length - 1}` },
+    { label: 'Visited', value: frame.visited.map(nodeName).join(' ') || '—' },
+    { label: algorithm === 'dfs' ? 'Stack' : algorithm === 'bfs' ? 'Queue' : 'Updated', value: frame.frontier.map(nodeName).join(' ') || '—' },
+  ];
+}
+
 /** Draws one frame and returns the numbers to show beside it. */
 export function drawSimulation(ctx: Ctx, w: number, h: number, engine: EngineName, params: SimParams, t: number): Readout[] {
   ctx.clearRect(0, 0, w, h);
@@ -667,6 +786,8 @@ export function drawSimulation(ctx: Ctx, w: number, h: number, engine: EngineNam
     case 'sorting': return sorting(ctx, w, h, params, t);
     case 'logic': return logic(ctx, w, h, params);
     case 'perceptron': return perceptron(ctx, w, h, params);
+    case 'tree': return tree(ctx, w, h, params, t);
+    case 'graph': return graphSearch(ctx, w, h, params, t);
     default: return [];
   }
 }

@@ -121,3 +121,44 @@ describe('code slide colouring', async () => {
     assert.strictEqual(tokenize('x1 = 2', 'js').find((t) => t.kind === 'number').text, '2');
   });
 });
+
+describe('trees and graphs', async () => {
+  const st = await import('../features/classroom/simulations/structures.ts');
+  test('AVL stays balanced on sorted input where a BST degenerates', () => {
+    let bst = null, avl = null;
+    for (const v of [10, 20, 30, 40, 50, 60, 70]) { bst = st.insert(bst, v, false); avl = st.insert(avl, v, true); }
+    assert.strictEqual(bst.height, 7);
+    assert.strictEqual(avl.height, 3);
+    assert.deepStrictEqual(st.traverse(avl, 'inorder'), [10, 20, 30, 40, 50, 60, 70]);
+    assert.deepStrictEqual(st.traverse(avl, 'levelorder'), [40, 20, 60, 10, 30, 50, 70]);
+  });
+  test('delete with two children uses the in-order successor', () => {
+    let t = null;
+    for (const v of [50, 30, 70, 60, 80]) t = st.insert(t, v, false);
+    const notes = [];
+    t = st.remove(t, 50, false, notes);
+    assert.strictEqual(t.value, 60);
+    assert.deepStrictEqual(st.traverse(t, 'inorder'), [30, 60, 70, 80]);
+    assert.match(notes[0], /successor 60/);
+  });
+  test('tree frames name rotations and end with the traversal', () => {
+    const frames = st.treeFrames([30, 20, 10], 'avl', 0, 'preorder');
+    assert.ok(frames.some((f) => /Right rotation at 30/.test(f.caption)));
+    assert.deepStrictEqual(frames.at(-1).visited, [20, 10, 30]);
+    assert.match(st.treeFrames([1, 2], 'bst', 9, 'none').at(-1).caption, /not in the tree/);
+  });
+  const edges = [{ from: 0, to: 1, weight: 4 }, { from: 0, to: 2, weight: 1 }, { from: 2, to: 1, weight: 2 }, { from: 1, to: 3, weight: 1 }];
+  test('Dijkstra finds the cheaper indirect path', () => {
+    const last = st.graphFrames(4, edges, 'dijkstra', 0, 3).at(-1);
+    assert.deepStrictEqual(last.path, [0, 2, 1, 3]);
+    assert.deepStrictEqual(last.dist, [0, 3, 1, 4]);
+  });
+  test('BFS visits by layers, DFS goes deep first', () => {
+    const tree = [{ from: 0, to: 1, weight: 1 }, { from: 0, to: 2, weight: 1 }, { from: 1, to: 3, weight: 1 }];
+    assert.deepStrictEqual(st.graphFrames(4, tree, 'bfs', 0, 3).at(-1).visited, [0, 1, 2, 3]);
+    assert.deepStrictEqual(st.graphFrames(4, tree, 'dfs', 0, 3).at(-1).visited, [0, 1, 3, 2]);
+  });
+  test('unreachable target is reported', () => {
+    assert.match(st.graphFrames(4, [{ from: 0, to: 1, weight: 1 }], 'dijkstra', 0, 3).at(-1).caption, /cannot be reached/);
+  });
+});
