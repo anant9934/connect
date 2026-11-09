@@ -48,6 +48,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/meetings/calendar.ics", h.calendarAll)
 	r.Get("/meetings/{id}", h.detail)
 	r.Get("/meetings/{id}/calendar.ics", h.calendar)
+	r.Get("/meetings/{id}/decks", h.listDecks)
+	r.Get("/meetings/{id}/decks/{deck}", h.getDeck)
 }
 
 // Item is one row of search results.

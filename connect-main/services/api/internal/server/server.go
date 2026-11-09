@@ -381,6 +381,10 @@ func BuildRouter(
 						roomDetail.With(
 							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
 							appmw.OptionalAuth(authService),
+						).Post("/canvas/save", interactionHandler.SaveCanvasDeck)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
 						).Patch("/canvas", interactionHandler.UpdateCanvas)
 						roomDetail.With(
 							appmw.CSRFProtection(cfg.CORSAllowedOrigins),

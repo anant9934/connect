@@ -392,3 +392,24 @@ func (h *Handler) ListSimulationAnswers(w http.ResponseWriter, r *http.Request) 
 	}
 	model.SendJSON(w, http.StatusOK, map[string]any{"answers": answers})
 }
+
+// SaveCanvasDeck handles POST /rooms/{code}/canvas/save: copies the live deck to the class
+// vault, where everyone in the meeting can open it from meeting history after class.
+func (h *Handler) SaveCanvasDeck(w http.ResponseWriter, r *http.Request) {
+	c, ok := h.resolve(w, r)
+	if !ok {
+		return
+	}
+	if !h.allow(w, c, "canvas-save", 20, time.Minute) {
+		return
+	}
+	var id string
+	err := database.InCallerContext(c.r.Context(), h.pool, c.roomID, func(tx pgx.Tx) error {
+		return tx.QueryRow(c.r.Context(), `SELECT connect_auth.save_live_deck($1::UUID)::text`, c.roomID).Scan(&id)
+	})
+	if err != nil {
+		sendCanvasError(w, c.r, err, "Could not save the deck.")
+		return
+	}
+	model.SendJSON(w, http.StatusCreated, map[string]any{"id": id})
+}

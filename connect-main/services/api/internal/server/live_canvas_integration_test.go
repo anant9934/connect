@@ -104,6 +104,23 @@ func TestWorkflowDB_LiveCanvas(t *testing.T) {
 		api.want("settings on slides", http.StatusUnprocessableEntity, http.MethodPatch, path, host, map[string]any{"params": map[string]any{"angle": 30}})
 	})
 
+	t.Run("a moderator saves the deck and members open it from history", func(t *testing.T) {
+		api.want("member cannot save", http.StatusForbidden, http.MethodPost, path+"/save", member, map[string]any{})
+		saved := api.want("save", http.StatusCreated, http.MethodPost, path+"/save", host, map[string]any{})
+		roomID := field(api.want("room", http.StatusOK, http.MethodGet, roomPath(code), host, nil), "room", "id")
+		list := rowsOf(api.want("member lists", http.StatusOK, http.MethodGet, "/api/v1/meetings/"+roomID+"/decks", member, nil), "decks")
+		if len(list) != 1 || list[0]["id"] != saved["id"] || list[0]["slideCount"] != 3.0 {
+			t.Fatalf("decks: %v", list)
+		}
+		deck := api.want("member opens", http.StatusOK, http.MethodGet, "/api/v1/meetings/"+roomID+"/decks/"+saved["id"].(string), member, nil)
+		if d, _ := deck["deck"].(map[string]any); d == nil || d["content"] == nil {
+			t.Errorf("deck: %v", deck)
+		}
+		if got := rowsOf(api.want("stranger lists", http.StatusOK, http.MethodGet, "/api/v1/meetings/"+roomID+"/decks", stranger, nil), "decks"); len(got) != 0 {
+			t.Errorf("stranger sees %d decks", len(got))
+		}
+	})
+
 	t.Run("sandbox answers only while open, clamped, private to the student", func(t *testing.T) {
 		api.want("simulation", http.StatusCreated, http.MethodPost, path+"/generate", host, map[string]any{"kind": "simulation", "prompt": "throw"})
 		answer := map[string]any{"params": map[string]any{"angle": 500, "speed": 10}}
