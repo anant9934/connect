@@ -4,7 +4,8 @@ import { apiFetch } from '@/lib/api/client';
 
 export interface DeckColumn { heading: string; bullets: string[] }
 export interface LiveSlide {
-  layout: 'title' | 'bullets' | 'table' | 'code' | 'steps' | 'comparison';
+  layout: 'title' | 'bullets' | 'table' | 'code' | 'steps' | 'comparison' | 'diagram';
+  diagram?: { nodes: { id: string; label: string; shape: 'rect' | 'diamond' | 'pill' | 'cylinder' }[]; edges: { from: string; to: string; label?: string }[] };
   title: string;
   subtitle?: string;
   bullets?: string[];

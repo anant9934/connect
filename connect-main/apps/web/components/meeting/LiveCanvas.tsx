@@ -8,6 +8,7 @@ import type { CanvasState, LiveDeck, LiveSimulation, LiveSlide, SimAnswer, SimPa
 import { drawSimulation, type Readout } from '@/features/classroom/simulations/engines';
 import { ENGINE_SPECS, normalizeParams, RUN_KEY } from '@/features/classroom/simulations/specs';
 import { tokenize, TOKEN_COLORS } from '@/features/classroom/highlight';
+import { DiagramView } from './DiagramView';
 
 const POLL_INTERVAL_MS = 4000;
 const FRAME_INTERVAL_MS = 33;
@@ -94,6 +95,8 @@ function SlideBody({ slide }: { slide: LiveSlide }) {
           {list(slide.bullets)}
         </div>
       );
+    case 'diagram':
+      return slide.diagram ? <div className="h-full min-h-[200px] flex items-center justify-center"><DiagramView diagram={slide.diagram} /></div> : list(slide.bullets);
     case 'steps':
       return list(slide.steps, true);
     case 'comparison':

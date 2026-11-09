@@ -220,3 +220,28 @@ describe('study vault timestamps', async () => {
     assert.strictEqual(text, 'O\nHeap: tree\nR\nK');
   });
 });
+
+describe('diagram layout', async () => {
+  const { layoutDiagram } = await import('../features/classroom/diagramLayout.ts');
+  const n = (id, shape = 'rect') => ({ id, label: id.toUpperCase(), shape });
+  test('layers follow edges and every edge is routed', () => {
+    const d = { nodes: [n('a', 'pill'), n('b', 'diamond'), n('c'), n('d', 'cylinder')], edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c', label: 'yes' }, { from: 'b', to: 'd', label: 'no' }] };
+    const l = layoutDiagram(d);
+    const at = Object.fromEntries(l.nodes.map((x) => [x.id, x]));
+    assert.deepStrictEqual([at.a.layer, at.b.layer, at.c.layer, at.d.layer], [0, 1, 2, 2]);
+    assert.ok(at.a.y < at.b.y && at.b.y < at.c.y);
+    assert.strictEqual(l.edges.length, 3);
+    assert.ok(l.edges.every((e) => e.path.startsWith('M ')));
+    for (const p of l.nodes) for (const q of l.nodes) if (p !== q && p.layer === q.layer) assert.ok(p.x + p.w <= q.x || q.x + q.w <= p.x, 'nodes in a row must not overlap');
+  });
+  test('cycles become back edges instead of looping forever', () => {
+    const l = layoutDiagram({ nodes: [n('idle'), n('run'), n('done')], edges: [{ from: 'idle', to: 'run' }, { from: 'run', to: 'idle', label: 'pause' }, { from: 'run', to: 'done' }] });
+    assert.strictEqual(l.edges.filter((e) => e.back).length, 1);
+    assert.ok(l.width > 0 && l.height > 0);
+  });
+  test('unknown endpoints and self loops are ignored; output is deterministic', () => {
+    const d = { nodes: [n('a'), n('b')], edges: [{ from: 'a', to: 'zz' }, { from: 'a', to: 'a' }, { from: 'a', to: 'b' }] };
+    assert.strictEqual(layoutDiagram(d).edges.length, 1);
+    assert.deepStrictEqual(layoutDiagram(d), layoutDiagram(d));
+  });
+});
