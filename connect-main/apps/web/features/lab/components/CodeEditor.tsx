@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Clock,
   Sparkles,
+  Loader2,
 } from 'lucide-react';
 import type { SupportedLanguage } from '../types';
 import { STARTER_CODE_BY_LANGUAGE } from '../runtimes/starterTemplates';
@@ -71,6 +72,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   const [isRunning, setIsRunning] = useState<boolean>(false);
   // True when the last C++ run happened in the browser sandbox rather than the official runner.
   const [practiceRun, setPracticeRun] = useState(false);
+  // First-run compiler download, shown so a slow campus connection does not look like a frozen IDE.
+  const [compilerStatus, setCompilerStatus] = useState<{ cached: boolean; percent: number | null } | null>(null);
   const [executionTime, setExecutionTime] = useState<number | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -233,11 +236,17 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
         }
         if (!res && serverUnavailable && language === 'cpp') {
           setPracticeRun(true);
-          setStdout('Preparing the browser compiler…');
-          const browser = await runCppInBrowser(code, stdin, {
-            onProgress: (done, total) => setStdout(`Downloading the C++ compiler once (${Math.round((done / Math.max(total, 1)) * 100)}% of ~${CLANG_DOWNLOAD_MB} MB)…`),
-            onCompiled: () => setStdout('Running…'),
-          });
+          setStdout('Compiling…');
+          let browser;
+          try {
+            browser = await runCppInBrowser(code, stdin, {
+              onLoading: (cached) => setCompilerStatus({ cached, percent: null }),
+              onProgress: (done, total) => setCompilerStatus((s) => ({ cached: s?.cached ?? false, percent: Math.floor((done / Math.max(total, 1)) * 100) })),
+              onCompiled: () => { setCompilerStatus(null); setStdout('Running…'); },
+            });
+          } finally {
+            setCompilerStatus(null);
+          }
           res = { status: browser.status, stdout: browser.stdout, stderr: browser.stderr, compileOutput: browser.compileOutput, exitCode: browser.exitCode, timeMs: Math.round(browser.runMs) };
         }
         if (!res) {
@@ -498,6 +507,26 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
                   <p data-testid="practice-run-label" className="inline-flex items-center gap-1.5 rounded-full bg-[#FFF4D1] text-[#6B4E00] px-2.5 py-0.5 text-[11px] font-bold font-sans">
                     Practice run (browser sandbox) · not an official grade
                   </p>
+                )}
+                {compilerStatus && (
+                  <div data-testid="compiler-status" role="status" aria-live="polite" className="neu-pill inline-flex flex-col gap-1.5 px-3 py-2 font-sans text-[11px] text-[#17171A] max-w-full">
+                    <span className="flex items-start gap-1.5 font-semibold">
+                      <Loader2 className="w-3.5 h-3.5 shrink-0 mt-px animate-spin text-[#7444E8]" aria-hidden="true" />
+                      <span>
+                        {compilerStatus.cached
+                          ? 'Loading the C++ compiler saved in this browser…'
+                          : `Downloading C++ WebAssembly compiler (~${CLANG_DOWNLOAD_MB} MB, cached for future runs)…`}
+                      </span>
+                      {!compilerStatus.cached && compilerStatus.percent !== null && (
+                        <span className="ml-auto pl-2 tabular-nums text-[#5A2FC7]">{compilerStatus.percent}%</span>
+                      )}
+                    </span>
+                    {!compilerStatus.cached && (
+                      <span className="block h-1.5 w-full rounded-full bg-[#ECE8F8] overflow-hidden" aria-hidden="true">
+                        <span className="block h-full rounded-full bg-[#7444E8]" style={{ width: `${compilerStatus.percent ?? 0}%` }} />
+                      </span>
+                    )}
+                  </div>
                 )}
                 {stdout && (
                   <div className="text-[#17151F] whitespace-pre-wrap leading-relaxed">

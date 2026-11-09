@@ -1,10 +1,16 @@
 // Tathastu Meet service worker. Caches the app's static shell so it installs as a PWA and shows
 // an offline page instead of a browser error. It never caches API responses or page HTML, so
-// nothing personal is stored, and live meetings always use the network.
+// nothing personal is stored, and live meetings always use the network. The one cross-origin
+// exception is the pinned browser C++ compiler from jsDelivr (about 105 MB of public, versioned
+// files), kept so later sessions compile without downloading it again, even offline.
 const VERSION = 'v1';
 const SHELL = `tm-shell-${VERSION}`;
 const STATIC = `tm-static-${VERSION}`;
 const OFFLINE_URL = '/offline.html';
+// Keep in step with CLANG_VERSION in features/lab/runtimes/cppBrowser.ts (a unit test checks it).
+const CLANG_VERSION = '22.0.0-git20542-10';
+const CLANG_BASE = `https://cdn.jsdelivr.net/npm/@yowasp/clang@${CLANG_VERSION}/gen/`;
+const CLANG = `tm-clang-${CLANG_VERSION}`;
 const PRECACHE = [OFFLINE_URL, '/icon.svg', '/favicon.svg', '/android-chrome-192x192.png', '/android-chrome-512x512.png', '/site.webmanifest'];
 
 self.addEventListener('install', (event) => {
@@ -15,7 +21,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('tm-') && k !== SHELL && k !== STATIC).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('tm-') && k !== SHELL && k !== STATIC && k !== CLANG).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -24,6 +30,25 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
+
+  // The pinned compiler never changes at a given version: serve the stored copy when there is one.
+  // The lab's compiler worker writes the same cache, so each file is stored once.
+  if (request.url.startsWith(CLANG_BASE)) {
+    event.respondWith(
+      caches.open(CLANG).then((cache) =>
+        cache.match(request.url).then(
+          (hit) =>
+            hit ||
+            fetch(request).then((res) => {
+              if (res.ok) cache.put(request.url, res.clone()).catch(() => undefined);
+              return res;
+            })
+        )
+      )
+    );
+    return;
+  }
+
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/health')) return;
 

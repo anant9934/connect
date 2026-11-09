@@ -1,12 +1,16 @@
 // C++ practice runs in the browser, for when no server code runner is configured. A real
 // Clang/LLD (YoWASP, ISC licence) compiled to WebAssembly is loaded from jsDelivr at a pinned
-// version the first time someone runs C++ (about 105 MB, then cached by the browser). The
+// version the first time someone runs C++ (about 105 MB), then kept in the Cache API under a
+// versioned name shared with the service worker, so later sessions load it from disk, even offline. The
 // program compiles and runs inside a Web Worker; a time limit ends runaway loops. These runs
 // are practice only: official grades come from the server runner or from faculty review.
 
 export const CLANG_VERSION = '22.0.0-git20542-10';
-const CLANG_URL = `https://cdn.jsdelivr.net/npm/@yowasp/clang@${CLANG_VERSION}/gen/bundle.js`;
+const CLANG_BASE = `https://cdn.jsdelivr.net/npm/@yowasp/clang@${CLANG_VERSION}/gen/`;
+const CLANG_URL = `${CLANG_BASE}bundle.js`;
 export const CLANG_DOWNLOAD_MB = 105;
+/** Cache API name for the compiler files; public/sw.js uses the same name for the same version. */
+export const CLANG_CACHE = `tm-clang-${CLANG_VERSION}`;
 
 export interface BrowserRunResult {
   status: 'ok' | 'compile_error' | 'runtime_error' | 'time_limit';
@@ -19,6 +23,8 @@ export interface BrowserRunResult {
 }
 
 export interface BrowserRunOptions {
+  /** Called once before the compiler loads: true when it is already stored in this browser. */
+  onLoading?: (cached: boolean) => void;
   /** Called while the compiler downloads the first time. */
   onProgress?: (doneBytes: number, totalBytes: number) => void;
   /** Called when compilation finishes and the program starts. */
@@ -29,8 +35,32 @@ export interface BrowserRunOptions {
 // Runs inside the worker. Kept as a string so it needs no build step and can import from the CDN.
 const WORKER_SOURCE = `
 const CLANG_URL = ${JSON.stringify(CLANG_URL)};
+const CLANG_BASE = ${JSON.stringify(CLANG_BASE)};
+const CLANG_CACHE = ${JSON.stringify(CLANG_CACHE)};
 const MAX_OUTPUT = 65536;
 let clangPromise = null;
+
+// The compiler bundle reads globalThis.fetch when it loads, so this wrapper (installed before the
+// import) serves its 105 MB of wasm and headers from the Cache API after the first download.
+const networkFetch = self.fetch.bind(self);
+self.fetch = async (input, init) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  if (!url.startsWith(CLANG_BASE) || typeof caches === 'undefined') return networkFetch(input, init);
+  let cache = null;
+  try {
+    cache = await caches.open(CLANG_CACHE);
+    const hit = await cache.match(url);
+    if (hit) return hit;
+  } catch (e) { cache = null; }
+  const res = await networkFetch(url, init);
+  if (cache && res.ok) cache.put(url, res.clone()).catch(() => {});
+  return res;
+};
+
+async function compilerCached() {
+  try { return typeof caches !== 'undefined' && !!(await (await caches.open(CLANG_CACHE)).match(CLANG_BASE + 'llvm.core.wasm')); }
+  catch (e) { return false; }
+}
 
 class Exit { constructor(code) { this.code = code; } }
 
@@ -104,10 +134,27 @@ const join = (chunks) => {
   return new TextDecoder().decode(all);
 };
 
+let lastPercent = -1;
+const progress = (s) => {
+  const percent = Math.floor((100 * s.doneLength) / Math.max(s.totalLength, 1));
+  if (percent === lastPercent) return;
+  lastPercent = percent;
+  self.postMessage({ type: 'progress', done: s.doneLength, total: s.totalLength });
+};
+
 self.onmessage = async ({ data }) => {
   const { source, stdin } = data;
   try {
-    clangPromise = clangPromise || import(CLANG_URL);
+    if (!clangPromise) {
+      self.postMessage({ type: 'loading', cached: await compilerCached() });
+      // runClang drops fetchProgress on its internal first pass, so load the files through its
+      // --version path, which keeps it, before compiling anything.
+      clangPromise = import(CLANG_URL).then(async (m) => {
+        await m.runClang(['clang++', '--version'], {}, { stdout: () => {}, stderr: () => {}, fetchProgress: progress });
+        return m;
+      });
+      clangPromise.catch(() => { clangPromise = null; lastPercent = -1; });
+    }
     const clang = await clangPromise;
     const diagnostics = [];
     const capture = (b) => { if (b) diagnostics.push(new Uint8Array(b)); };
@@ -117,7 +164,7 @@ self.onmessage = async ({ data }) => {
       files = await clang.runClang(
         ['clang++', '-std=c++17', '-O1', '-fno-exceptions', '-Wall', 'main.cpp', '-o', 'main.wasm'],
         { 'main.cpp': source },
-        { stdout: capture, stderr: capture, fetchProgress: (s) => self.postMessage({ type: 'progress', done: s.doneLength, total: s.totalLength }) },
+        { stdout: capture, stderr: capture, fetchProgress: progress },
       );
     } catch (e) {
       self.postMessage({ type: 'done', result: { status: 'compile_error', stdout: '', stderr: '', compileOutput: join(diagnostics) || String(e && e.message || e), exitCode: 1, compileMs: performance.now() - t0, runMs: 0 } });
@@ -171,7 +218,8 @@ export function runCppInBrowser(source: string, stdin: string, options: BrowserR
       w.onerror = null;
     };
     w.onmessage = ({ data }) => {
-      if (data.type === 'progress') options.onProgress?.(data.done, data.total);
+      if (data.type === 'loading') options.onLoading?.(data.cached);
+      else if (data.type === 'progress') options.onProgress?.(data.done, data.total);
       else if (data.type === 'compiled') {
         options.onCompiled?.();
         // Only the program's own run counts against the limit, not the download or compile.
