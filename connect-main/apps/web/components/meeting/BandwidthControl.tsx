@@ -18,18 +18,21 @@ const readSaved = (): BandwidthMode => {
 };
 
 // Lets someone on a weak connection receive less video, and suggests it when the connection stays poor.
-export const BandwidthControl: React.FC<{ transport: MediaTransport }> = ({ transport }) => {
-  const [mode, setMode] = useState<BandwidthMode>('normal');
+// override, when set (listen-only mode), wins over the saved choice until it is cleared.
+export const BandwidthControl: React.FC<{ transport: MediaTransport; override?: BandwidthMode | null }> = ({ transport, override = null }) => {
+  const [mode, setMode] = useState<BandwidthMode>(() => (typeof window === 'undefined' ? 'normal' : readSaved()));
   const [advice, setAdvice] = useState(false);
 
   useEffect(() => {
-    const saved = readSaved();
-    setMode(saved);
-    transport.setBandwidthMode?.(saved);
+    setMode(readSaved());
   }, [transport]);
 
   useEffect(() => {
-    if (mode !== 'normal') {
+    transport.setBandwidthMode?.(override ?? mode);
+  }, [transport, mode, override]);
+
+  useEffect(() => {
+    if (mode !== 'normal' || override !== null) {
       setAdvice(false);
       return;
     }
@@ -44,11 +47,10 @@ export const BandwidthControl: React.FC<{ transport: MediaTransport }> = ({ tran
       }
     }, CHECK_EVERY_MS);
     return () => clearInterval(timer);
-  }, [mode, transport]);
+  }, [mode, override, transport]);
 
   const choose = (next: BandwidthMode) => {
     setMode(next);
-    transport.setBandwidthMode?.(next);
     try {
       window.localStorage.setItem(STORAGE_KEY, next);
     } catch {
@@ -62,7 +64,9 @@ export const BandwidthControl: React.FC<{ transport: MediaTransport }> = ({ tran
         <span className="sr-only">Video quality you receive</span>
         <select
           data-testid="bandwidth-mode"
-          value={mode}
+          value={override ?? mode}
+          disabled={override !== null}
+          title={override !== null ? 'Listen-only mode receives audio only' : undefined}
           onChange={(e) => choose(e.target.value as BandwidthMode)}
           className="bg-[#FAFAF8] border border-[#E5E7EB] rounded-lg px-1.5 min-h-[32px] text-[11px] text-[#1C1C1C] max-w-[8rem]"
         >

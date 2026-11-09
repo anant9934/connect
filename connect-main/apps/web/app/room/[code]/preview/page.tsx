@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Loader2, Video, AlertTriangle, VolumeX, Sparkles } from 'lucide-react';
+import { ArrowLeft, Loader2, Video, AlertTriangle, VolumeX, Sparkles, Headphones } from 'lucide-react';
 import { getRoom, joinRoom, resolveMeetingNumber } from '@/features/rooms/api';
 import { isMeetingNumber } from '@/features/rooms/joinTarget';
 import { getSession } from '@/features/auth/api';
@@ -347,7 +347,7 @@ export default function RoomPreviewPage() {
   }, [videoDevices, selectedVideoId, videoEnabled, mediaPerms, saveDevicePrefs]);
 
   // Join meeting handler
-  const handleJoin = async (e?: React.FormEvent, joinMuted = false) => {
+  const handleJoin = async (e?: React.FormEvent, joinMuted = false, listenOnly = false) => {
     if (e) e.preventDefault();
     setGuestNameError(null);
     setPasscodeError(null);
@@ -383,8 +383,9 @@ export default function RoomPreviewPage() {
         sessionStorage.setItem(
           `tathastu_room_${roomCode}`,
           JSON.stringify({
-            videoEnabled: finalVideo,
-            audioEnabled: finalAudio,
+            videoEnabled: listenOnly ? false : finalVideo,
+            audioEnabled: listenOnly ? false : finalAudio,
+            listenOnly,
             selectedVideoId,
             selectedAudioId,
             participantIdentity: joinRes.participant.identity,
@@ -633,6 +634,19 @@ export default function RoomPreviewPage() {
                 >
                   <VolumeX className="w-3.5 h-3.5" />
                   <span>Join with camera & mic off</span>
+                </button>
+
+                {/* Listen-only: nothing is sent, and only audio, slides and class activity are received. */}
+                <button
+                  id="join-listen-only-btn"
+                  data-testid="join-listen-only-btn"
+                  type="button"
+                  onClick={() => handleJoin(undefined, true, true)}
+                  disabled={joining}
+                  className="neu-pill w-full py-2 px-3 text-xs font-semibold text-[#17171A] flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <Headphones className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Listen only (low data)</span>
                 </button>
               </div>
             </form>

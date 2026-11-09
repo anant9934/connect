@@ -63,6 +63,8 @@ interface MeetingRoomProps {
   audioDeviceId?: string;
   identity?: string;
   displayName?: string;
+  /** Join without sending audio or video and receive audio only, for weak connections. */
+  initialListenOnly?: boolean;
 }
 
 export const MeetingRoom: React.FC<MeetingRoomProps> = ({
@@ -76,6 +78,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   audioDeviceId,
   identity: initialIdentity,
   displayName: initialDisplayName,
+  initialListenOnly = false,
 }) => {
   const router = useRouter();
 
@@ -88,6 +91,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const [isMicMuted, setIsMicMuted] = useState(!initialAudioEnabled);
   const [isVideoMuted, setIsVideoMuted] = useState(!initialVideoEnabled);
+  const [isListenOnly, setIsListenOnly] = useState(initialListenOnly);
   const isMicMutedRef = useRef(!initialAudioEnabled);
   const isVideoMutedRef = useRef(!initialVideoEnabled);
   isMicMutedRef.current = isMicMuted;
@@ -624,6 +628,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     setIsMicPending(true);
     try {
       const willEnable = isMicMuted;
+      // Speaking means taking part again, so it ends listen-only mode.
+      if (willEnable) setIsListenOnly(false);
       await transport.setMicrophoneEnabled(willEnable, audioDeviceId);
       setIsMicMuted(!willEnable);
       setIsMicBlocked(false);
@@ -645,6 +651,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     setIsVideoPending(true);
     try {
       const willEnable = isVideoMuted;
+      if (willEnable) setIsListenOnly(false);
       await transport.setCameraEnabled(willEnable, videoDeviceId);
       setIsVideoMuted(!willEnable);
       setIsVideoBlocked(false);
@@ -657,6 +664,26 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
     } finally {
       setIsVideoPending(false);
+    }
+  };
+
+  // Listen-only stops sending audio and video; BandwidthControl switches receiving to audio only.
+  const handleToggleListenOnly = async () => {
+    const transport = transportRef.current;
+    const next = !isListenOnly;
+    setIsListenOnly(next);
+    if (!next || !transport) return;
+    try {
+      if (!isMicMuted) {
+        await transport.setMicrophoneEnabled(false, audioDeviceId);
+        setIsMicMuted(true);
+      }
+      if (!isVideoMuted) {
+        await transport.setCameraEnabled(false, videoDeviceId);
+        setIsVideoMuted(true);
+      }
+    } catch {
+      // Tracks that fail to stop stay as they are; the toggles still show their state.
     }
   };
 
@@ -1158,6 +1185,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         onClosePanel={() => setActivePanel(null)}
         onToggleMic={handleToggleMic}
         onToggleVideo={handleToggleVideo}
+        isListenOnly={isListenOnly}
+        onToggleListenOnly={handleToggleListenOnly}
         onToggleScreenShare={handleToggleScreenShare}
         onToggleLock={handleToggleLock}
         onRemoveParticipant={handleRemoveParticipant}

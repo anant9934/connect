@@ -81,6 +81,8 @@ interface MeetingStageProps {
   onClosePanel: () => void;
   onToggleMic: () => void;
   onToggleVideo: () => void;
+  isListenOnly?: boolean;
+  onToggleListenOnly?: () => void;
   onToggleScreenShare: () => void;
   onToggleLock: () => void;
   onRemoveParticipant: (identity: string) => Promise<void>;
@@ -131,6 +133,8 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
   onClosePanel,
   onToggleMic,
   onToggleVideo,
+  isListenOnly = false,
+  onToggleListenOnly,
   onToggleScreenShare,
   onToggleLock,
   onRemoveParticipant,
@@ -207,7 +211,7 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
           <ConnectionStatus connectionState={connectionState} />
           {/* Integrated WebRTC Transport Diagnostics in header layout zone */}
           {transport && <TransportDiagnostics transport={transport} inline={true} />}
-          {transport && <BandwidthControl transport={transport} />}
+          {transport && <BandwidthControl transport={transport} override={isListenOnly ? 'audio-only' : null} />}
         </div>
 
         <div className="flex items-center gap-3">
@@ -463,6 +467,8 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
         isHandRaised={isLocalHandRaised}
         onToggleMic={onToggleMic}
         onToggleVideo={onToggleVideo}
+        isListenOnly={isListenOnly}
+        onToggleListenOnly={onToggleListenOnly}
         onToggleScreenShare={onToggleScreenShare}
         onTogglePanel={onTogglePanel}
         onOpenInvite={() => setShowInviteDialog(true)}

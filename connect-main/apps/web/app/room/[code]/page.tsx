@@ -29,6 +29,7 @@ export default function MeetingRoomPage() {
     isHost: boolean;
     participantIdentity?: string;
     displayName?: string;
+    listenOnly?: boolean;
   } | null>(null);
 
   const fetchToken = useCallback(
@@ -122,6 +123,7 @@ export default function MeetingRoomPage() {
         isHost: parsedConfig.isHost ?? false,
         participantIdentity: parsedConfig.participantIdentity,
         displayName: parsedConfig.displayName,
+        listenOnly: parsedConfig.listenOnly === true,
       });
 
       // 2. Request LiveKit token
@@ -217,6 +219,7 @@ export default function MeetingRoomPage() {
       audioDeviceId={roomConfig.selectedAudioId}
       identity={roomConfig.participantIdentity}
       displayName={roomConfig.displayName}
+      initialListenOnly={roomConfig.listenOnly}
     />
   );
 }

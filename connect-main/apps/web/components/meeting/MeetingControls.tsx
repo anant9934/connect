@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import {
   Mic,
+  Headphones,
   MicOff,
   Video,
   VideoOff,
@@ -40,6 +41,8 @@ interface MeetingControlsProps {
   isHandRaised: boolean;
   onToggleMic: () => void;
   onToggleVideo: () => void;
+  isListenOnly?: boolean;
+  onToggleListenOnly?: () => void;
   onRequestDeviceHelp?: (device: 'camera' | 'microphone') => void;
   onToggleScreenShare: () => void;
   onTogglePanel: (panel: 'chat' | 'participants' | 'notes' | 'files' | 'classroom') => void;
@@ -66,6 +69,8 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
   isHandRaised,
   onToggleMic,
   onToggleVideo,
+  isListenOnly = false,
+  onToggleListenOnly,
   onRequestDeviceHelp,
   onToggleScreenShare,
   onTogglePanel,
@@ -190,6 +195,23 @@ export const MeetingControls: React.FC<MeetingControlsProps> = ({
                 </span>
               )}
             </div>
+
+            {/* Listen-only: send nothing and receive audio only. Pressed in while on. */}
+            {onToggleListenOnly && (
+              <button
+                id="toolbar-listen-only-btn"
+                data-testid="listen-only-toggle"
+                onClick={onToggleListenOnly}
+                aria-pressed={isListenOnly}
+                className={`neu-pill min-w-[46px] min-h-[46px] p-2.5 sm:p-3 !rounded-2xl flex items-center justify-center ${
+                  isListenOnly ? 'text-[#5A2FC7] !bg-[#F1EBFF]' : 'text-[#1C1C1C]'
+                }`}
+                aria-label={isListenOnly ? 'Leave listen-only mode' : 'Listen only (low data)'}
+                title={isListenOnly ? 'Listen-only: sending nothing, receiving audio only' : 'Listen only (low data)'}
+              >
+                <Headphones className="w-5 h-5" />
+              </button>
+            )}
 
             {/* 3. Screen Share (Desktop only; on mobile accessible via More Sheet) */}
             <button
