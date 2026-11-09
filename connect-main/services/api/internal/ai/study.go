@@ -184,7 +184,26 @@ func (h *Handler) summariseMeeting(w http.ResponseWriter, r *http.Request) {
 	if courseCode == "" {
 		courseCode = title
 	}
-	summary, usage, err := h.service.SummarizeLecture(r.Context(), orgID.String(), userID, courseCode, buildMeetingTranscript(lines, doubts, recStart))
+	full := buildMeetingTranscript(lines, doubts, recStart)
+	var (
+		summary *LectureSummary
+		usage   *Usage
+	)
+	if len(full) > chunkThresholdChars && len(lines) > 0 {
+		// Long class: summarise ten-minute windows, then merge. Times stay measured from the
+		// recording (or the first line), so they still link to the right moment.
+		base := lines[0].SpokenAt
+		if recStart != nil {
+			base = *recStart
+		}
+		var texts []string
+		for _, chunk := range chunkLines(lines) {
+			texts = append(texts, buildMeetingTranscript(chunk, nil, &base))
+		}
+		summary, usage, err = h.service.SummarizeLongLecture(r.Context(), orgID.String(), userID, courseCode, texts, buildMeetingTranscript(nil, doubts, nil))
+	} else {
+		summary, usage, err = h.service.SummarizeLecture(r.Context(), orgID.String(), userID, courseCode, full)
+	}
 	if err != nil {
 		h.handleError(w, r, err)
 		return

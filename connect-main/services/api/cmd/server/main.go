@@ -280,6 +280,8 @@ func main() {
 
 	// 7. Initialize In-Process Background Worker (if enabled)
 	var workerRunner *worker.Runner
+		// Completions survive restarts (free-tier spin-downs) in a cache table behind the memory cache.
+		aiService.SetCacheStore(ai.NewPgCacheStore(db.Pool))
 	var workerCancel context.CancelFunc
 	workerDone := make(chan struct{})
 

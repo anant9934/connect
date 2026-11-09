@@ -2,11 +2,17 @@ package ai
 
 import (
 	"container/list"
+	"context"
+	"errors"
+	"log/slog"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ResponseCache returns a stored completion for a request seen before, so repeating a request
@@ -95,4 +101,47 @@ func (c *ResponseCache) Len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.order.Len()
+}
+
+// CacheStore persists completions across restarts, behind the in-memory cache.
+type CacheStore interface {
+	Get(ctx context.Context, key string) (*CompletionResult, bool)
+	Put(ctx context.Context, key, budgetKey string, result *CompletionResult)
+}
+
+// PgCacheStore keeps completions in ai_response_cache through security-definer functions.
+// Failures only cost a cache miss; they never fail the request.
+type PgCacheStore struct {
+	pool *pgxpool.Pool
+	ttl  time.Duration
+}
+
+// NewPgCacheStore stores completions for a week.
+func NewPgCacheStore(pool *pgxpool.Pool) *PgCacheStore {
+	return &PgCacheStore{pool: pool, ttl: 7 * 24 * time.Hour}
+}
+
+func (s *PgCacheStore) Get(ctx context.Context, key string) (*CompletionResult, bool) {
+	if s == nil || s.pool == nil {
+		return nil, false
+	}
+	var res CompletionResult
+	err := s.pool.QueryRow(ctx, `SELECT content, model, provider FROM connect_auth.ai_cache_get($1)`, key).Scan(&res.Content, &res.Model, &res.Provider)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("ai_cache_read_failed", slog.String("error", err.Error()))
+		}
+		return nil, false
+	}
+	return &res, true
+}
+
+func (s *PgCacheStore) Put(ctx context.Context, key, budgetKey string, result *CompletionResult) {
+	if s == nil || s.pool == nil || result == nil || result.IsMock || result.Content == "" {
+		return
+	}
+	if _, err := s.pool.Exec(ctx, `SELECT connect_auth.ai_cache_put($1, $2, $3, $4, $5, $6)`,
+		key, budgetKey, result.Model, result.Provider, result.Content, int(s.ttl.Seconds())); err != nil {
+		slog.Warn("ai_cache_write_failed", slog.String("error", err.Error()))
+	}
 }

@@ -30,6 +30,7 @@ type Service struct {
 	cfg          ServiceConfig
 	policyEngine *PolicyEngine
 	cache        *ResponseCache
+	store        CacheStore
 
 	mu sync.RWMutex
 }
@@ -73,6 +74,11 @@ func NewService(
 		policyEngine: pe,
 		cache:        NewResponseCache(500, 24*time.Hour),
 	}
+}
+
+// SetCacheStore adds a persistent cache behind the in-memory one.
+func (s *Service) SetCacheStore(store CacheStore) {
+	s.store = store
 }
 
 // PolicyEngine returns the policy engine for org budget and permission management.
@@ -133,14 +139,34 @@ func (s *Service) checkLimits(ctx context.Context, orgID, userID, model string, 
 // complete enforces limits, reserves budget, calls the router and settles the reservation
 // against the amount actually billed. The reservation is released if the call fails.
 func (s *Service) complete(ctx context.Context, orgID, userID string, req CompletionRequest) (*CompletionResult, error) {
+	return s.completeWith(ctx, orgID, userID, req, false)
+}
+
+// completeWith is complete; skipRate leaves out the per-minute and per-day request limits, for
+// the later calls of one request that needs several (a long lecture in chunks). Budget is
+// still checked on every call.
+func (s *Service) completeWith(ctx context.Context, orgID, userID string, req CompletionRequest, skipRate bool) (*CompletionResult, error) {
 	// An identical earlier request is answered from the cache: no provider call, quota or budget.
 	key := cacheKey(orgID, req)
 	if hit, ok := s.cache.Get(key); ok {
 		hit.Usage = Usage{Provider: hit.Provider, Model: hit.Model, CacheHit: true}
 		return hit, nil
 	}
+	if s.store != nil {
+		if hit, ok := s.store.Get(ctx, key); ok {
+			s.cache.Put(key, hit)
+			hit.Usage = Usage{Provider: hit.Provider, Model: hit.Model, CacheHit: true}
+			return hit, nil
+		}
+	}
 
-	reserved, err := s.checkLimits(ctx, orgID, userID, req.Model, req.MaxTokens)
+	var reserved int64
+	var err error
+	if skipRate {
+		reserved, err = s.policyEngine.AuthorizeRequest(ctx, orgID, req.Model, req.MaxTokens)
+	} else {
+		reserved, err = s.checkLimits(ctx, orgID, userID, req.Model, req.MaxTokens)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +187,9 @@ func (s *Service) complete(ctx context.Context, orgID, userID string, req Comple
 	}
 	s.policyEngine.SettleSpend(orgID, reserved, res.Usage.BilledCostMicroUSD)
 	s.cache.Put(key, res)
+	if s.store != nil {
+		s.store.Put(ctx, key, orgID, res)
+	}
 	return res, nil
 }
 
@@ -171,23 +200,7 @@ func (s *Service) SummarizeLecture(ctx context.Context, orgID, userID, courseCod
 		return nil, nil, err
 	}
 
-	systemPrompt := `You are an expert academic lecture assistant. Analyze the provided lecture transcript and return a structured JSON summary matching this schema:
-{
-  "title": "Concise Lecture Topic Title",
-  "overview": "2-3 paragraph academic overview",
-  "keyConcepts": ["Concept 1", "Concept 2"],
-  "takeaways": ["Takeaway 1", "Takeaway 2"],
-  "actionItems": ["Homework or revision item 1"],
-  "topics": [{"title": "Topic in the order taught", "at": "MM:SS", "points": ["Subtopic or key point"]}],
-  "definitions": [{"term": "Term", "meaning": "Formal definition as taught"}],
-  "revisionNotes": ["One-line fact to revise before an exam"],
-  "questions": [{"question": "A question a student asked", "answer": "The teacher's answer, if given", "at": "MM:SS", "answered": true}],
-  "unresolved": ["A question or confusion left open, to follow up"]
-}
-Transcript lines may start with [MM:SS], the time into the class recording. Use those times for "at";
-if a line has no time, leave "at" empty. Never invent times. The lecture may mix English and Hindi
-(Hinglish); write the summary in clear English. Questions may also come from the class Q&A list.
-Return only valid JSON.`
+	systemPrompt := lectureSummarySystemPrompt
 
 	userPrompt := fmt.Sprintf("Course: %s\nTranscript:\n%s", courseCode, s.sanitizer.WrapUserContent("lecture_transcript", cleanTranscript))
 
@@ -308,3 +321,22 @@ Return only valid JSON.`
 
 	return cards, &res.Usage, nil
 }
+
+// lectureSummarySystemPrompt asks for the full lecture notes schema.
+const lectureSummarySystemPrompt = `You are an expert academic lecture assistant. Analyze the provided lecture transcript and return a structured JSON summary matching this schema:
+{
+  "title": "Concise Lecture Topic Title",
+  "overview": "2-3 paragraph academic overview",
+  "keyConcepts": ["Concept 1", "Concept 2"],
+  "takeaways": ["Takeaway 1", "Takeaway 2"],
+  "actionItems": ["Homework or revision item 1"],
+  "topics": [{"title": "Topic in the order taught", "at": "MM:SS", "points": ["Subtopic or key point"]}],
+  "definitions": [{"term": "Term", "meaning": "Formal definition as taught"}],
+  "revisionNotes": ["One-line fact to revise before an exam"],
+  "questions": [{"question": "A question a student asked", "answer": "The teacher's answer, if given", "at": "MM:SS", "answered": true}],
+  "unresolved": ["A question or confusion left open, to follow up"]
+}
+Transcript lines may start with [MM:SS], the time into the class recording. Use those times for "at";
+if a line has no time, leave "at" empty. Never invent times. The lecture may mix English and Hindi
+(Hinglish); write the summary in clear English. Questions may also come from the class Q&A list.
+Return only valid JSON.`
