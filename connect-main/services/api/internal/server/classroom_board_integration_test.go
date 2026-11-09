@@ -280,4 +280,16 @@ func TestWorkflowDB_ClassroomBoards(t *testing.T) {
 		move("stranger", http.StatusForbidden, stranger, note)
 		patch("host closes drawing", http.StatusOK, host, map[string]any{"studentsCanDraw": false})
 	})
+
+	t.Run("math blocks and the larger whiteboard", func(t *testing.T) {
+		b := stroke("whiteboard")
+		b["tool"], b["points"], b["body"] = "math", [][]float64{{-1.5, 2.5}}, `\frac{n(n+1)}{2}`
+		post("math beyond the first view", http.StatusCreated, host, b)
+		bare := stroke("whiteboard")
+		bare["tool"], bare["points"] = "math", [][]float64{{0.5, 0.5}}
+		post("math needs its formula", http.StatusBadRequest, host, bare)
+		far := stroke("whiteboard")
+		far["points"] = [][]float64{{9, 9}}
+		post("still bounded", http.StatusBadRequest, host, far)
+	})
 }

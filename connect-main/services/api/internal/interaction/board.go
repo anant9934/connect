@@ -54,7 +54,7 @@ type Stroke struct {
 }
 
 // boardTools maps each tool to how many points it stores: 0 means any number (free drawing).
-var boardTools = map[string]int{"pen": 0, "highlighter": 0, "rect": 2, "circle": 2, "arrow": 2, "text": 1, "note": 1}
+var boardTools = map[string]int{"pen": 0, "highlighter": 0, "rect": 2, "circle": 2, "arrow": 2, "text": 1, "note": 1, "math": 1}
 
 const maxBoardBody = 500
 
@@ -192,13 +192,33 @@ func (h *Handler) ListStrokes(w http.ResponseWriter, r *http.Request) {
 	model.SendJSON(w, http.StatusOK, map[string]any{"strokes": strokes})
 }
 
+// The whiteboard pans and zooms over an area larger than its first view; slide annotations
+// stay on their page, the 0-1 square.
+const (
+	whiteboardMin = -4.0
+	whiteboardMax = 5.0
+)
+
+// pointBounds returns the coordinate range allowed on a board.
+func pointBounds(board string) (float64, float64) {
+	if board == "whiteboard" {
+		return whiteboardMin, whiteboardMax
+	}
+	return 0, 1
+}
+
 // validPoints requires 1 to maxStrokePoints pairs, each within the 0-1 square.
 func validPoints(points [][]float64) bool {
+	return validPointsIn(points, 0, 1)
+}
+
+// validPointsIn requires 1 to maxStrokePoints pairs, each within [lo, hi].
+func validPointsIn(points [][]float64, lo, hi float64) bool {
 	if len(points) == 0 || len(points) > maxStrokePoints {
 		return false
 	}
 	for _, p := range points {
-		if len(p) != 2 || math.IsNaN(p[0]) || math.IsNaN(p[1]) || p[0] < 0 || p[0] > 1 || p[1] < 0 || p[1] > 1 {
+		if len(p) != 2 || math.IsNaN(p[0]) || math.IsNaN(p[1]) || p[0] < lo || p[0] > hi || p[1] < lo || p[1] > hi {
 			return false
 		}
 	}
@@ -231,9 +251,10 @@ func (h *Handler) PostStroke(w http.ResponseWriter, r *http.Request) {
 		req.Tool = "pen"
 	}
 	pointCount, knownTool := boardTools[req.Tool]
-	needsBody := req.Tool == "text" || req.Tool == "note"
+	needsBody := req.Tool == "text" || req.Tool == "note" || req.Tool == "math"
+	lo, hi := pointBounds(req.Board)
 	if !clientMessageIDPattern.MatchString(req.ClientStrokeID) || !boardPattern.MatchString(req.Board) || !colorPattern.MatchString(req.Color) ||
-		!knownTool || req.Width < 1 || req.Width > 40 || !validPoints(req.Points) ||
+		!knownTool || req.Width < 1 || req.Width > 40 || !validPointsIn(req.Points, lo, hi) ||
 		(pointCount > 0 && len(req.Points) != pointCount) || needsBody != (req.Body != "") || (needsBody && !validBody(req.Body)) {
 		model.SendJSONError(w, c.r, http.StatusBadRequest, "INVALID_STROKE", "This stroke is not valid.")
 		return
@@ -308,7 +329,8 @@ func (h *Handler) MoveStroke(w http.ResponseWriter, r *http.Request) {
 	}
 	decoder := json.NewDecoder(c.r.Body)
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&req); err != nil || !uuidPattern.MatchString(req.ID) || len(req.Points) != 1 || !validPoints(req.Points) {
+	// The database knows the item's board; the widest (whiteboard) range is checked here.
+	if err := decoder.Decode(&req); err != nil || !uuidPattern.MatchString(req.ID) || len(req.Points) != 1 || !validPointsIn(req.Points, whiteboardMin, whiteboardMax) {
 		model.SendJSONError(w, c.r, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid request body.")
 		return
 	}

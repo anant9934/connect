@@ -25,3 +25,21 @@ func TestValidBody(t *testing.T) {
 		t.Error("point counts")
 	}
 }
+
+func TestPointBounds(t *testing.T) {
+	outside := [][]float64{{-2.5, 3.2}}
+	lo, hi := pointBounds("whiteboard")
+	if !validPointsIn(outside, lo, hi) {
+		t.Error("the whiteboard should accept points beyond its first view")
+	}
+	lo, hi = pointBounds("slide:00000000-0000-0000-0000-000000000000:1")
+	if validPointsIn(outside, lo, hi) {
+		t.Error("slide annotations must stay on the page")
+	}
+	if validPointsIn([][]float64{{9, 0}}, whiteboardMin, whiteboardMax) {
+		t.Error("the whiteboard is large, not unbounded")
+	}
+	if boardTools["math"] != 1 {
+		t.Error("math blocks have one point")
+	}
+}
