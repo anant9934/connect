@@ -65,6 +65,8 @@ type Usage struct {
 	EstimatedCostMicroUSD int64  `json:"estimatedCostMicroUSD"` // provider theoretical cost
 	BilledCostMicroUSD    int64  `json:"billedCostMicroUSD"`    // actual amount billed to organization (0 for free tier)
 	IsMock                bool   `json:"isMock,omitempty"`
+	// CacheHit means the answer came from the response cache and used no provider tokens.
+	CacheHit bool `json:"cacheHit,omitempty"`
 }
 
 // CompletionRequest is a provider-neutral request for text generation.

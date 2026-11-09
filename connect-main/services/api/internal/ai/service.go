@@ -29,6 +29,7 @@ type Service struct {
 	limiter      ratelimit.Limiter
 	cfg          ServiceConfig
 	policyEngine *PolicyEngine
+	cache        *ResponseCache
 
 	mu sync.RWMutex
 }
@@ -70,6 +71,7 @@ func NewService(
 		limiter:      limiter,
 		cfg:          cfg,
 		policyEngine: pe,
+		cache:        NewResponseCache(500, 24*time.Hour),
 	}
 }
 
@@ -131,6 +133,13 @@ func (s *Service) checkLimits(ctx context.Context, orgID, userID, model string, 
 // complete enforces limits, reserves budget, calls the router and settles the reservation
 // against the amount actually billed. The reservation is released if the call fails.
 func (s *Service) complete(ctx context.Context, orgID, userID string, req CompletionRequest) (*CompletionResult, error) {
+	// An identical earlier request is answered from the cache: no provider call, quota or budget.
+	key := cacheKey(orgID, req)
+	if hit, ok := s.cache.Get(key); ok {
+		hit.Usage = Usage{Provider: hit.Provider, Model: hit.Model, CacheHit: true}
+		return hit, nil
+	}
+
 	reserved, err := s.checkLimits(ctx, orgID, userID, req.Model, req.MaxTokens)
 	if err != nil {
 		return nil, err
@@ -151,6 +160,7 @@ func (s *Service) complete(ctx context.Context, orgID, userID string, req Comple
 		res.Usage.BilledCostMicroUSD = 0
 	}
 	s.policyEngine.SettleSpend(orgID, reserved, res.Usage.BilledCostMicroUSD)
+	s.cache.Put(key, res)
 	return res, nil
 }
 
