@@ -1,4 +1,5 @@
 import type { SupportedLanguage, PilotCourseMeta } from '../types';
+import { DSA_MODULES, OOP_MODULES } from '../curriculum/cpp';
 
 export const STARTER_CODE_BY_LANGUAGE: Record<SupportedLanguage, string> = {
   cpp: `#include <iostream>
@@ -285,91 +286,25 @@ export const PILOT_COURSES: PilotCourseMeta[] = [
     slug: 'cpp-oops',
     title: 'Object-Oriented Programming with C++',
     code: 'CS201-OOP',
-    tagline: 'Classes, Objects, Inheritance, Virtual Functions & Memory Layout',
+    tagline: 'Classes and objects, encapsulation, inheritance and polymorphism',
     description: 'Master practical C++ development including encapsulation, inheritance hierarchies, dynamic polymorphism, operator overloading, and memory management with RAII.',
     badge: 'C++',
     primaryLanguage: 'cpp',
     tools: ['editor', 'oops_visualizer'],
     accentColor: '#7444E8',
-    modules: [
-      {
-        order: 1,
-        title: 'Classes, Objects & Encapsulation',
-        description: 'Constructors, destructors, access specifiers, and getter/setter patterns.',
-        lessons: ['Class Anatomy & Member Variables', 'Constructor Delegating & Initialization Lists', 'Const Correctness'],
-        sampleExercise: {
-          title: 'BankAccount Class with Balance Validation',
-          problem: 'Implement a BankAccount class with deposit(amount), withdraw(amount), and getBalance() methods. Disallow negative deposits or withdrawals exceeding balance.',
-          difficulty: 'beginner',
-          language: 'cpp',
-          starterCode: `#include <iostream>\nusing namespace std;\n\nclass BankAccount {\nprivate:\n    double balance;\npublic:\n    BankAccount(double init) : balance(init) {}\n    void deposit(double amt) {\n        // TODO\n    }\n    bool withdraw(double amt) {\n        // TODO\n        return false;\n    }\n    double getBalance() const {\n        return balance;\n    }\n};\n\nint main() {\n    BankAccount acc(100.0);\n    acc.deposit(50.0);\n    cout << "Balance: " << acc.getBalance() << endl;\n    return 0;\n}`,
-          testCases: [
-            { input: '', expected_output: 'Balance: 150', is_hidden: false },
-          ],
-        },
-      },
-      {
-        order: 2,
-        title: 'Inheritance & Polymorphism',
-        description: 'Base and derived classes, virtual functions, vtables, and pure abstract interfaces.',
-        lessons: ['Public vs Private Inheritance', 'Virtual Functions & Runtime Dispatch', 'Abstract Base Classes'],
-        sampleExercise: {
-          title: 'Geometric Shapes Polymorphic Hierarchy',
-          problem: 'Create an abstract Shape class with virtual double area() const = 0, and implement Rectangle and Circle derived classes.',
-          difficulty: 'medium',
-          language: 'cpp',
-          starterCode: `#include <iostream>\nusing namespace std;\n\nclass Shape {\npublic:\n    virtual double area() const = 0;\n    virtual ~Shape() {}\n};\n\nint main() {\n    cout << "Shapes initialized" << endl;\n    return 0;\n}`,
-          testCases: [
-            { input: '', expected_output: 'Shapes initialized', is_hidden: false },
-          ],
-        },
-      },
-    ],
+    modules: OOP_MODULES,
   },
   {
     slug: 'dsa',
     title: 'Data Structures & Algorithms',
     code: 'CS202-DSA',
-    tagline: 'Linear Structures, Trees, Graphs, Sorting & Traversal Visualizers',
+    tagline: 'Arrays, lists, stacks, queues, trees, graphs, searching, sorting and DP',
     description: 'Design and analyze data structures and algorithmic complexity with interactive animated visualizers for arrays, linked lists, stacks, queues, trees, and sorting.',
     badge: 'DSA',
     primaryLanguage: 'cpp',
     tools: ['editor', 'dsa_visualizer'],
     accentColor: '#2DBE74',
-    modules: [
-      {
-        order: 1,
-        title: 'Linear Data Structures',
-        description: 'Singly and doubly linked lists, circular buffers, stack push/pop, queue operations.',
-        lessons: ['Pointers & Node Allocation', 'Stack Operations & Parenthesis Matching', 'Queue Implementations'],
-        sampleExercise: {
-          title: 'Reverse a Singly Linked List',
-          problem: 'Given the head of a linked list, reverse it in-place in O(N) time and O(1) auxiliary space.',
-          difficulty: 'medium',
-          language: 'cpp',
-          starterCode: `#include <iostream>\nusing namespace std;\n\nstruct ListNode {\n    int val;\n    ListNode* next;\n    ListNode(int x) : val(x), next(nullptr) {}\n};\n\nListNode* reverseList(ListNode* head) {\n    // TODO: Invert next pointers\n    return head;\n}\n\nint main() {\n    cout << "Reversed successfully" << endl;\n    return 0;\n}`,
-          testCases: [
-            { input: '', expected_output: 'Reversed successfully', is_hidden: false },
-          ],
-        },
-      },
-      {
-        order: 2,
-        title: 'Trees & Graph Algorithms',
-        description: 'Binary search trees, traversals (pre, in, post), BFS and DFS traversals.',
-        lessons: ['BST Insertion & Lookup', 'In-Order Traversal Sorting Property', 'Breadth-First Search'],
-        sampleExercise: {
-          title: 'Binary Search Tree Validation',
-          problem: 'Write a function to determine if a binary tree is a valid Binary Search Tree (BST).',
-          difficulty: 'hard',
-          language: 'cpp',
-          starterCode: `#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << "BST Valid: true" << endl;\n    return 0;\n}`,
-          testCases: [
-            { input: '', expected_output: 'BST Valid: true', is_hidden: false },
-          ],
-        },
-      },
-    ],
+    modules: DSA_MODULES,
   },
   {
     slug: 'web-dev',
