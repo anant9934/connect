@@ -12,6 +12,7 @@ const LINKS = [
   { href: '/institution', label: 'Classes' },
   { href: '/lab', label: 'Programming Labs' },
   { href: '/attendance', label: 'Attendance' },
+  { href: '/study', label: 'Study vault' },
   { href: '/notifications', label: 'Notifications' },
   { href: '/admin', label: 'Administration' },
   { href: '/diagnostics', label: 'Connection check' },

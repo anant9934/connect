@@ -202,3 +202,21 @@ describe('attendance pillars formula', async () => {
     assert.strictEqual(pct(0.834), '83%');
   });
 });
+
+describe('study vault timestamps', async () => {
+  const { parseTimestamp, replayLink, summaryAsNotes } = await import('../features/study/api.ts');
+  test('MM:SS and H:MM:SS to seconds', () => {
+    assert.strictEqual(parseTimestamp('03:15'), 195);
+    assert.strictEqual(parseTimestamp('1:02:03'), 3723);
+    assert.strictEqual(parseTimestamp('around 5 min'), null);
+    assert.strictEqual(parseTimestamp(undefined), null);
+  });
+  test('links open the replay at the second', () => {
+    assert.strictEqual(replayLink('r1', '01:05'), '/history/r1?t=65#replay');
+    assert.strictEqual(replayLink('r1', ''), null);
+  });
+  test('notes for flashcards include definitions and revision notes', () => {
+    const text = summaryAsNotes({ title: 'T', overview: 'O', keyConcepts: ['K'], takeaways: [], actionItems: [], definitions: [{ term: 'Heap', meaning: 'tree' }], revisionNotes: ['R'] });
+    assert.strictEqual(text, 'O\nHeap: tree\nR\nK');
+  });
+});

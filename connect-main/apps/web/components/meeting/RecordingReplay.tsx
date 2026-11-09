@@ -18,6 +18,12 @@ export function RecordingReplay({ meetingId }: { meetingId: string }) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // ?t=SECONDS (from a study-vault timestamp) seeks there once the recording file is open.
+  const [startAt] = useState<number | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const t = Number(new URLSearchParams(window.location.search).get('t'));
+    return Number.isFinite(t) && t > 0 ? t : null;
+  });
 
   useEffect(() => {
     let current = true;
@@ -64,7 +70,7 @@ export function RecordingReplay({ meetingId }: { meetingId: string }) {
 
   if (recordings.length === 0 && lines.length === 0) return null;
   return (
-    <section className="neu-card p-4 space-y-3" data-testid="recording-replay">
+    <section id="replay" className="neu-card p-4 space-y-3 scroll-mt-4" data-testid="recording-replay">
       <h2 className="text-sm font-semibold text-[#171717] flex items-center gap-1.5"><Clapperboard className="w-4 h-4 text-[#7444E8]" aria-hidden="true" /> Replay and transcript</h2>
       {recordings.length > 0 ? (
         <>
@@ -82,7 +88,11 @@ export function RecordingReplay({ meetingId }: { meetingId: string }) {
             </label>
           </div>
           <p className="text-[11px] text-[#5F5F68]">Recordings stay on the computer that made them. Ask the host for <span className="font-mono">{selected?.fileName}</span>, then open it here.</p>
-          {videoUrl && <video ref={videoRef} src={videoUrl} controls className="w-full rounded-2xl bg-black" data-testid="replay-video" />}
+          {startAt !== null && !videoUrl && <p className="text-xs font-semibold text-[#5A2FC7]">Open the recording file to jump to {formatOffset(startAt * 1000)}.</p>}
+          {videoUrl && (
+            <video ref={videoRef} src={videoUrl} controls className="w-full rounded-2xl bg-black" data-testid="replay-video"
+              onLoadedMetadata={(e) => { if (startAt !== null) e.currentTarget.currentTime = startAt; }} />
+          )}
         </>
       ) : (
         <p className="text-xs text-[#5F5F68]">No recording was saved for this meeting; the transcript is below.</p>
