@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
-import { GraduationCap, Loader2, X } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronUp, GraduationCap, Loader2, Trophy, X } from 'lucide-react';
 import { ApiError } from '@/lib/api/client';
 import * as api from '@/features/classroom/api';
 
@@ -183,12 +183,26 @@ export const ClassroomPanel: React.FC<ClassroomPanelProps> = ({ roomCode, selfId
   const [error, setError] = useState<string | null>(null);
   const [doubtText, setDoubtText] = useState('');
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [board, setBoard] = useState<api.LeaderboardRow[] | null>(null);
+  const closedQuizzes = useRef<Set<string> | null>(null);
+
+  const openBoard = useCallback(async () => {
+    try {
+      setBoard(await api.getLeaderboard(roomCode));
+    } catch {
+      setError('Could not load the leaderboard.');
+    }
+  }, [roomCode]);
 
   const refresh = useCallback(async () => {
     try {
       const [pollRes, doubtRes] = await Promise.all([api.listPolls(roomCode), api.listDoubts(roomCode)]);
       setPolls(pollRes.polls);
       setCanManage(pollRes.canManage);
+      // When a quiz closes, everyone sees the leaderboard once.
+      const closed = new Set(pollRes.polls.filter((p) => p.kind === 'quiz' && p.closed).map((p) => p.id));
+      if (closedQuizzes.current && [...closed].some((id) => !closedQuizzes.current!.has(id))) openBoard();
+      closedQuizzes.current = closed;
       setDoubts(doubtRes.doubts);
       setOffline(false);
     } catch {
@@ -196,7 +210,7 @@ export const ClassroomPanel: React.FC<ClassroomPanelProps> = ({ roomCode, selfId
     } finally {
       setLoading(false);
     }
-  }, [roomCode]);
+  }, [roomCode, openBoard]);
 
   useEffect(() => {
     refresh();
@@ -234,6 +248,27 @@ export const ClassroomPanel: React.FC<ClassroomPanelProps> = ({ roomCode, selfId
         </p>
       )}
       {error && <p role="alert" className="px-4 py-2 bg-red-50 border-b border-red-200 text-xs text-red-700">{error}</p>}
+      {board && (
+        <div role="dialog" aria-label="Quiz leaderboard" data-testid="leaderboard" className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4" onClick={() => setBoard(null)}>
+          <div className="neu-card w-full max-w-sm p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-heading font-bold text-lg text-[#17171A] flex items-center gap-2"><Trophy className="w-5 h-5 text-[#B8860B]" aria-hidden="true" /> Quiz leaderboard</h3>
+            {board.length === 0 ? (
+              <p className="text-sm text-[#5F5F68]">No quiz answers yet.</p>
+            ) : (
+              <ol className="space-y-1.5">
+                {board.map((row) => (
+                  <li key={`${row.rank}-${row.displayName}`} className={`flex items-center gap-3 rounded-2xl px-3 py-2 ${row.isMe ? 'bg-[#F1EBFF]' : 'bg-[#FCFCFA]'}`}>
+                    <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-extrabold ${row.rank === 1 ? 'bg-[#FFC93C] text-[#17171A]' : row.rank <= 3 ? 'bg-[#FFF4D1] text-[#6B4E00]' : 'bg-white text-[#5F5F68] border border-[#ECECE6]'}`}>{row.rank}</span>
+                    <span className="flex-1 min-w-0 truncate text-sm font-semibold text-[#17171A]">{row.displayName}{row.isMe ? ' (you)' : ''}</span>
+                    <span className="font-mono text-sm font-bold text-[#5A2FC7]">{row.points}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+            <button type="button" onClick={() => setBoard(null)} className="neu-pill w-full min-h-[40px] text-sm font-semibold">Close</button>
+          </div>
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#FAFAF8]">
         {loading ? (
           <div className="flex justify-center py-8" role="status" aria-label="Loading">
@@ -244,6 +279,11 @@ export const ClassroomPanel: React.FC<ClassroomPanelProps> = ({ roomCode, selfId
             {canManage && <NewPollForm onCreate={(poll) => act(() => api.createPoll(roomCode, poll), 'The question could not be created.')} />}
             <section aria-label="Questions" className="space-y-2">
               {polls.length === 0 && <p className="text-xs text-[#6B7280]">No questions yet.</p>}
+              {polls.some((p) => p.kind === 'quiz') && (
+                <button type="button" data-testid="open-leaderboard" onClick={openBoard} className="neu-pill inline-flex items-center gap-1.5 px-3 min-h-[36px] text-xs font-semibold text-[#17171A]">
+                  <Trophy className="w-3.5 h-3.5 text-[#B8860B]" aria-hidden="true" /> Quiz leaderboard
+                </button>
+              )}
               <ul className="space-y-2">
                 {polls.map((poll) => (
                   <PollCard
@@ -273,7 +313,17 @@ export const ClassroomPanel: React.FC<ClassroomPanelProps> = ({ roomCode, selfId
               <ul className="space-y-2">
                 {doubts.map((doubt) => (
                   <li key={doubt.id} data-testid="doubt-card" className="p-3 rounded-xl border border-[#E5E7EB] bg-white space-y-2">
-                    <p className="text-xs font-semibold break-words">{doubt.question}</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-semibold break-words">{doubt.question}</p>
+                      <button type="button" data-testid="doubt-vote" aria-pressed={doubt.myVote}
+                        disabled={doubt.askedBy === selfIdentity || doubt.status === 'resolved'}
+                        aria-label={doubt.myVote ? 'Remove your upvote' : 'Upvote: I have this question too'}
+                        title={doubt.askedBy === selfIdentity ? 'You asked this' : 'I have this question too'}
+                        onClick={() => act(() => api.voteDoubt(roomCode, doubt.id), 'Your vote could not be saved.')}
+                        className={`neu-pill shrink-0 inline-flex items-center gap-1 px-2 min-h-[30px] text-xs font-bold disabled:opacity-60 ${doubt.myVote ? 'text-[#5A2FC7] !bg-[#F1EBFF]' : 'text-[#17171A]'}`}>
+                        <ChevronUp className="w-3.5 h-3.5" aria-hidden="true" /> {doubt.votes ?? 0}
+                      </button>
+                    </div>
                     <p className="text-[11px] text-[#6B7280]">{doubt.askedByName} · {doubt.status}</p>
                     {doubt.answer && <p className="text-xs break-words">{doubt.answer}</p>}
                     {canManage && doubt.status !== 'resolved' && (

@@ -23,7 +23,10 @@ export interface Doubt {
   status: 'open' | 'assigned' | 'answered' | 'resolved';
   assignedTo: string | null;
   answer: string | null;
+  votes: number;
+  myVote: boolean;
 }
+export interface LeaderboardRow { rank: number; displayName: string; points: number; answered: number; isMe: boolean }
 export interface NewPoll {
   kind: 'poll' | 'quiz';
   question: string;
@@ -77,6 +80,9 @@ export const askDoubt = (code: string, question: string) => post(roomPath(code, 
 export const answerDoubt = (code: string, id: string, answer: string) =>
   post(roomPath(code, `/doubts/${id}/answer`), { answer });
 export const resolveDoubt = (code: string, id: string) => post(roomPath(code, `/doubts/${id}/resolve`));
+export const voteDoubt = (code: string, id: string) => apiFetch<{ voted: boolean; votes: number }>(roomPath(code, `/doubts/${id}/vote`), { method: 'POST' });
+export const getLeaderboard = async (code: string) =>
+  (await apiFetch<{ leaderboard: LeaderboardRow[] }>(roomPath(code, '/leaderboard'), { method: 'GET' })).leaderboard;
 
 export interface ClassroomState {
   studentsCanDraw: boolean;
