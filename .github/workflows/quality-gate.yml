@@ -155,6 +155,7 @@ jobs:
         env:
           ADMIN_URL: "postgres://connect_admin:connect_disposable_ci_password_456@localhost:5432/connect_test_ci_runner?sslmode=disable"
         run: |
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000044.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000043.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000042.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f tests/sql/rollback_000041.sql
@@ -218,6 +219,7 @@ jobs:
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000041_ai_response_cache.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000042_board_math.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000043_dashboard_summaries.sql
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -f connect-main/migrations/000044_schools_and_programs.sql
 
       - name: Verify RLS Under Restricted Runtime Roles
         env:
