@@ -115,3 +115,62 @@ h1, h2, h3, h4, h5, h6 {
     scroll-behavior: auto !important;
   }
 }
+
+/* Tactile surfaces. Soft extrusion on the warm canvas, used only on things people press:
+   the meeting dock, pill inputs and metric cards. Colours are the existing brand tokens. */
+:root {
+  --brand-violet: #7444E8;
+  --brand-violet-deep: #5A2FC7;
+  --brand-marigold: #FFC93C;
+  --brand-mint: #2DBE74;
+  --brand-coral: #FF6B6B;
+  --tint-violet: #F1EBFF;
+  --tint-marigold: #FFF4D1;
+  --tint-mint: #E4F8EB;
+  --tint-coral: #FFE9E9;
+  --neu-raised: 6px 6px 14px rgba(23, 23, 26, 0.06), -6px -6px 14px rgba(255, 255, 255, 0.9);
+  --neu-pressed: inset 3px 3px 7px rgba(23, 23, 26, 0.08), inset -3px -3px 7px rgba(255, 255, 255, 0.85);
+  --neu-hairline: 1px solid rgba(23, 23, 26, 0.06);
+}
+
+@layer components {
+  .neu-surface {
+    background-color: #F8F8F5;
+    border: var(--neu-hairline);
+    box-shadow: var(--neu-raised);
+  }
+  .neu-card {
+    background-color: #FFFFFF;
+    border: var(--neu-hairline);
+    border-radius: 20px;
+    box-shadow: 4px 4px 12px rgba(23, 23, 26, 0.04), -4px -4px 12px rgba(255, 255, 255, 0.8);
+  }
+  .neu-pill {
+    border-radius: 9999px;
+    background-color: #F8F8F5;
+    border: var(--neu-hairline);
+    box-shadow: var(--neu-raised);
+    transition: box-shadow 160ms cubic-bezier(0.34, 1.56, 0.64, 1), transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .neu-pill:active,
+  .neu-pressed,
+  .neu-pill[aria-pressed='true'] {
+    box-shadow: var(--neu-pressed);
+    transform: scale(0.98);
+  }
+  .neu-well {
+    border-radius: 9999px;
+    background-color: #F3F2EE;
+    border: var(--neu-hairline);
+    box-shadow: var(--neu-pressed);
+  }
+  .neu-well:focus-within {
+    outline: 2px solid var(--brand-violet);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .neu-pill { transition: none; }
+  .neu-pill:active, .neu-pressed, .neu-pill[aria-pressed='true'] { transform: none; }
+}
