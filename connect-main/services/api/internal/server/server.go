@@ -337,6 +337,8 @@ func BuildRouter(
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/live-state", interactionHandler.LiveState)
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/classroom", interactionHandler.GetClassroom)
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/board", interactionHandler.ListStrokes)
+						roomDetail.With(appmw.OptionalAuth(authService)).Get("/canvas", interactionHandler.GetCanvas)
+						roomDetail.With(appmw.OptionalAuth(authService)).Get("/canvas/submissions", interactionHandler.ListSimulationAnswers)
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/breakouts", interactionHandler.GetBreakouts)
 						roomDetail.With(
 							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
@@ -362,6 +364,22 @@ func BuildRouter(
 							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
 							appmw.OptionalAuth(authService),
 						).Post("/board/remove", interactionHandler.RemoveStrokes)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Post("/canvas/generate", interactionHandler.GenerateCanvas)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Patch("/canvas", interactionHandler.UpdateCanvas)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Put("/canvas/slides/{index}", interactionHandler.EditCanvasSlide)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
+						).Post("/canvas/submit", interactionHandler.SubmitSimulation)
 						roomDetail.With(
 							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
 							appmw.OptionalAuth(authService),

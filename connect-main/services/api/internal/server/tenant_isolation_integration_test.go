@@ -117,6 +117,12 @@ func (c apiClient) signup() (id, token string) {
 
 func newRuntimeRouter(t *testing.T, app *pgxpool.Pool, configure func(*auth.Service)) http.Handler {
 	t.Helper()
+	return newRuntimeRouterWith(t, app, configure, nil)
+}
+
+// newRuntimeRouterWith also lets a test configure the interaction handler.
+func newRuntimeRouterWith(t *testing.T, app *pgxpool.Pool, configure func(*auth.Service), withInteraction func(*interaction.Handler)) http.Handler {
+	t.Helper()
 	cfg := &config.Config{
 		AppEnv:             config.EnvDevelopment,
 		Port:               8080,
@@ -133,6 +139,10 @@ func newRuntimeRouter(t *testing.T, app *pgxpool.Pool, configure func(*auth.Serv
 	}
 	roomService := room.NewService(room.NewPgxRepository(app), room.NewPolicy(), auditService, livekit.NewTokenService("test_key", "test_secret_that_is_long_enough_for_tests"), nil)
 	validator := notes.NewPgxRoomValidator(app)
+	interactionHandler := interaction.NewHandler(app, roomService, limiter, auditService)
+	if withInteraction != nil {
+		withInteraction(interactionHandler)
+	}
 	return server.BuildRouter(cfg, logger, limiter,
 		handlers.NewHealthHandler(&mockPinger{}, &mockPinger{}, logger),
 		handlers.NewSystemHandler("test"), handlers.NewAssertionHandler(cfg),
@@ -142,7 +152,7 @@ func newRuntimeRouter(t *testing.T, app *pgxpool.Pool, configure func(*auth.Serv
 		files.NewHandler(files.NewService(files.NewPgxRepository(app), files.NewMemoryStorageProvider(), files.NewHeuristicScanner(), validator, auditService)),
 		authService, p2p.NewHandler(cfg, logger, p2p.NewHub(logger), roomService, authService), nil,
 		institution.NewHandler(app, auditService),
-		interaction.NewHandler(app, roomService, limiter, auditService),
+		interactionHandler,
 		notifications.NewHandler(app),
 		meetings.NewHandler(app, "http://localhost:3000"),
 		avatars.NewHandler(authService, files.NewMemoryStorageProvider()),

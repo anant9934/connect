@@ -45,6 +45,8 @@ type Handler struct {
 	rooms   *room.Service
 	limiter ratelimit.Limiter
 	audit   *audit.Service
+	// generator makes live canvas content; nil until SetLiveGenerator is called.
+	generator LiveGenerator
 }
 
 // NewHandler constructs the handler.

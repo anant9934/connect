@@ -264,6 +264,7 @@ func main() {
 			DefaultFastModel: ai.ModelGeminiFlashLite,
 		})
 		aiHandler = ai.NewHandler(db.Pool, aiService)
+		interactionHandler.SetLiveGenerator(aiService)
 	}
 	router := server.BuildRouter(cfg, logger, limiter, healthHandler, systemHandler, assertionHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler, livekitWebhook, institutionHandler, interactionHandler, notificationsHandler, meetingsHandler, avatars.NewHandler(authService, filesStorage), labHandler, aiHandler)
 	srv := server.New(cfg, logger, router)
