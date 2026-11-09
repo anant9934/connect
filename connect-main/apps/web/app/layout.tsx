@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Bricolage_Grotesque, DM_Sans, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
+import { ServiceWorkerRegister } from '@/components/pwa/ServiceWorkerRegister';
 
 const bricolage = Bricolage_Grotesque({
   subsets: ['latin'],
@@ -162,6 +163,7 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
+        <ServiceWorkerRegister />
         <div className="min-h-screen min-h-dvh flex flex-col">{children}</div>
       </body>
     </html>

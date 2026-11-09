@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#FFB300">
+  <title>Offline | Tathastu Meet</title>
+  <style>
+    :root { --ink: #17171A; --muted: #5F5F68; --violet: #7444E8; --marigold: #FFC93C; --canvas: #FCFCFA; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px;
+      background: var(--canvas); color: var(--ink); font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    .card { width: 100%; max-width: 420px; background: #fff; border: 1px solid rgba(23,23,26,0.06); border-radius: 24px; padding: 32px;
+      text-align: center; box-shadow: 6px 6px 14px rgba(23,23,26,0.06), -6px -6px 14px rgba(255,255,255,0.9); }
+    .badge { display: inline-block; background: #FFF4D1; color: #6B4E00; font-weight: 700; font-size: 12px; border-radius: 999px; padding: 4px 12px; }
+    h1 { font-size: 28px; letter-spacing: -0.02em; margin: 16px 0 8px; }
+    p { color: var(--muted); line-height: 1.5; margin: 0 0 24px; }
+    button { border: 1px solid rgba(23,23,26,0.06); border-radius: 999px; min-height: 44px; padding: 0 24px; font: inherit; font-weight: 600;
+      background: var(--violet); color: #fff; cursor: pointer; box-shadow: 6px 6px 14px rgba(23,23,26,0.06), -6px -6px 14px rgba(255,255,255,0.9); }
+    button:active { box-shadow: inset 3px 3px 7px rgba(23,23,26,0.15); }
+    img { width: 48px; height: 48px; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <img src="/icon.svg" alt="Tathastu Meet">
+    <div><span class="badge">You are offline</span></div>
+    <h1>No connection right now</h1>
+    <p>Meetings need the internet. Tathastu Meet will work again as soon as you are back online.</p>
+    <button type="button" onclick="location.reload()">Try again</button>
+  </main>
+  <script>window.addEventListener('online', function () { location.reload(); });</script>
+</body>
+</html>
