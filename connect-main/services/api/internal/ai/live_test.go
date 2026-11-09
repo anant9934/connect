@@ -71,3 +71,19 @@ func TestGenerateLiveSimulation(t *testing.T) {
 		t.Errorf("unknown engine: %v", err)
 	}
 }
+
+func TestGenerateLiveSimulation_TreeAndGraphEngines(t *testing.T) {
+	svc, mock := newLiveTestService(t)
+	for _, raw := range []string{
+		`{"engine":"tree","title":"AVL rotations","params":{"kind":"avl","values":[10,20,30,40,50],"traversal":"levelorder"}}`,
+		`{"engine":"graph","title":"Shortest path","params":{"nodes":5,"algorithm":"dijkstra","edges":[{"from":0,"to":1,"weight":3}]}}`,
+	} {
+		mock.SetResponse(raw)
+		if _, _, err := svc.GenerateLiveSimulation(context.Background(), "org", "user", "show it", ""); err != nil {
+			t.Errorf("%s: %v", raw, err)
+		}
+	}
+	if !strings.Contains(mock.LastCall().SystemPrompt, "dijkstra") {
+		t.Error("prompt should describe the graph engine")
+	}
+}

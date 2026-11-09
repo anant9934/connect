@@ -73,6 +73,8 @@ Engines and params (numbers must stay in range):
 - sorting: algorithm one of bubble|insertion|selection|merge|quick, size 5-40, speed 1-10, seed 1-999
 - logic: circuit one of and|or|not|nand|nor|xor|xnor|half_adder|full_adder, a, b, c each 0 or 1
 - perceptron: dataset one of and|or|xor, w1, w2, bias each -3 to 3
+- tree: kind one of bst|avl, values: up to 15 distinct integers 1-99 inserted in order, traversal one of none|inorder|preorder|postorder|levelorder, remove 0-99 (a value to delete after inserting; 0 for none), speed 0.5-5
+- graph: nodes 3-8 (named A, B, C...), edges: up to 16 of {"from": 0-7, "to": 0-7, "weight": 1-20} (undirected), algorithm one of bfs|dfs|dijkstra, start and target node indexes, speed 0.5-5
 Pick the engine that best teaches the request. If none fits exactly, pick the closest and say in
 the explanation what it shows. 2 to 4 "observe" items.`
 }

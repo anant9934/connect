@@ -120,3 +120,39 @@ func TestParseSimulation(t *testing.T) {
 		t.Errorf("html engine: %v", err)
 	}
 }
+
+func TestNormalizeParams_TreeAndGraph(t *testing.T) {
+	tree, err := NormalizeParams("tree", map[string]any{"values": []any{5.0, 5.0, 300.0, "x", -2.0}, "kind": "AVL"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tree["values"].([]int); len(got) != 3 || got[0] != 5 || got[1] != 99 || got[2] != 1 {
+		t.Errorf("tree values: %v", got)
+	}
+	if tree["kind"] != "avl" {
+		t.Errorf("kind: %v", tree["kind"])
+	}
+	graph, _ := NormalizeParams("graph", map[string]any{
+		"nodes": 4.0, "start": 9.0,
+		"edges": []any{
+			map[string]any{"from": 0.0, "to": 1.0, "weight": 50.0},
+			map[string]any{"from": 1.0, "to": 0.0, "weight": 3.0}, // duplicate of 0-1
+			map[string]any{"from": 2.0, "to": 2.0},                // self loop
+			map[string]any{"from": 0.0, "to": 6.0},                // beyond nodes
+			map[string]any{"from": 2.0, "to": 3.0},
+		},
+	})
+	edges := graph["edges"].([]Edge)
+	if len(edges) != 2 || edges[0].Weight != 20 || edges[1].Weight != 1 {
+		t.Errorf("edges: %+v", edges)
+	}
+	if graph["start"] != 3.0 {
+		t.Errorf("start clamped to last node: %v", graph["start"])
+	}
+	empty, _ := NormalizeParams("graph", map[string]any{"nodes": 3.0})
+	for _, e := range empty["edges"].([]Edge) {
+		if e.From >= 3 || e.To >= 3 {
+			t.Errorf("default edge outside 3 nodes: %+v", e)
+		}
+	}
+}

@@ -32,6 +32,8 @@ type engine struct {
 	numbers   map[string]number
 	choices   map[string]choice
 	processes bool
+	values    bool // a list of distinct keys, for trees
+	edges     bool // a weighted edge list, for graphs
 }
 
 // Engines lists every built-in simulation. The web client has a renderer for each and the
@@ -64,6 +66,107 @@ var engines = map[string]engine{
 		numbers: map[string]number{"w1": {-3, 3, 1, false}, "w2": {-3, 3, 1, false}, "bias": {-3, 3, -1.5, false}},
 		choices: map[string]choice{"dataset": {[]string{"and", "or", "xor"}, "and"}},
 	},
+	"tree": {
+		numbers: map[string]number{"remove": {0, 99, 0, true}, "speed": {0.5, 5, 1.5, false}},
+		choices: map[string]choice{
+			"kind":      {[]string{"bst", "avl"}, "bst"},
+			"traversal": {[]string{"none", "inorder", "preorder", "postorder", "levelorder"}, "inorder"},
+		},
+		values: true,
+	},
+	"graph": {
+		numbers: map[string]number{"nodes": {3, 8, 6, true}, "start": {0, 7, 0, true}, "target": {0, 7, 5, true}, "speed": {0.5, 5, 1, false}},
+		choices: map[string]choice{"algorithm": {[]string{"bfs", "dfs", "dijkstra"}, "dijkstra"}},
+		edges:   true,
+	},
+}
+
+// MaxTreeValues bounds a tree so it stays readable on one screen.
+const MaxTreeValues = 15
+
+// MaxGraphEdges bounds a graph for the same reason.
+const MaxGraphEdges = 16
+
+var defaultTreeValues = []int{50, 30, 70, 20, 40, 60, 80}
+
+// Edge is one weighted, undirected edge between node indexes.
+type Edge struct {
+	From   int `json:"from"`
+	To     int `json:"to"`
+	Weight int `json:"weight"`
+}
+
+var defaultEdges = []Edge{{0, 1, 4}, {0, 2, 2}, {1, 2, 1}, {1, 3, 5}, {2, 4, 8}, {3, 4, 2}, {3, 5, 6}, {4, 5, 3}}
+
+func readValues(v any) []int {
+	list, ok := v.([]any)
+	if !ok {
+		return append([]int(nil), defaultTreeValues...)
+	}
+	seen := map[int]bool{}
+	out := []int{}
+	for _, item := range list {
+		f, ok := toFloat(item)
+		if !ok {
+			continue
+		}
+		n := int(clamp(f, number{1, 99, 1, true}))
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+		if len(out) == MaxTreeValues {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return append([]int(nil), defaultTreeValues...)
+	}
+	return out
+}
+
+func readEdges(v any, nodes int) []Edge {
+	list, ok := v.([]any)
+	out := []Edge{}
+	seen := map[[2]int]bool{}
+	if ok {
+		for _, item := range list {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			from, ok1 := toFloat(m["from"])
+			to, ok2 := toFloat(m["to"])
+			weight, ok3 := toFloat(m["weight"])
+			if !ok1 || !ok2 {
+				continue
+			}
+			if !ok3 {
+				weight = 1
+			}
+			a, b := int(math.Round(from)), int(math.Round(to))
+			if a < 0 || b < 0 || a >= nodes || b >= nodes || a == b {
+				continue
+			}
+			key := [2]int{min(a, b), max(a, b)}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, Edge{a, b, int(clamp(weight, number{1, 20, 1, true}))})
+			if len(out) == MaxGraphEdges {
+				break
+			}
+		}
+	}
+	if len(out) == 0 {
+		for _, e := range defaultEdges {
+			if e.From < nodes && e.To < nodes {
+				out = append(out, e)
+			}
+		}
+	}
+	return out
 }
 
 // EngineNames returns the engines in a stable order, for prompts and errors.
@@ -164,6 +267,18 @@ func NormalizeParams(engineName string, raw map[string]any) (map[string]any, err
 	}
 	if spec.processes {
 		out["processes"] = readProcesses(raw["processes"])
+	}
+	if spec.values {
+		out["values"] = readValues(raw["values"])
+	}
+	if spec.edges {
+		nodes := int(out["nodes"].(float64))
+		out["edges"] = readEdges(raw["edges"], nodes)
+		for _, key := range []string{"start", "target"} {
+			if int(out[key].(float64)) >= nodes {
+				out[key] = float64(nodes - 1)
+			}
+		}
 	}
 	if v, ok := toFloat(raw[RunKey]); ok {
 		out[RunKey] = clamp(v, number{0, 1e9, 0, true})
