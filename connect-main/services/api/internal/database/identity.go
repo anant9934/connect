@@ -17,7 +17,7 @@ const (
 )
 
 // RequiredMigration is the newest migration this build needs. Update it with each migration.
-const RequiredMigration = "000039_attendance_pillars"
+const RequiredMigration = "000040_doubt_votes_and_leaderboard"
 
 // rlsExemptTables holds no tenant or user data.
 var rlsExemptTables = map[string]bool{"schema_metadata": true}
