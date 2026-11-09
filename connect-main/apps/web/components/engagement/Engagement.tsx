@@ -73,7 +73,7 @@ const focusOf = (r: EngagementTableRow) => {
 };
 
 /** Per-student engagement breakdown. `live` adds a "here now" column. */
-export const EngagementTable: React.FC<{ rows: EngagementTableRow[]; live?: boolean }> = ({ rows, live = false }) => (
+export const EngagementTable: React.FC<{ rows: EngagementTableRow[]; live?: boolean; onSelect?: (userId: string, name: string) => void }> = ({ rows, live = false, onSelect }) => (
   <div className="overflow-x-auto">
     <table className="w-full text-sm text-left">
       <thead>
@@ -86,7 +86,11 @@ export const EngagementTable: React.FC<{ rows: EngagementTableRow[]; live?: bool
       <tbody>
         {rows.map((r) => (
           <tr key={r.userId} data-testid="engagement-row" className="border-t border-[#E9E9E5]">
-            <td className="py-1.5 pr-3 whitespace-nowrap font-medium text-[#171717]">{r.displayName}</td>
+            <td className="py-1.5 pr-3 whitespace-nowrap font-medium text-[#171717]">
+              {onSelect ? (
+                <button type="button" data-testid="open-pillars" onClick={() => onSelect(r.userId, r.displayName)} className="text-[#7258E8] underline">{r.displayName}</button>
+              ) : r.displayName}
+            </td>
             {live && (
               <td className="py-1.5 pr-3">
                 <span className={`inline-block w-2 h-2 rounded-full ${r.present ? 'bg-[#22A06B]' : 'bg-[#D0D0CC]'}`} aria-label={r.present ? 'In the class now' : 'Not in the class'} />

@@ -7,6 +7,8 @@ import { ArrowLeft, Loader2 } from 'lucide-react';
 import { getSession } from '@/features/auth/api';
 import { ApiError } from '@/lib/api/client';
 import * as api from '@/features/institution/api';
+import { AttendancePillars } from '@/components/attendance/AttendancePillars';
+import { getPillars, type Pillars } from '@/features/attendance/pillars';
 
 const inputClass =
   'w-full px-3 py-2 rounded-xl border border-[#E9E9E5] bg-[#FCFCFA] text-[16px] sm:text-sm text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7258E8] min-h-[44px]';
@@ -30,7 +32,9 @@ export default function AttendancePage() {
   const [members, setMembers] = useState<api.Member[]>([]);
   const [students, setStudents] = useState<api.StudentSummary[]>([]);
   const [classes, setClasses] = useState<api.ClassSummary[]>([]);
-  const [engagement, setEngagement] = useState<{ title: string; people: api.EngagementRow[] } | null>(null);
+  const [engagement, setEngagement] = useState<{ title: string; sessionId: string; people: api.EngagementRow[] } | null>(null);
+  const [pillars, setPillars] = useState<{ name: string; data: Pillars } | null>(null);
+  const [pillarsError, setPillarsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const org = orgs.find((o) => o.id === orgId);
@@ -105,7 +109,8 @@ export default function AttendancePage() {
   const openEngagement = async (item: api.ClassSummary) => {
     setError(null);
     try {
-      setEngagement({ title: item.title, people: await api.getEngagement(orgId, item.id) });
+      setEngagement({ title: item.title, sessionId: item.id, people: await api.getEngagement(orgId, item.id) });
+      setPillars(null);
     } catch (err) {
       fail(err, 'Could not load engagement.');
     }
@@ -245,8 +250,18 @@ export default function AttendancePage() {
             {engagement.people.length > 0 && (
               <EngagementTable
                 rows={engagement.people.map((p) => ({ ...p, pollsAnswered: p.pollAnswers }))}
+                onSelect={async (userId, name) => {
+                  setPillarsError(null);
+                  try {
+                    setPillars({ name, data: await getPillars(engagement.sessionId, { student: userId, org: orgId, session: true }) });
+                  } catch {
+                    setPillarsError('Could not load this student\'s attendance pillars.');
+                  }
+                }}
               />
             )}
+            {pillarsError && <p role="alert" className="text-sm text-[#9B2C2C]">{pillarsError}</p>}
+            {pillars && <AttendancePillars pillars={pillars.data} name={pillars.name} />}
             <EngagementExplainer />
           </section>
         )}

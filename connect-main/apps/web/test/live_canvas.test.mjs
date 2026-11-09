@@ -8,7 +8,8 @@ register(
   'data:text/javascript,' +
     encodeURIComponent(`
 export async function resolve(specifier, context, next) {
-  if (specifier.startsWith('.') && !/\\.[a-z]+$/.test(specifier)) {
+  if (specifier.startsWith('@/')) specifier = ${JSON.stringify(new URL('../', import.meta.url).href)} + specifier.slice(2);
+  if ((specifier.startsWith('.') || specifier.startsWith('file:')) && !/\\.[a-z]+$/.test(specifier)) {
     try { return await next(specifier + '.ts', context); } catch {}
   }
   return next(specifier, context);
@@ -176,5 +177,28 @@ describe('recording offsets', async () => {
     assert.strictEqual(offsetInRecording('2026-11-09T10:01:30Z', s, e), 90_000);
     assert.strictEqual(offsetInRecording('2026-11-09T09:59:59Z', s, e), null);
     assert.strictEqual(offsetInRecording('2026-11-09T10:30:01Z', s, e), null);
+  });
+});
+
+describe('attendance pillars formula', async () => {
+  const { formulaTerms, pct } = await import('../features/attendance/pillars.ts');
+  const base = {
+    finalized: true, status: 'present', score: 0.83, policyVersion: 2,
+    duration: { ratio: 0.9 }, engagement: { ratio: 0.6 }, focus: { ratio: 0.8 },
+  };
+  test('weighted sum term by term', () => {
+    const f = formulaTerms({ ...base, weights: { duration: 0.7, engagement: 0.2, focus: 0.1 } });
+    assert.deepStrictEqual(f.terms.map((t) => t.label), ['Duration', 'Engagement', 'Focus']);
+    assert.ok(Math.abs(f.total - (0.63 + 0.12 + 0.08)) < 1e-9);
+  });
+  test('zero weights are left out and missing signals add nothing', () => {
+    const f = formulaTerms({ ...base, focus: { ratio: null }, weights: { duration: 0.8, engagement: 0, focus: 0.2 } });
+    assert.deepStrictEqual(f.terms.map((t) => t.label), ['Duration', 'Focus']);
+    assert.ok(Math.abs(f.total - 0.72) < 1e-9);
+  });
+  test('no rule applied yet', () => {
+    assert.strictEqual(formulaTerms({ ...base, weights: null }), null);
+    assert.strictEqual(pct(null), '—');
+    assert.strictEqual(pct(0.834), '83%');
   });
 });

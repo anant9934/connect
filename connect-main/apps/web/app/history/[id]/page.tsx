@@ -13,6 +13,8 @@ import { MeetingNote } from '@/features/notes/types';
 import { MeetingFile } from '@/features/files/types';
 import { SavedDecks } from '@/components/meeting/SavedDecks';
 import { RecordingReplay } from '@/components/meeting/RecordingReplay';
+import { AttendancePillars } from '@/components/attendance/AttendancePillars';
+import { getPillars, type Pillars } from '@/features/attendance/pillars';
 
 const when = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -23,6 +25,7 @@ export default function MeetingDetailPage() {
   const [attendance, setAttendance] = useState<MyAttendance | null>(null);
   const [notes, setNotes] = useState<MeetingNote | null>(null);
   const [files, setFiles] = useState<MeetingFile[]>([]);
+  const [pillars, setPillars] = useState<Pillars | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,6 +45,8 @@ export default function MeetingDetailPage() {
         if (!isMounted) return;
         setNotes(noteData);
         setFiles(fileData);
+        // Your own duration, engagement and focus; hosts without a student record see nothing here.
+        if (mine) setPillars(await getPillars(id).catch(() => null));
       } catch (err) {
         if (isMounted) setError(err instanceof ApiError && err.statusCode === 404 ? 'This meeting is unavailable.' : 'Could not load this meeting.');
       } finally {
@@ -114,6 +119,7 @@ export default function MeetingDetailPage() {
         {attendance && (
           <section className="p-4 rounded-2xl border border-[#E9E9E5] bg-white space-y-2">
             <h2 className="text-sm font-semibold text-[#171717]">Your attendance</h2>
+            {pillars && <AttendancePillars pillars={pillars} />}
             <AttendanceExplanation attendance={attendance} />
           </section>
         )}
