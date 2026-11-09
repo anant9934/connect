@@ -249,6 +249,7 @@ export const AssignmentSolver: React.FC<AssignmentSolverProps> = ({ assignment, 
             allowedLanguages={allowed}
             onCodeChange={setCode}
             height="560px"
+            orgId={orgId}
           />
         </div>
 

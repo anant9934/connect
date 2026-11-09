@@ -21,6 +21,8 @@ import { STARTER_CODE_BY_LANGUAGE } from '../runtimes/starterTemplates';
 import { runPythonCode, preloadPython } from '../runtimes/pythonRunner';
 import { executeSqlQuery, type SqlQueryResult } from '../runtimes/sqlRunner';
 import { buildSandboxedHtmlDoc } from '../runtimes/htmlPreview';
+import { runOnServer } from '../api';
+import { listOrganizations } from '@/features/institution/api';
 
 interface CodeEditorProps {
   initialLanguage?: SupportedLanguage;
@@ -32,6 +34,8 @@ interface CodeEditorProps {
   showPreview?: boolean;
   readOnly?: boolean;
   height?: string;
+  /** Institution whose code runner runs C++ and Java; defaults to the user's first institution. */
+  orgId?: string;
 }
 
 export const CodeEditor: React.FC<CodeEditorProps> = ({
@@ -44,6 +48,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   showPreview = true,
   readOnly = false,
   height = '520px',
+  orgId,
 }) => {
   const [language, setLanguage] = useState<SupportedLanguage>(initialLanguage);
 
@@ -206,25 +211,28 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
         setExecutionTime(dur);
         setStdout('Live preview updated.');
       } else {
-        // C++ & Java: Remote execution is explicitly BLOCKED under zero-trust policy
+        // C++ and Java compile and run on the institution's isolated code runner, never here.
         setActiveConsoleTab('output');
-        setExecutionTime(0);
         const langName = language === 'cpp' ? 'C++' : 'Java';
-        const notice =
-          `[EXECUTION BLOCKED: ${langName.toUpperCase()}]\n` +
-          `----------------------------------------------------------------------\n` +
-          `Direct compilation and execution of untrusted native ${langName} code is BLOCKED.\n\n` +
-          `Architectural Constraints & Security Boundaries:\n` +
-          `• In-Process Security: Running untrusted compiler subprocesses inside the web server or API process is strictly prohibited (prevents arbitrary code execution & host compromise).\n` +
-          `• Infrastructure Budget: Provisioning dedicated, isolated microVM sandbox instances (such as Firecracker or gVisor nsjail with strict kernel cgroups) requires additional infrastructure budget (Current Budget: ₹0).\n` +
-          `• Workspace Status: Full editing, syntax highlighting, templates, and assignment submission are operational. Direct live runtime execution remains BLOCKED until sandboxed microVM workers are provisioned.`;
-        setStderr(notice);
-        onExecute?.({
-          stdout: '',
-          stderr: `${langName} remote execution is BLOCKED under zero-trust ₹0 policy.`,
-          durationMs: 0,
-          status: 'error',
-        });
+        const org = orgId ?? (await listOrganizations().catch(() => []))[0]?.id;
+        if (!org) {
+          const msg = `${langName} runs on your institution's code runner. Join an institution to run it; editing and submitting work without it.`;
+          setStderr(msg);
+          setExecutionTime(0);
+          onExecute?.({ stdout: '', stderr: msg, durationMs: 0, status: 'error' });
+          return;
+        }
+        const res = await runOnServer(org, language as 'cpp' | 'java', code, stdin);
+        setExecutionTime(res.timeMs);
+        setStdout(res.stdout);
+        const problem =
+          res.status === 'compile_error' ? `Compilation error:\n${res.compileOutput}`
+          : res.status === 'time_limit' ? 'Time limit exceeded.'
+          : res.status === 'memory_limit' ? 'Memory limit exceeded.'
+          : res.status === 'runtime_error' ? `Runtime error (exit ${res.exitCode}).\n${res.stderr}`
+          : res.stderr;
+        setStderr(problem);
+        onExecute?.({ stdout: res.stdout, stderr: problem, durationMs: res.timeMs, status: res.status === 'ok' ? 'passed' : 'error' });
       }
     } catch (err: any) {
       setStderr(err.message || String(err));

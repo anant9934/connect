@@ -148,3 +148,18 @@ export async function fetchFacultyOverview(orgId: string): Promise<{ overview: F
     method: 'GET',
   });
 }
+
+export interface ServerRunResult { status: 'ok' | 'compile_error' | 'runtime_error' | 'time_limit' | 'memory_limit'; stdout: string; stderr: string; compileOutput: string; exitCode: number; timeMs: number }
+
+/** Runs C++ or Java on the institution's code runner. Errors carry the server's own message. */
+export async function runOnServer(orgId: string, language: 'cpp' | 'java', source: string, stdin: string): Promise<ServerRunResult> {
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}${labBasePath(orgId)}/run`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ language, source_code: source, stdin }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof body.message === 'string' ? body.message : typeof body.error === 'string' ? body.error : 'The code could not be run.');
+  return body.result as ServerRunResult;
+}
