@@ -240,4 +240,44 @@ func TestWorkflowDB_ClassroomBoards(t *testing.T) {
 		patch("host closes", http.StatusOK, host, map[string]any{"studentsCanDraw": false})
 		post("guest blocked once closed", http.StatusForbidden, guest, stroke("whiteboard"))
 	})
+
+	t.Run("text, shapes and notes, and moving notes", func(t *testing.T) {
+		patch("host opens drawing", http.StatusOK, host, map[string]any{"studentsCanDraw": true})
+		item := func(tool string, points [][]float64, body string) map[string]any {
+			b := stroke("whiteboard")
+			b["tool"], b["points"] = tool, points
+			if body != "" {
+				b["body"] = body
+			}
+			return b
+		}
+		post("rect", http.StatusCreated, host, item("rect", [][]float64{{0.1, 0.1}, {0.4, 0.3}}, ""))
+		post("arrow", http.StatusCreated, host, item("arrow", [][]float64{{0.5, 0.5}, {0.8, 0.6}}, ""))
+		post("rect needs two points", http.StatusBadRequest, host, item("rect", [][]float64{{0.1, 0.1}}, ""))
+		post("note needs text", http.StatusBadRequest, host, item("note", [][]float64{{0.2, 0.2}}, ""))
+		post("pen cannot carry text", http.StatusBadRequest, host, item("pen", [][]float64{{0.2, 0.2}}, "hi"))
+		post("unknown tool", http.StatusBadRequest, host, item("laser", [][]float64{{0.2, 0.2}}, ""))
+		post("member note", http.StatusCreated, member, item("note", [][]float64{{0.6, 0.2}}, "Why O(log n)?"))
+		post("host text", http.StatusCreated, host, item("text", [][]float64{{0.3, 0.8}}, "Binary search"))
+		var note, text string
+		for _, s := range strokes(host, "whiteboard", 0) {
+			if s["tool"] == "note" {
+				note = s["id"].(string)
+				if s["body"] != "Why O(log n)?" {
+					t.Errorf("note body: %v", s["body"])
+				}
+			}
+			if s["tool"] == "text" {
+				text = s["id"].(string)
+			}
+		}
+		move := func(name string, want int, who caller, id string) {
+			api.want(name, want, http.MethodPost, roomPath(code)+"/board/move", who, map[string]any{"id": id, "points": [][]float64{{0.7, 0.7}}})
+		}
+		move("author moves own note", http.StatusOK, member, note)
+		move("member cannot move host text", http.StatusForbidden, member, text)
+		move("host moves anyone's note", http.StatusOK, host, note)
+		move("stranger", http.StatusForbidden, stranger, note)
+		patch("host closes drawing", http.StatusOK, host, map[string]any{"studentsCanDraw": false})
+	})
 }

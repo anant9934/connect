@@ -6,7 +6,9 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -48,6 +50,25 @@ type Stroke struct {
 	Color          string          `json:"color"`
 	Width          int             `json:"width"`
 	Points         json.RawMessage `json:"points"`
+	Body           *string         `json:"body,omitempty"`
+}
+
+// boardTools maps each tool to how many points it stores: 0 means any number (free drawing).
+var boardTools = map[string]int{"pen": 0, "highlighter": 0, "rect": 2, "circle": 2, "arrow": 2, "text": 1, "note": 1}
+
+const maxBoardBody = 500
+
+// validBody allows printable text and line breaks, 1 to maxBoardBody characters.
+func validBody(body string) bool {
+	if strings.TrimSpace(body) == "" || utf8.RuneCountInString(body) > maxBoardBody || !utf8.ValidString(body) {
+		return false
+	}
+	for _, r := range body {
+		if r < 0x20 && r != '\n' {
+			return false
+		}
+	}
+	return true
 }
 
 func sendBoardError(w http.ResponseWriter, r *http.Request, err error, failure string) {
@@ -144,7 +165,7 @@ func (h *Handler) ListStrokes(w http.ResponseWriter, r *http.Request) {
 	strokes := []Stroke{}
 	err := database.InCallerContext(c.r.Context(), h.pool, c.roomID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(c.r.Context(), `
-			SELECT id::text, seq, author_identity, tool, color, width, points
+			SELECT id::text, seq, author_identity, tool, color, width, points, body
 			FROM board_strokes
 			WHERE room_id = $1 AND board = $2 AND seq > $3 AND deleted_at IS NULL
 			ORDER BY seq LIMIT $4
@@ -156,7 +177,7 @@ func (h *Handler) ListStrokes(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var s Stroke
 			var points []byte
-			if err := rows.Scan(&s.ID, &s.Seq, &s.AuthorIdentity, &s.Tool, &s.Color, &s.Width, &points); err != nil {
+			if err := rows.Scan(&s.ID, &s.Seq, &s.AuthorIdentity, &s.Tool, &s.Color, &s.Width, &points, &s.Body); err != nil {
 				return err
 			}
 			s.Points = points
@@ -197,6 +218,7 @@ func (h *Handler) PostStroke(w http.ResponseWriter, r *http.Request) {
 		Color          string      `json:"color"`
 		Width          int         `json:"width"`
 		Points         [][]float64 `json:"points"`
+		Body           string      `json:"body"`
 	}
 	c.r.Body = http.MaxBytesReader(w, c.r.Body, 256<<10)
 	decoder := json.NewDecoder(c.r.Body)
@@ -208,8 +230,11 @@ func (h *Handler) PostStroke(w http.ResponseWriter, r *http.Request) {
 	if req.Tool == "" {
 		req.Tool = "pen"
 	}
+	pointCount, knownTool := boardTools[req.Tool]
+	needsBody := req.Tool == "text" || req.Tool == "note"
 	if !clientMessageIDPattern.MatchString(req.ClientStrokeID) || !boardPattern.MatchString(req.Board) || !colorPattern.MatchString(req.Color) ||
-		(req.Tool != "pen" && req.Tool != "highlighter") || req.Width < 1 || req.Width > 40 || !validPoints(req.Points) {
+		!knownTool || req.Width < 1 || req.Width > 40 || !validPoints(req.Points) ||
+		(pointCount > 0 && len(req.Points) != pointCount) || needsBody != (req.Body != "") || (needsBody && !validBody(req.Body)) {
 		model.SendJSONError(w, c.r, http.StatusBadRequest, "INVALID_STROKE", "This stroke is not valid.")
 		return
 	}
@@ -225,11 +250,11 @@ func (h *Handler) PostStroke(w http.ResponseWriter, r *http.Request) {
 	err = database.InCallerContext(c.r.Context(), h.pool, c.roomID, func(tx pgx.Tx) error {
 		ctx := c.r.Context()
 		err := tx.QueryRow(ctx, `
-			INSERT INTO board_strokes (room_id, board, author_identity, tool, color, width, points, client_stroke_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			INSERT INTO board_strokes (room_id, board, author_identity, tool, color, width, points, client_stroke_id, body)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, ''))
 			ON CONFLICT (room_id, author_identity, client_stroke_id) DO NOTHING
 			RETURNING seq
-		`, c.roomID, req.Board, c.identity, req.Tool, req.Color, req.Width, points, req.ClientStrokeID).Scan(&seq)
+		`, c.roomID, req.Board, c.identity, req.Tool, req.Color, req.Width, points, req.ClientStrokeID, req.Body).Scan(&seq)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return tx.QueryRow(ctx, `SELECT seq FROM board_strokes WHERE room_id = $1 AND author_identity = $2 AND client_stroke_id = $3`,
 				c.roomID, c.identity, req.ClientStrokeID).Scan(&seq)
@@ -269,4 +294,35 @@ func (h *Handler) RemoveStrokes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	model.SendJSON(w, http.StatusOK, map[string]any{"removed": removed})
+}
+
+// MoveStroke handles POST /rooms/{code}/board/move: drag a note or text box to a new place.
+func (h *Handler) MoveStroke(w http.ResponseWriter, r *http.Request) {
+	c, ok := h.resolve(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		ID     string      `json:"id"`
+		Points [][]float64 `json:"points"`
+	}
+	decoder := json.NewDecoder(c.r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil || !uuidPattern.MatchString(req.ID) || len(req.Points) != 1 || !validPoints(req.Points) {
+		model.SendJSONError(w, c.r, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid request body.")
+		return
+	}
+	if !h.allow(w, c, "board-move", 120, time.Minute) {
+		return
+	}
+	points, _ := json.Marshal(req.Points)
+	err := database.InCallerContext(c.r.Context(), h.pool, c.roomID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(c.r.Context(), `SELECT connect_auth.board_move($1::UUID, $2::UUID, $3::jsonb)`, c.roomID, req.ID, string(points))
+		return err
+	})
+	if err != nil {
+		sendBoardError(w, c.r, err, "Could not move that.")
+		return
+	}
+	model.SendJSON(w, http.StatusOK, map[string]any{"success": true})
 }
