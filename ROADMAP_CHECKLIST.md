@@ -38,13 +38,14 @@ end to end (API, web, data) and has automated or browser evidence; it does not m
   - [x] Structured JSON decks (title, bullets, table, comparison, steps, code), validated and size-limited server-side, synced to every screen, late joiners land on the current slide
   - [x] Inline slide editing by the teacher; PDF export through the browser print dialog
   - [x] Code slides coloured by a token highlighter; decks saved to the class vault (`000037`) and opened from meeting history after class
-  - [ ] Voice-transcript context (needs 28); Mermaid diagrams (steps layout instead); PPTX export
+  - [x] "Use live voice context": the server adds the last 3 minutes of the live transcript to the request
+  - [ ] Mermaid diagrams (steps layout instead); PPTX export
   - [ ] <5 s target not yet measured against a real free-tier provider
 - [~] **8. Live simulation generator (teacher)** — the model picks one of 9 built-in engines (projectile, pendulum, function graph, CPU scheduling, sorting, logic circuits, perceptron, BST/AVL tree, BFS/DFS/Dijkstra graph) and its settings. It never writes code that runs in students' browsers
   - [x] Presenter mode: slider frames over the LiveKit data channel (about 30 a second, accepted only from the stored presenter), each screen animating locally at display rate; settings saved for late joiners
   - [x] Sandbox mode: students change their own copy and send it; the teacher lists and previews answers; answers are private to each student
   - [ ] Free-form WebGL or arbitrary sandboxes; multi-layer neural networks
-- [ ] **9. Cloud recording and playback** — **BLOCKED**: LiveKit free tier allows 60 shared minutes; token grant only
+- [~] **9. Recording and playback** — host records the meeting tab and their mic locally with MediaRecorder (no cloud minutes); the .webm downloads to the host and its slide/transcript markers are stored (`000038`); replay in meeting history opens the file and seeks to markers. Cloud recording stays **BLOCKED** (free tier: 60 shared minutes). Real tab-capture permission not exercised headless
 - [~] **10. Meeting history** — history list and detail with search (`/history`, `000023`); summary cards partial
 - [~] **11. Institution hierarchy** — organization, courses, batches, enrollment, faculty allocation (`000007`, `000019`); no school/department/degree levels
 - [~] **12. Admin dashboard and audit** — `/admin` dashboard (`000024`) and audit log service; no server metrics or storage quotas view
@@ -72,11 +73,11 @@ end to end (API, web, data) and has automated or browser evidence; it does not m
 
 ## Domain 5: AI lecture intelligence
 
-- [ ] **28. Speech-to-text** — **BLOCKED**: no approved speech provider
-- [ ] **29. Hinglish transcription** — **BLOCKED** on 28
+- [~] **28. Speech-to-text** — host live captions from the browser's Web Speech API (Chrome/Edge send audio to their vendor's service; disclosed before starting), Groq free Whisper fallback for other browsers, captions to everyone over the data channel, transcript saved (`000038`). Not run against a real speech service here
+- [~] **29. Hinglish transcription** — caption languages en-IN (Indian English/Hinglish), hi-IN and en-US; Whisper is left to auto-detect for en-IN so code-switching is not forced into one language. Accuracy not measured
 - [~] **30. Lecture summaries** — `/ai/summaries/generate` and background jobs from supplied text
 - [~] **31. Study materials** — quizzes and flashcards generation; no revision-notes UI
 - [ ] **32. Doubt extraction from transcripts** — needs 28
-- [ ] **33. Timestamp-linked navigation** — needs 9 and 28
+- [~] **33. Timestamp-linked navigation** — replay timeline merges slide markers and transcript lines at MM:SS; clicking seeks the video (browser-checked). AI summaries, flashcards and doubts not yet linked to times
 - [~] **34. Faculty review gate** — `/ai/artifacts/{id}/review` (approve/publish); review UI partial
 - [~] **35. LLM infrastructure** — provider routing (Gemini, Groq, OpenRouter free), budgets, usage ledger, rate limits, retries; no response cache or accuracy evaluation
