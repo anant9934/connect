@@ -87,3 +87,28 @@ func TestGenerateLiveSimulation_TreeAndGraphEngines(t *testing.T) {
 		t.Error("prompt should describe the graph engine")
 	}
 }
+
+func TestValidateLectureSummary_TopicsQuestionsAndTimes(t *testing.T) {
+	v := NewValidator()
+	s, err := v.ValidateLectureSummary(`{"title":"Heaps","overview":"Binary heaps.",
+	  "topics":[{"title":"Heap property","at":"[03:15]","points":["parent >= children"]},{"title":"Heapify","at":"around five minutes"},{"title":""}],
+	  "definitions":[{"term":"Complete tree","meaning":"All levels full except the last"},{"term":"","meaning":"x"}],
+	  "questions":[{"question":"Why O(n)?","answer":"","at":"1:02:03","answered":true},{"question":"Min vs max?","answer":"Order flips","at":"07:40","answered":true}],
+	  "revisionNotes":["Height is log n"," "], "unresolved":["Proof of O(n) build"],
+	  "source":{"roomId":"injected"}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Topics) != 2 || s.Topics[0].At != "03:15" || s.Topics[1].At != "" {
+		t.Errorf("topics: %+v", s.Topics)
+	}
+	if len(s.Definitions) != 1 || len(s.RevisionNotes) != 1 {
+		t.Errorf("definitions %d notes %d", len(s.Definitions), len(s.RevisionNotes))
+	}
+	if s.Questions[0].Answered || s.Questions[0].At != "1:02:03" || !s.Questions[1].Answered {
+		t.Errorf("questions: %+v", s.Questions)
+	}
+	if s.Source != nil {
+		t.Error("the model must not set the source")
+	}
+}

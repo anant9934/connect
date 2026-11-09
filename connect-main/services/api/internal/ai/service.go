@@ -167,8 +167,16 @@ func (s *Service) SummarizeLecture(ctx context.Context, orgID, userID, courseCod
   "overview": "2-3 paragraph academic overview",
   "keyConcepts": ["Concept 1", "Concept 2"],
   "takeaways": ["Takeaway 1", "Takeaway 2"],
-  "actionItems": ["Homework or revision item 1"]
+  "actionItems": ["Homework or revision item 1"],
+  "topics": [{"title": "Topic in the order taught", "at": "MM:SS", "points": ["Subtopic or key point"]}],
+  "definitions": [{"term": "Term", "meaning": "Formal definition as taught"}],
+  "revisionNotes": ["One-line fact to revise before an exam"],
+  "questions": [{"question": "A question a student asked", "answer": "The teacher's answer, if given", "at": "MM:SS", "answered": true}],
+  "unresolved": ["A question or confusion left open, to follow up"]
 }
+Transcript lines may start with [MM:SS], the time into the class recording. Use those times for "at";
+if a line has no time, leave "at" empty. Never invent times. The lecture may mix English and Hindi
+(Hinglish); write the summary in clear English. Questions may also come from the class Q&A list.
 Return only valid JSON.`
 
 	userPrompt := fmt.Sprintf("Course: %s\nTranscript:\n%s", courseCode, s.sanitizer.WrapUserContent("lecture_transcript", cleanTranscript))
@@ -178,7 +186,7 @@ Return only valid JSON.`
 		SystemPrompt:   systemPrompt,
 		UserPrompt:     userPrompt,
 		Temperature:    0.2,
-		MaxTokens:      2048,
+		MaxTokens:      4096,
 		ResponseFormat: "json",
 	}
 
