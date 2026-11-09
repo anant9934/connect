@@ -47,6 +47,8 @@ type Handler struct {
 	audit   *audit.Service
 	// generator makes live canvas content; nil until SetLiveGenerator is called.
 	generator LiveGenerator
+	// transcriber is the Whisper fallback; nil when no Groq key is configured.
+	transcriber SpeechTranscriber
 }
 
 // NewHandler constructs the handler.

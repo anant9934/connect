@@ -3,6 +3,7 @@ package interaction
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tathastu/connect/services/api/internal/ai"
 	"github.com/tathastu/connect/services/api/internal/database"
 	"github.com/tathastu/connect/services/api/internal/model"
 )
@@ -233,4 +235,87 @@ func (h *Handler) SaveRecording(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	model.SendJSON(w, http.StatusCreated, map[string]any{"id": id, "markers": len(markers)})
+}
+
+// SpeechTranscriber turns an audio chunk into text. *ai.Transcriber implements it.
+type SpeechTranscriber interface {
+	Transcribe(ctx context.Context, audio []byte, contentType, lang string) (string, error)
+}
+
+// SetTranscriber enables the Whisper fallback for browsers without speech recognition.
+func (h *Handler) SetTranscriber(t SpeechTranscriber) {
+	h.transcriber = t
+}
+
+// whisperDailyLimit keeps the shared free Groq quota from running out in one day.
+const whisperDailyLimit = 1500
+
+// PostTranscriptAudio handles POST /rooms/{code}/transcript/audio: a few seconds of the host's
+// speech, transcribed by the free Whisper fallback and stored as a segment. Permission is
+// checked before the provider is called, so nobody else can spend the shared quota.
+func (h *Handler) PostTranscriptAudio(w http.ResponseWriter, r *http.Request) {
+	c, ok := h.resolve(w, r)
+	if !ok {
+		return
+	}
+	c.r.Body = http.MaxBytesReader(w, c.r.Body, ai.MaxWhisperAudioBytes+(64<<10))
+	if err := c.r.ParseMultipartForm(ai.MaxWhisperAudioBytes); err != nil {
+		model.SendJSONError(w, c.r, http.StatusBadRequest, "INVALID_PAYLOAD", "Send up to 2 MB of audio.")
+		return
+	}
+	lang, clientID := c.r.FormValue("lang"), c.r.FormValue("clientId")
+	spokenAt, err := time.Parse(time.RFC3339Nano, c.r.FormValue("spokenAt"))
+	if err != nil {
+		spokenAt = time.Now()
+	}
+	file, header, err := c.r.FormFile("audio")
+	if err != nil || !transcriptLangs[lang] || !clientMessageIDPattern.MatchString(clientID) {
+		model.SendJSONError(w, c.r, http.StatusBadRequest, "INVALID_PAYLOAD", "Audio, a language and a client id are required.")
+		return
+	}
+	defer file.Close()
+	audio, err := io.ReadAll(io.LimitReader(file, ai.MaxWhisperAudioBytes+1))
+	if err != nil || len(audio) == 0 || len(audio) > ai.MaxWhisperAudioBytes {
+		model.SendJSONError(w, c.r, http.StatusBadRequest, "INVALID_PAYLOAD", "Send up to 2 MB of audio.")
+		return
+	}
+	var canManage bool
+	err = database.InCallerContext(c.r.Context(), h.pool, c.roomID, func(tx pgx.Tx) error {
+		return tx.QueryRow(c.r.Context(), `SELECT connect_auth.can_announce($1::UUID)`, c.roomID).Scan(&canManage)
+	})
+	if err != nil || !canManage {
+		model.SendJSONError(w, c.r, http.StatusForbidden, "FORBIDDEN", "Only the host or a co-host can add to the transcript.")
+		return
+	}
+	if h.transcriber == nil {
+		ai.WriteError(w, c.r, ai.ErrProviderNotConfigured)
+		return
+	}
+	if !h.allow(w, c, "whisper", 30, time.Minute) {
+		return
+	}
+	if h.limiter != nil {
+		if allowed, err := h.limiter.Allow(c.r.Context(), "interaction:whisper:day", whisperDailyLimit, 24*time.Hour); err != nil || !allowed {
+			ai.WriteError(w, c.r, ai.ErrProviderQuotaExhausted)
+			return
+		}
+	}
+	text, err := h.transcriber.Transcribe(c.r.Context(), audio, header.Header.Get("Content-Type"), lang)
+	if err != nil {
+		ai.WriteError(w, c.r, err)
+		return
+	}
+	text = cleanSegmentText(text)
+	if text == "" {
+		model.SendJSON(w, http.StatusOK, map[string]any{"text": ""})
+		return
+	}
+	err = database.InCallerContext(c.r.Context(), h.pool, c.roomID, func(tx pgx.Tx) error {
+		return h.addSegments(c.r.Context(), tx, c.roomID, "whisper", []NewSegment{{ClientID: clientID, SpokenAt: spokenAt, Text: text, Lang: lang}})
+	})
+	if err != nil {
+		sendCanvasError(w, c.r, err, "Could not save the transcript.")
+		return
+	}
+	model.SendJSON(w, http.StatusCreated, map[string]any{"text": text})
 }

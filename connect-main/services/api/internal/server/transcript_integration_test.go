@@ -1,9 +1,12 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -26,6 +29,14 @@ func (g *contextGenerator) GenerateLiveSlides(ctx context.Context, b, u, p, lect
 	return content, n, err
 }
 
+// fakeTranscriber stands in for Groq Whisper.
+type fakeTranscriber struct{ calls int }
+
+func (f *fakeTranscriber) Transcribe(context.Context, []byte, string, string) (string, error) {
+	f.calls++
+	return "aaj hum heaps padhenge", nil
+}
+
 // TestWorkflowDB_TranscriptAndRecordings adds captions as the host, uses them as slide context,
 // saves a local recording's markers, and reads both back from meeting history.
 func TestWorkflowDB_TranscriptAndRecordings(t *testing.T) {
@@ -43,7 +54,9 @@ func TestWorkflowDB_TranscriptAndRecordings(t *testing.T) {
 	room.SetGuestTokenSecret([]byte("transcript-integration-secret-0123456"))
 	t.Cleanup(room.ResetGuestTokenSecretForTest)
 	gen := &contextGenerator{}
-	api := apiClient{t: t, router: newRuntimeRouterWith(t, app, nil, func(h *interaction.Handler) { h.SetLiveGenerator(gen) })}
+	whisper := &fakeTranscriber{}
+	router := newRuntimeRouterWith(t, app, nil, func(h *interaction.Handler) { h.SetLiveGenerator(gen); h.SetTranscriber(whisper) })
+	api := apiClient{t: t, router: router}
 	_, hostToken := api.signup()
 	_, memberToken := api.signup()
 	_, strangerToken := api.signup()
@@ -89,5 +102,31 @@ func TestWorkflowDB_TranscriptAndRecordings(t *testing.T) {
 	}
 	if got := rowsOf(api.want("stranger history", http.StatusOK, http.MethodGet, "/api/v1/meetings/"+roomID+"/transcript", stranger, nil), "segments"); len(got) != 0 {
 		t.Errorf("stranger sees %d lines", len(got))
+	}
+
+	audio := func(who caller) int {
+		var body bytes.Buffer
+		form := multipart.NewWriter(&body)
+		_ = form.WriteField("lang", "en-IN")
+		_ = form.WriteField("clientId", "w1")
+		part, _ := form.CreateFormFile("audio", "chunk.webm")
+		_, _ = part.Write([]byte("fake-opus"))
+		_ = form.Close()
+		req := httptest.NewRequest(http.MethodPost, roomPath(code)+"/transcript/audio", &body)
+		req.Header.Set("Content-Type", form.FormDataContentType())
+		req.Header.Set("Origin", "http://localhost:3000")
+		req.Header.Set("Authorization", "Bearer "+who.token)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if got := audio(member); got != http.StatusForbidden || whisper.calls != 0 {
+		t.Errorf("member audio: %d, provider calls %d", got, whisper.calls)
+	}
+	if got := audio(host); got != http.StatusCreated || whisper.calls != 1 {
+		t.Errorf("host audio: %d", got)
+	}
+	if got := rowsOf(api.want("whisper segment stored", http.StatusOK, http.MethodGet, roomPath(code)+"/transcript", host, nil), "segments"); len(got) != 3 || got[2]["source"] != "whisper" {
+		t.Errorf("after whisper: %v", got)
 	}
 }

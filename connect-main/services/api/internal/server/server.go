@@ -390,6 +390,10 @@ func BuildRouter(
 						roomDetail.With(
 							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
 							appmw.OptionalAuth(authService),
+						).Post("/transcript/audio", interactionHandler.PostTranscriptAudio)
+						roomDetail.With(
+							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
+							appmw.OptionalAuth(authService),
 						).Post("/recordings", interactionHandler.SaveRecording)
 						roomDetail.With(
 							appmw.CSRFProtection(cfg.CORSAllowedOrigins),
