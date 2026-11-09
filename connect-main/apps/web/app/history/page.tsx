@@ -7,6 +7,7 @@ import { getSession } from '@/features/auth/api';
 import { User } from '@/features/auth/types';
 import { ApiError } from '@/lib/api/client';
 import { allMeetingsCalendarUrl, MeetingItem, searchMeetings } from '@/features/rooms/meetings';
+import { HistorySummary } from '@/components/dashboard/HistorySummary';
 
 const PAGE_SIZE = 20;
 const SEARCH_DELAY_MS = 300;
@@ -149,6 +150,7 @@ export default function MeetingHistoryPage() {
           </div>
         </div>
         <h1 className="text-xl font-bold text-[#171717]">Meeting history</h1>
+        <HistorySummary />
 
         <form role="search" onSubmit={(e) => e.preventDefault()} className="p-4 rounded-2xl border border-[#E9E9E5] bg-white space-y-3">
           <div>

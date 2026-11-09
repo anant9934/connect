@@ -7,6 +7,7 @@ import { getSession } from '@/features/auth/api';
 import { ApiError } from '@/lib/api/client';
 import * as api from '@/features/institution/api';
 import { EngagementExplainer, ScoreBadge, engagementBand } from '@/components/engagement/Engagement';
+import { SystemHealth } from '@/components/dashboard/SystemHealth';
 
 const AUDIT_PAGE_SIZE = 25;
 const AUDIT_REFRESH_MS = 5000;
@@ -260,6 +261,8 @@ export default function AdminPage() {
           </div>
         )}
         {org && <p className="text-sm text-[#404040]">{org.name} · {ROLE_LABELS[org.role]}</p>}
+
+        {orgId && <SystemHealth orgId={orgId} />}
 
         {overview && (
           <>
