@@ -21,7 +21,8 @@ import { STARTER_CODE_BY_LANGUAGE } from '../runtimes/starterTemplates';
 import { runPythonCode, preloadPython } from '../runtimes/pythonRunner';
 import { executeSqlQuery, type SqlQueryResult } from '../runtimes/sqlRunner';
 import { buildSandboxedHtmlDoc } from '../runtimes/htmlPreview';
-import { runOnServer } from '../api';
+import { runOnServer, type ServerRunResult } from '../api';
+import { CLANG_DOWNLOAD_MB, runCppInBrowser } from '../runtimes/cppBrowser';
 import { listOrganizations } from '@/features/institution/api';
 
 interface CodeEditorProps {
@@ -68,6 +69,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   const [stdout, setStdout] = useState<string>('');
   const [stderr, setStderr] = useState<string>('');
   const [isRunning, setIsRunning] = useState<boolean>(false);
+  // True when the last C++ run happened in the browser sandbox rather than the official runner.
+  const [practiceRun, setPracticeRun] = useState(false);
   const [executionTime, setExecutionTime] = useState<number | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -211,23 +214,44 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
         setExecutionTime(dur);
         setStdout('Live preview updated.');
       } else {
-        // C++ and Java compile and run on the institution's isolated code runner, never here.
+        // C++ and Java compile and run on the institution's isolated code runner. Without one,
+        // C++ falls back to a practice run in a browser sandbox; Java has no browser fallback.
         setActiveConsoleTab('output');
+        setPracticeRun(false);
         const langName = language === 'cpp' ? 'C++' : 'Java';
         const org = orgId ?? (await listOrganizations().catch(() => []))[0]?.id;
-        if (!org) {
-          const msg = `${langName} runs on your institution's code runner. Join an institution to run it; editing and submitting work without it.`;
+        let res: ServerRunResult | null = null;
+        let serverUnavailable = !org;
+        if (org) {
+          try {
+            res = await runOnServer(org, language as 'cpp' | 'java', code, stdin);
+          } catch (err) {
+            const codeName = (err as { code?: string }).code;
+            if (codeName === 'RUNNER_NOT_CONFIGURED' || codeName === 'RUNNER_UNAVAILABLE') serverUnavailable = true;
+            else throw err;
+          }
+        }
+        if (!res && serverUnavailable && language === 'cpp') {
+          setPracticeRun(true);
+          setStdout('Preparing the browser compiler…');
+          const browser = await runCppInBrowser(code, stdin, {
+            onProgress: (done, total) => setStdout(`Downloading the C++ compiler once (${Math.round((done / Math.max(total, 1)) * 100)}% of ~${CLANG_DOWNLOAD_MB} MB)…`),
+            onCompiled: () => setStdout('Running…'),
+          });
+          res = { status: browser.status, stdout: browser.stdout, stderr: browser.stderr, compileOutput: browser.compileOutput, exitCode: browser.exitCode, timeMs: Math.round(browser.runMs) };
+        }
+        if (!res) {
+          const msg = `${langName} runs on your institution's code runner, and none is set up yet. Editing and submitting still work; faculty review the code.`;
           setStderr(msg);
           setExecutionTime(0);
           onExecute?.({ stdout: '', stderr: msg, durationMs: 0, status: 'error' });
           return;
         }
-        const res = await runOnServer(org, language as 'cpp' | 'java', code, stdin);
         setExecutionTime(res.timeMs);
         setStdout(res.stdout);
         const problem =
           res.status === 'compile_error' ? `Compilation error:\n${res.compileOutput}`
-          : res.status === 'time_limit' ? 'Time limit exceeded.'
+          : res.status === 'time_limit' ? `Time limit exceeded. ${res.stderr}`.trim()
           : res.status === 'memory_limit' ? 'Memory limit exceeded.'
           : res.status === 'runtime_error' ? `Runtime error (exit ${res.exitCode}).\n${res.stderr}`
           : res.stderr;
@@ -470,6 +494,11 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
           <div className="flex-1 p-3 overflow-auto font-mono text-xs">
             {activeConsoleTab === 'output' && (
               <div className="space-y-3">
+                {practiceRun && language === 'cpp' && (
+                  <p data-testid="practice-run-label" className="inline-flex items-center gap-1.5 rounded-full bg-[#FFF4D1] text-[#6B4E00] px-2.5 py-0.5 text-[11px] font-bold font-sans">
+                    Practice run (browser sandbox) · not an official grade
+                  </p>
+                )}
                 {stdout && (
                   <div className="text-[#17151F] whitespace-pre-wrap leading-relaxed">
                     {stdout}

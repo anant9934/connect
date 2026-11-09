@@ -160,6 +160,10 @@ export async function runOnServer(orgId: string, language: 'cpp' | 'java', sourc
     body: JSON.stringify({ language, source_code: source, stdin }),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(typeof body.message === 'string' ? body.message : typeof body.error === 'string' ? body.error : 'The code could not be run.');
+  if (!res.ok) {
+    const err = new Error(typeof body.message === 'string' ? body.message : typeof body.error === 'string' ? body.error : 'The code could not be run.') as Error & { code?: string };
+    err.code = typeof body.error === 'string' ? body.error : `HTTP_${res.status}`;
+    throw err;
+  }
   return body.result as ServerRunResult;
 }
