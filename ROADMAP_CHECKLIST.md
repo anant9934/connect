@@ -1,6 +1,8 @@
 # Connect Roadmap Checklist (35 modules)
 
 **Audited:** 2026-11-09 from source on `feat/implementation-live-browser-testing` (`097d99f`).
+Design tokens: `.neu-surface`, `.neu-card`, `.neu-pill`, `.neu-pressed`, `.neu-well` in `apps/web/app/globals.css`, on the existing brand colours.
+
 Marks come from the code, migrations and routes, not from earlier reports. `[x]` means code exists
 end to end (API, web, data) and has automated or browser evidence; it does not mean production sign-off.
 `docs/FEATURE_REGISTER.md` stays the acceptance record.
@@ -28,8 +30,16 @@ end to end (API, web, data) and has automated or browser evidence; it does not m
 ## Domain 2: Classroom, live generative canvas and admin
 
 - [~] **6. Presentation and annotation** — PDF (pdf.js) and approximate PPTX rendered client-side, page sync, pen and highlighter strokes (`000027`, `ClassroomBoard`); no laser pointer or text tool
-- [ ] **7. Live AI slide generation (teacher)** — no slide generator; AI service exists to build on
-- [ ] **8. Live interactive simulation generator (teacher)** — not built
+- [~] **7. Live AI slide generation (teacher)** — built 2026-11-09 (`000033`, `livecanvas`, `LiveCanvas.tsx`)
+  - [x] Host/co-host command bar in class; prompt plus optional pasted lecture context; students cannot generate (checked before the model is called)
+  - [x] Structured JSON decks (title, bullets, table, comparison, steps, code), validated and size-limited server-side, synced to every screen, late joiners land on the current slide
+  - [x] Inline slide editing by the teacher; PDF export through the browser print dialog
+  - [ ] Voice-transcript context (needs 28); Mermaid diagrams (steps layout instead); code syntax colouring; PPTX export; saving to a class vault
+  - [ ] <5 s target not yet measured against a real free-tier provider
+- [~] **8. Live simulation generator (teacher)** — built 2026-11-09; the model picks one of 7 built-in engines (projectile, pendulum, function graph, CPU scheduling, sorting, logic circuits, perceptron) and its settings. It never writes code that runs in students' browsers
+  - [x] Presenter mode: slider frames over the LiveKit data channel (about 30 a second, accepted only from the stored presenter), each screen animating locally at display rate; settings saved for late joiners
+  - [x] Sandbox mode: students change their own copy and send it; the teacher lists and previews answers; answers are private to each student
+  - [ ] Free-form WebGL or arbitrary sandboxes; multi-layer neural networks; trees and graphs engines
 - [ ] **9. Cloud recording and playback** — **BLOCKED**: LiveKit free tier allows 60 shared minutes; token grant only
 - [~] **10. Meeting history** — history list and detail with search (`/history`, `000023`); summary cards partial
 - [~] **11. Institution hierarchy** — organization, courses, batches, enrollment, faculty allocation (`000007`, `000019`); no school/department/degree levels
