@@ -49,6 +49,7 @@ import {
 } from '@/features/meeting/transport';
 import { TransportDiagnostics } from './TransportDiagnostics';
 import { PermissionHelpSheet } from './PermissionHelpSheet';
+import type { SimFrame } from './LiveCanvas';
 import { TargetMediaDevice } from '@/features/meeting/permissions';
 
 interface MeetingRoomProps {
@@ -153,6 +154,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [latestAnnouncement, setLatestAnnouncement] = useState<ChatMessage | null>(null);
   const [myRole, setMyRole] = useState('participant');
   const [syncTick, setSyncTick] = useState(0);
+  const [simFrame, setSimFrame] = useState<SimFrame | null>(null);
   const [pendingAdmissions, setPendingAdmissions] = useState<AdmissionRequest[]>([]);
   const [externalNotesRevision, setExternalNotesRevision] = useState<number>(1);
   const [externalFileEvent, setExternalFileEvent] = useState<{ action: string; fileId: string; filename: string } | undefined>(undefined);
@@ -241,6 +243,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         if (data && data.message) ingestRemoteMessageRef.current(data.message, participant?.identity);
         refreshInteractionRef.current();
         setSyncTick((tick) => tick + 1);
+      } else if (topic === 'tc-sim') {
+        // Presenter frames for the live simulation. The sender is LiveKit's authenticated
+        // participant; the canvas accepts frames only from the stored presenter.
+        if (data && typeof data.params === 'object' && data.params && participant?.identity) {
+          setSimFrame({ params: data.params, from: participant.identity, at: Date.now() });
+        }
       } else if (topic === 'tc-notes') {
         if (typeof data.revision === 'number') {
           setExternalNotesRevision(data.revision);
@@ -1109,6 +1117,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           sendHint: () => {
             transportRef.current?.sendData('tc-sync', {}).catch(() => {
               // Others catch up on their next poll.
+            });
+          },
+          simFrame,
+          sendSimFrame: (params) => {
+            transportRef.current?.sendData('tc-sim', { params }).catch(() => {
+              // Stored settings reach everyone on the next sync.
             });
           },
         }}

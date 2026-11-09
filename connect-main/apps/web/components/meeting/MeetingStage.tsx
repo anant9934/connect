@@ -21,6 +21,7 @@ import { ClassroomPanel } from './ClassroomPanel';
 import { BandwidthControl } from './BandwidthControl';
 import { ClassroomBoard } from './ClassroomBoard';
 import { BreakoutControl } from './BreakoutControl';
+import { LiveCanvas, type SimFrame } from './LiveCanvas';
 import { FilesPanel } from './FilesPanel';
 import { TransportDiagnostics } from './TransportDiagnostics';
 import { ChatMessage } from '@/features/chat/types';
@@ -47,6 +48,8 @@ interface MeetingStageProps {
     onRetry: (message: ChatMessage) => void;
     syncTick: number;
     sendHint: () => void;
+    simFrame: SimFrame | null;
+    sendSimFrame: (params: Record<string, unknown>) => void;
   };
   isLocked: boolean;
   isMicMuted: boolean;
@@ -351,6 +354,13 @@ export const MeetingStage: React.FC<MeetingStageProps> = ({
             selfIdentity={localParticipant?.identity || ''}
             syncTick={interaction.syncTick}
             onChanged={interaction.sendHint}
+          />
+          <LiveCanvas
+            roomCode={roomCode}
+            syncTick={interaction.syncTick}
+            onChanged={interaction.sendHint}
+            simFrame={interaction.simFrame}
+            sendSimFrame={interaction.sendSimFrame}
           />
         </div>
 
