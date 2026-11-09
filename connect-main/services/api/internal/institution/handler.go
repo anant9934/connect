@@ -51,6 +51,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		o.Post("/members", h.addMember)
 		o.Patch("/members/{user}", h.updateMember)
 		o.Post("/members/{user}/password-reset", h.issuePasswordReset)
+		o.Get("/schools", h.listSchools)
+		o.Post("/schools", h.createSchool)
+		o.Get("/programs", h.listPrograms)
+		o.Post("/programs", h.createProgram)
 		o.Get("/departments", h.listDepartments)
 		o.Post("/departments", h.createDepartment)
 		o.Get("/courses", h.listCourses)
@@ -345,13 +349,14 @@ func (h *Handler) updateMember(w http.ResponseWriter, r *http.Request) {
 // --- Academic structure ---
 
 func (h *Handler) listDepartments(w http.ResponseWriter, r *http.Request) {
-	h.list(w, r, "departments", `SELECT id, code, name, status FROM departments WHERE organization_id = $1 ORDER BY code`, chi.URLParam(r, "org"))
+	h.list(w, r, "departments", `SELECT id, school_id AS "schoolId", code, name, status FROM departments WHERE organization_id = $1 ORDER BY code`, chi.URLParam(r, "org"))
 }
 
 func (h *Handler) createDepartment(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Code string `json:"code"`
-		Name string `json:"name"`
+		Code     string `json:"code"`
+		Name     string `json:"name"`
+		SchoolID string `json:"schoolId"`
 	}
 	if err := decode(r, &req); err != nil {
 		sendError(w, r, err)
@@ -361,11 +366,11 @@ func (h *Handler) createDepartment(w http.ResponseWriter, r *http.Request) {
 		sendError(w, r, invalid("A code and name are required."))
 		return
 	}
-	h.insert(w, r, "department", `INSERT INTO departments (organization_id, code, name) VALUES ($1, $2, $3) RETURNING id, code, name, status`, chi.URLParam(r, "org"), req.Code, req.Name)
+	h.insert(w, r, "department", `INSERT INTO departments (organization_id, code, name, school_id) VALUES ($1, $2, $3, NULLIF($4, '')::uuid) RETURNING id, school_id AS "schoolId", code, name, status`, chi.URLParam(r, "org"), req.Code, req.Name, req.SchoolID)
 }
 
 func (h *Handler) listCourses(w http.ResponseWriter, r *http.Request) {
-	h.list(w, r, "courses", `SELECT id, department_id AS "departmentId", code, title, description, credits, status FROM courses WHERE organization_id = $1 ORDER BY code`, chi.URLParam(r, "org"))
+	h.list(w, r, "courses", `SELECT id, department_id AS "departmentId", degree_program_id AS "degreeProgramId", code, title, description, credits, status FROM courses WHERE organization_id = $1 ORDER BY code`, chi.URLParam(r, "org"))
 }
 
 func (h *Handler) createCourse(w http.ResponseWriter, r *http.Request) {
@@ -375,6 +380,7 @@ func (h *Handler) createCourse(w http.ResponseWriter, r *http.Request) {
 		Title        string `json:"title"`
 		Description  string `json:"description"`
 		Credits      int    `json:"credits"`
+		ProgramID    string `json:"degreeProgramId"`
 	}
 	if err := decode(r, &req); err != nil {
 		sendError(w, r, err)
@@ -387,8 +393,8 @@ func (h *Handler) createCourse(w http.ResponseWriter, r *http.Request) {
 	if req.Credits <= 0 {
 		req.Credits = 3
 	}
-	h.insert(w, r, "course", `INSERT INTO courses (organization_id, department_id, code, title, description, credits) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, department_id AS "departmentId", code, title, description, credits, status`,
-		chi.URLParam(r, "org"), req.DepartmentID, req.Code, req.Title, req.Description, req.Credits)
+	h.insert(w, r, "course", `INSERT INTO courses (organization_id, department_id, code, title, description, credits, degree_program_id) VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, '')::uuid) RETURNING id, department_id AS "departmentId", degree_program_id AS "degreeProgramId", code, title, description, credits, status`,
+		chi.URLParam(r, "org"), req.DepartmentID, req.Code, req.Title, req.Description, req.Credits, req.ProgramID)
 }
 
 func (h *Handler) listBatches(w http.ResponseWriter, r *http.Request) {
