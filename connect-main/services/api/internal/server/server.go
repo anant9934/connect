@@ -104,6 +104,9 @@ func BuildRouter(
 			if authHandler != nil {
 				authRouter.With(appmw.CSRFProtection(cfg.CORSAllowedOrigins)).Post("/signup", authHandler.Signup)
 				authRouter.With(appmw.CSRFProtection(cfg.CORSAllowedOrigins)).Post("/login", authHandler.Login)
+				authRouter.With(appmw.CSRFProtection(cfg.CORSAllowedOrigins)).Post("/login/member", authHandler.MemberLogin)
+				authRouter.With(appmw.CSRFProtection(cfg.CORSAllowedOrigins)).Post("/password/forgot", authHandler.ForgotPassword)
+				authRouter.With(appmw.CSRFProtection(cfg.CORSAllowedOrigins)).Post("/password/reset", authHandler.ResetPassword)
 				authRouter.With(appmw.CSRFProtection(cfg.CORSAllowedOrigins)).Post("/google", authHandler.GoogleAuth)
 				authRouter.With(appmw.CSRFProtection(cfg.CORSAllowedOrigins)).Post("/logout", authHandler.Logout)
 				authRouter.Get("/session", authHandler.Session)

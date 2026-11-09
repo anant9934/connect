@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,6 +64,10 @@ type Repository interface {
 	UpdateSessionLastSeen(ctx context.Context, sessionID string, now time.Time) error
 	RevokeSession(ctx context.Context, sessionID string) error
 	RevokeAllUserSessions(ctx context.Context, userID string) error
+
+	IssueSelfPasswordReset(ctx context.Context, emailNormalized, tokenHash string, minutes int) (bool, error)
+	ResetPasswordWithToken(ctx context.Context, tokenHash, passwordHash string) (string, error)
+	EmailByMemberIdentifier(ctx context.Context, orgSlug, identifier string) (string, error)
 }
 
 // PgxRepository implements Repository using PostgreSQL connection pool.
@@ -345,6 +350,33 @@ func (r *PgxRepository) RevokeAllUserSessions(ctx context.Context, userID string
 	return err
 }
 
+// IssueSelfPasswordReset stores a hashed self-service reset code for an active account.
+func (r *PgxRepository) IssueSelfPasswordReset(ctx context.Context, emailNormalized, tokenHash string, minutes int) (bool, error) {
+	var issued bool
+	err := r.pool.QueryRow(ctx, `SELECT connect_auth.issue_self_password_reset($1, $2, $3)`, emailNormalized, tokenHash, minutes).Scan(&issued)
+	return issued, err
+}
+
+// ResetPasswordWithToken uses a code once and returns the user, or "" if the code is not valid.
+func (r *PgxRepository) ResetPasswordWithToken(ctx context.Context, tokenHash, passwordHash string) (string, error) {
+	var userID *string
+	err := r.pool.QueryRow(ctx, `SELECT connect_auth.reset_password_with_token($1, $2)::text`, tokenHash, passwordHash).Scan(&userID)
+	if err != nil || userID == nil {
+		return "", err
+	}
+	return *userID, nil
+}
+
+// EmailByMemberIdentifier resolves an institution slug and registration number to an email.
+func (r *PgxRepository) EmailByMemberIdentifier(ctx context.Context, orgSlug, identifier string) (string, error) {
+	var email *string
+	err := r.pool.QueryRow(ctx, `SELECT connect_auth.auth_email_by_member_identifier($1, $2)`, orgSlug, identifier).Scan(&email)
+	if err != nil || email == nil {
+		return "", err
+	}
+	return *email, nil
+}
+
 // MemoryRepository provides a concurrent-safe in-memory store for tests and offline development.
 type MemoryRepository struct {
 	mu              sync.RWMutex
@@ -352,6 +384,14 @@ type MemoryRepository struct {
 	usersByEmail    map[string]*User
 	usersByGoogleID map[string]*User
 	sessions        map[string]*Session // key: tokenHash
+	resets          map[string]memoryReset // key: tokenHash
+	memberEmails    map[string]string      // key: orgSlug + "\x00" + identifier
+}
+
+type memoryReset struct {
+	userID    string
+	expiresAt time.Time
+	used      bool
 }
 
 // NewMemoryRepository constructs an in-memory repository instance.
@@ -361,7 +401,62 @@ func NewMemoryRepository() *MemoryRepository {
 		usersByEmail:    make(map[string]*User),
 		usersByGoogleID: make(map[string]*User),
 		sessions:        make(map[string]*Session),
+		resets:          make(map[string]memoryReset),
+		memberEmails:    make(map[string]string),
 	}
+}
+
+// SetMemberIdentifier registers a registration number for tests and offline development.
+func (m *MemoryRepository) SetMemberIdentifier(orgSlug, identifier, email string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.memberEmails[orgSlug+"\x00"+identifier] = email
+}
+
+func (m *MemoryRepository) IssueSelfPasswordReset(_ context.Context, emailNormalized, tokenHash string, minutes int) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.usersByEmail[emailNormalized]
+	if !ok || u.Status != "active" {
+		return false, nil
+	}
+	for hash, reset := range m.resets {
+		if reset.userID == u.ID {
+			reset.used = true
+			m.resets[hash] = reset
+		}
+	}
+	m.resets[tokenHash] = memoryReset{userID: u.ID, expiresAt: time.Now().Add(time.Duration(minutes) * time.Minute)}
+	return true, nil
+}
+
+func (m *MemoryRepository) ResetPasswordWithToken(_ context.Context, tokenHash, passwordHash string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	reset, ok := m.resets[tokenHash]
+	if !ok || reset.used || time.Now().After(reset.expiresAt) {
+		return "", nil
+	}
+	reset.used = true
+	m.resets[tokenHash] = reset
+	u, ok := m.usersByID[reset.userID]
+	if !ok {
+		return "", nil
+	}
+	u.PasswordHash = passwordHash
+	now := time.Now().UTC()
+	for _, sess := range m.sessions {
+		if sess.UserID == u.ID && sess.RevokedAt == nil {
+			sess.RevokedAt = &now
+		}
+	}
+	return u.ID, nil
+}
+
+func (m *MemoryRepository) EmailByMemberIdentifier(_ context.Context, orgSlug, identifier string) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.memberEmails[strings.ToLower(orgSlug)+"\x00"+identifier], nil
 }
 
 func (m *MemoryRepository) CreateUser(_ context.Context, u *User) error {

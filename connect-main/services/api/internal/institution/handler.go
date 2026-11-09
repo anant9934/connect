@@ -49,6 +49,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		o.Get("/members", h.listMembers)
 		o.Post("/members", h.addMember)
 		o.Patch("/members/{user}", h.updateMember)
+		o.Post("/members/{user}/password-reset", h.issuePasswordReset)
 		o.Get("/departments", h.listDepartments)
 		o.Post("/departments", h.createDepartment)
 		o.Get("/courses", h.listCourses)
