@@ -1,6 +1,6 @@
 # Connect Roadmap Checklist (35 modules)
 
-**Audited:** 2026-11-09 from source on `feat/implementation-live-browser-testing` (`097d99f`).
+**Audited:** 2026-11-09 from source on `feat/implementation-live-browser-testing` (`097d99f`); Sprint 5 entries updated 2026-11-10 (`5466304`).
 Design tokens: `.neu-surface`, `.neu-card`, `.neu-pill`, `.neu-pressed`, `.neu-well` in `apps/web/app/globals.css`, on the existing brand colours.
 
 Marks come from the code, migrations and routes, not from earlier reports. `[x]` means code exists
@@ -24,7 +24,8 @@ end to end (API, web, data) and has automated or browser evidence; it does not m
 - [~] **4. Authentication and identity**
   - [x] Signup, login, logout, sessions, Google, and sign-in by institution + registration number (`member_identifier`)
   - [x] Password reset without email: an institution admin issues a one-time 12-character code (24 h, hashed, single use; admins cannot reset admins); self-service codes are logged only outside production (`000035`)
-  - [ ] Email verification and emailed resets (**BLOCKED**: no email provider); university SSO (SAML/OIDC)
+  - [x] University single sign-on with OpenID Connect at `/api/v1/auth/sso/{org}` (`000045`): PKCE, signed state cookie, nonce, issuer/audience/expiry and verified-email checks, allowed email domains; only existing active members of that institution get a session (no account creation). Providers set by `SSO_PROVIDERS`; sign-in page lists them. Tested against a fake identity provider; no real university IdP connected
+  - [ ] SAML (not built; OIDC covers Google Workspace, Microsoft Entra, Okta and Keycloak). Email verification and emailed resets **BLOCKED**: no email provider
   - [x] Profile editing and avatars (`/profile`, `avatars`)
 - [~] **5. Cross-platform apps**
   - [x] Responsive web, manifest and service worker: static shell cached, offline page when the network is gone; never caches API responses or page HTML
@@ -39,16 +40,17 @@ end to end (API, web, data) and has automated or browser evidence; it does not m
   - [x] Inline slide editing by the teacher; PDF export through the browser print dialog
   - [x] Code slides coloured by a token highlighter; decks saved to the class vault (`000037`) and opened from meeting history after class
   - [x] "Use live voice context": the server adds the last 3 minutes of the live transcript to the request
-  - [ ] Mermaid diagrams (steps layout instead); PPTX export
+  - [x] Diagram slides: nodes (box, decision, pill, database) and labelled edges, laid out by a built-in layered layout and drawn as SVG (no Mermaid dependency); browser-checked
+  - [x] Editable `.pptx` download from the live canvas and the class vault (built in the browser with JSZip; text, tables, code, comparison and diagrams as native shapes and connectors); opened with python-pptx
   - [ ] <5 s target not yet measured against a real free-tier provider
 - [~] **8. Live simulation generator (teacher)** — the model picks one of 9 built-in engines (projectile, pendulum, function graph, CPU scheduling, sorting, logic circuits, perceptron, BST/AVL tree, BFS/DFS/Dijkstra graph) and its settings. It never writes code that runs in students' browsers
   - [x] Presenter mode: slider frames over the LiveKit data channel (about 30 a second, accepted only from the stored presenter), each screen animating locally at display rate; settings saved for late joiners
   - [x] Sandbox mode: students change their own copy and send it; the teacher lists and previews answers; answers are private to each student
   - [ ] Free-form WebGL or arbitrary sandboxes; multi-layer neural networks
 - [~] **9. Recording and playback** — host records the meeting tab and their mic locally with MediaRecorder (no cloud minutes); the .webm downloads to the host and its slide/transcript markers are stored (`000038`); replay in meeting history opens the file and seeks to markers. Cloud recording stays **BLOCKED** (free tier: 60 shared minutes). Real tab-capture permission not exercised headless
-- [~] **10. Meeting history** — history list and detail with search (`/history`, `000023`); summary cards partial
-- [~] **11. Institution hierarchy** — organization, courses, batches, enrollment, faculty allocation (`000007`, `000019`); no school/department/degree levels
-- [~] **12. Admin dashboard and audit** — `/admin` dashboard (`000024`) and audit log service; no server metrics or storage quotas view
+- [x] **10. Meeting history** — history list and detail with search (`/history`, `000023`); summary cards for classes, average time in class, doubts resolved, saved decks and recordings (`000043`), browser-checked
+- [x] **11. Institution hierarchy** — organization → school → department → degree program → course → batch, with enrollment and faculty allocation (`000007`, `000019`, `000044`); structure map on `/institution`, browser-checked. Schools and programs are optional so existing data keeps working
+- [x] **12. Admin dashboard and audit** — `/admin` dashboard (`000024`), audit log, and System Health & Quotas (`000043`): live rooms and people in class, AI tokens and spend against the monthly budget, files and storage, and database size and largest tables for platform admins. No CPU/memory metrics (Render shows those)
 
 ## Domain 3: Attendance intelligence and interactive classroom
 
@@ -59,14 +61,14 @@ end to end (API, web, data) and has automated or browser evidence; it does not m
 - [x] **17. Attendance dashboard** — three pillar cards (duration with join/leave/reconnections/late-early, engagement breakdown, tab focus) with the rule's weighted formula, for the student in meeting history and for staff from `/attendance` (`000039`); unfinalised classes say no rule has been applied yet
 - [~] **18. Attendance rules** — versioned rules and audited corrections; weight formula partly configurable
 - [x] **19. Polls, quizzes and doubts** — single/multiple choice, timed quizzes, scoring, doubt queue sorted by upvotes (no self-votes), top-5 quiz leaderboard shown when a quiz closes (`000040`)
-- [~] **20. Breakouts and whiteboard** — breakout open/assign/close (`000028`); board with pen, highlighter, text, rectangles, circles, arrows and draggable pastel sticky notes (`000036`); no LaTeX, live cursors or infinite canvas
+- [~] **20. Breakouts and whiteboard** — breakout open/assign/close (`000028`); board with pen, highlighter, text, rectangles, circles, arrows and draggable pastel sticky notes (`000036`); infinite pan and zoom (Space + drag, hand tool, pinch, Ctrl + wheel, 50–200% pill) and LaTeX-style math blocks typeset without a library (`000042`), browser-checked; no live cursors
 
 ## Domain 4: Practical learning platform
 
 - [~] **21. Course workspaces** — lab courses, modules, exercises (`000030`, `/lab/course/[slug]`)
 - [~] **22. Coding IDE** — custom editor for C++, Python, Java, HTML, CSS, JS, SQL; not Monaco/CodeMirror
-- [~] **23. C++ OOP and DSA curriculum** — OOPS and DSA visualizers and templates; curriculum coverage not complete
-- [~] **24. Sandboxed execution** — Python (WASM), SQL (WASM), HTML preview in the browser; C++/Java run on an operator-provided Piston or Judge0 CE service (`CODE_RUNNER_KIND`, `CODE_RUNNER_URL`, `CODE_RUNNER_TOKEN`), with time limits and per-user rate limits. No runner is deployed yet; without one the editor says so and grades stay faculty-reviewed (no simulated results)
+- [x] **23. C++ OOP and DSA curriculum** — 13 exercises: classes, encapsulation, inheritance, polymorphism; arrays, linked lists, stacks, queues, trees, graphs, searching, sorting, dynamic programming. Each has a starter and 3 tests (1 hidden); reference solutions compiled and passed all 39 tests (`test/verify_cpp_curriculum.mjs`)
+- [~] **24. Sandboxed execution** — Python (WASM), SQL (WASM), HTML preview in the browser; C++/Java run on an operator-provided Piston or Judge0 CE service (`CODE_RUNNER_KIND`, `CODE_RUNNER_URL`, `CODE_RUNNER_TOKEN`), with time limits and per-user rate limits. No runner is deployed yet. Without one, C++ runs as a "Practice run (browser sandbox)" with Clang compiled to WebAssembly (about 105 MB downloaded from jsDelivr once, then cached; 5 s time limit), never as an official grade; Java says no runner is set up
 - [~] **25. Visualizers and SQL lab** — `DSAVisualizer`, `OOPSVisualizer`, `SqlLab`, live HTML preview
 - [~] **26. Assignments and evaluation** — creator, test cases, submissions, evaluator; with a runner, C++/Java submissions are graded on the server against every test case including hidden ones; other languages stay self-checks reviewed by faculty
 - [~] **27. Progress dashboard** — `/lab/dashboard`, `lab_student_progress`
@@ -75,9 +77,9 @@ end to end (API, web, data) and has automated or browser evidence; it does not m
 
 - [~] **28. Speech-to-text** — host live captions from the browser's Web Speech API (Chrome/Edge send audio to their vendor's service; disclosed before starting), Groq free Whisper fallback for other browsers, captions to everyone over the data channel, transcript saved (`000038`). Not run against a real speech service here
 - [~] **29. Hinglish transcription** — caption languages en-IN (Indian English/Hinglish), hi-IN and en-US; Whisper is left to auto-detect for en-IN so code-switching is not forced into one language. Accuracy not measured
-- [~] **30. Lecture summaries** — notes from a class's saved captions and Q&A (`/ai/summaries/from-meeting`) with topics in order at MM:SS, definitions and key concepts; Hinglish transcripts summarised in English. Long classes are cut at 60k characters (no chunking yet)
+- [~] **30. Lecture summaries** — notes from a class's saved captions and Q&A (`/ai/summaries/from-meeting`) with topics in order at MM:SS, definitions and key concepts; Hinglish transcripts summarised in English. Long classes (over 18k characters) are summarised in 10-minute windows with 60 s overlap, then merged with MM:SS kept
 - [x] **31. Study materials** — revision sheet, MCQs with explanations and flip flashcards in the study vault (`/study`)
 - [~] **32. Doubt extraction from transcripts** — summaries list student questions with the teacher's answer and time, and unresolved follow-ups. Extraction quality not measured against real lectures
 - [~] **33. Timestamp-linked navigation** — replay timeline merges slide markers and transcript lines at MM:SS; summary topics and questions link to `/history/{meeting}?t=…` which seeks once the local file is opened. Flashcards have no times
 - [x] **34. Faculty review gate** — study vault: notes stay faculty-only, faculty edit (validated server-side; editing published notes returns them to review), then Approve & publish; students see only published material (RLS)
-- [~] **35. LLM infrastructure** — provider routing (Gemini, Groq, OpenRouter free), budgets, usage ledger, rate limits, retries, Groq Whisper, and an in-process SHA-256 response cache per organization (500 entries, 24 h; not shared across instances or restarts). No semantic chunking or accuracy evaluation
+- [~] **35. LLM infrastructure** — provider routing (Gemini, Groq, OpenRouter free), budgets, usage ledger, rate limits, retries, Groq Whisper, and a SHA-256 response cache per organization, in memory and in Postgres (`000041`, 7 days, shared across instances and restarts), and transcript chunking. No accuracy evaluation

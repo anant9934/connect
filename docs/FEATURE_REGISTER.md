@@ -3,6 +3,8 @@
 **Audited:** 2026-11-01 from source on `main` at `d31b718`, not from earlier reports.
 Search-based entries show whether code exists, not that it works.
 
+**Sprint 5 update (2026-11-10, `feat/implementation-live-browser-testing` at `5466304`):** rows P1-13, P2-02, P2-04, P2-06, P2-08, P3-08, P4-03, P5-02 and P5-04 were re-checked from source. Evidence is local: Go unit tests and `go vet`, 102 web unit tests, type check, production build and a headless Chrome run against a stub API. Database integration tests for migrations `000041`–`000045` run only in CI and were not observed from this machine.
+
 ## Audit findings
 
 | Severity | Finding | Status |
@@ -49,14 +51,15 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | P1-10 | 1 | Password recovery, email verification | no | no | no | BLOCKED | Needs an email provider; none is authorized under the budget |
 | P1-11 | 1 | Profile and avatar | `auth` | yes | yes | TESTING | |
 | P1-12 | 1 | Notes and file sharing (R2) | `notes`, `files` | yes | unconfirmed | TESTING | ClamAV disabled in `render.yaml`; request context and tenant tests pass in CI run 41358542181 |
+| P1-13 | 1 | University single sign-on (OIDC) | `auth/sso.go`, `000045` | sign-in button | no | TESTING | Full flow and 8 rejection cases pass against a fake identity provider; no real university IdP connected; SAML not built; needs `SSO_PROVIDERS`, `SSO_STATE_SECRET`, `PUBLIC_APP_ORIGIN` |
 | P2-01 | 2 | Recording and playback | token grant only | no | no | BLOCKED | Free tier allows 60 shared minutes only; no paid plan authorized |
-| P2-02 | 2 | Meeting history | `/rooms/history` | basic | no | IN_PROGRESS | No search, attendance or recording links |
+| P2-02 | 2 | Meeting history | `meetings`, `000023`, `000043` | `/history` | no | TESTING | Search, detail, replay markers and summary cards; cards browser-checked with stub data |
 | P2-03 | 2 | Recurring scheduling, reminders | `institution` | `/institution` | no | IN_PROGRESS | Recurrence, time zones, daylight saving, conflicts, reschedule and cancel pass; no reminders or calendar export |
-| P2-04 | 2 | Presentation tools | no | no | no | NOT_STARTED | |
+| P2-04 | 2 | Presentation tools | `classroom`, `livecanvas` | yes | no | TESTING | PDF/PPTX viewing, annotation, AI decks with diagram slides and `.pptx` download (opened with python-pptx); generation latency not measured on a real provider |
 | P2-05 | 2 | Low-bandwidth mode, diagnostics | n/a | partial | partial | IN_PROGRESS | |
-| P2-06 | 2 | Institutions, courses, enrollment | `institution`, `000019` | `/institution` | no | TESTING | Passes in API tests and real Chrome, CI run 41367090494; no subjects or classrooms as separate entities; no Android screens |
+| P2-06 | 2 | Institutions, courses, enrollment | `institution`, `000019`, `000044` | `/institution` | no | TESTING | Schools and degree programs added above courses with a structure map (browser-checked); hierarchy integration test runs in CI only; no Android screens |
 | P2-07 | 2 | Notifications | `notifications`, `000022` | `/notifications` | deferred | TESTING | In-app: class changes, reminders and attendance corrections pass with jobs run as `connect_worker` and in real Chrome, CI run 41391002517. No email (no provider approved); no recording or assignment notices yet |
-| P2-08 | 2 | Admin dashboard | audit service only | no | no | NOT_STARTED | |
+| P2-08 | 2 | Admin dashboard | `institution`, `000024`, `000043` | `/admin` | no | TESTING | Overview, audit log, System Health & Quotas browser-checked with stub data; no host CPU/memory metrics |
 | P3-01 | 3 | Trusted session tracking | signed webhook, `000010` | n/a | n/a | TESTING | Real signed webhooks from a local LiveKit server recorded sessions in CI; not registered on the production LiveKit project, migrations not in production |
 | P3-02 | 3 | Duration attendance and reconciliation | worker | n/a | n/a | TESTING | Queue lifecycle passes in CI run 41358542181; process restart mid-job untested |
 | P3-03 | 3 | Versioned attendance rules | `institution` | yes | no | TESTING | API passes in CI run 41367090494; web form not exercised in a browser; early-leave rule and weights missing |
@@ -64,14 +67,14 @@ and needs acceptance evidence. Security, NFR and evidence detail is recorded onl
 | P3-05 | 3 | Dashboards and exports | summary, CSV | per-class table | no | IN_PROGRESS | API summary and CSV pass; no dashboard for engagement, disconnections or device signals |
 | P3-06 | 3 | Engagement and device signals | no | no | no | NOT_STARTED | |
 | P3-07 | 3 | Polls, quizzes, doubts | `interaction`, `000021` | yes | no | IN_PROGRESS | Web and API pass, latest CI run 41391002517; no question bank; hosts' poll options not edited after creation; Android deferred |
-| P3-08 | 3 | Whiteboard, breakout rooms | no | no | no | NOT_STARTED | |
+| P3-08 | 3 | Whiteboard, breakout rooms | `interaction`, `000028`, `000036`, `000042` | yes | no | TESTING | Pan/zoom, math blocks, notes and shapes browser-checked; breakouts not run against LiveKit here; no live cursors |
 | P4-01 | 4 | Course workspaces and exercises | no | no | no | NOT_STARTED | |
 | P4-02 | 4 | Multi-language editor | no | no | no | NOT_STARTED | |
-| P4-03 | 4 | Isolated code execution | no | no | no | BLOCKED | No free host can run it safely; local sandbox only, production disabled |
+| P4-03 | 4 | Isolated code execution | `runner` (Piston/Judge0 adapter) | yes | no | BLOCKED | Official C++/Java grading needs an operator-run runner (`CODE_RUNNER_URL`); none deployed. Browser Clang sandbox gives practice runs only, never grades |
 | P4-04 | 4 | Assignments and auto-evaluation | no | no | no | NOT_STARTED | Evaluation depends on P4-03 |
 | P4-05 | 4 | Live preview, SQL lab, visualizers | no | no | no | NOT_STARTED | |
 | P4-06 | 4 | Progress dashboard | no | no | no | NOT_STARTED | |
 | P5-01 | 5 | Transcription, captions | no | no | no | BLOCKED | Needs P2-01 and a genuinely free speech option |
-| P5-02 | 5 | Summaries and study materials | no | no | no | BLOCKED | Needs P5-01 and a genuinely free LLM option |
+| P5-02 | 5 | Summaries and study materials | `ai`, `000041` | `/study` | no | TESTING | Chunked map/reduce for long lectures (unit-tested with a fake provider); quality not measured on real lectures |
 | P5-03 | 5 | Faculty review and publishing | no | no | no | NOT_STARTED | |
-| P5-04 | 5 | Token and cost tracking | `aiproviders` cost calculation | no | no | IN_PROGRESS | No persistence; needs disposable database |
+| P5-04 | 5 | Token and cost tracking | `ai`, usage ledger, `000041` | `/admin` health | no | TESTING | Usage and spend against budget shown to admins; persistent response cache; CI database tests not observed here |
