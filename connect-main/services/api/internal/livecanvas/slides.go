@@ -30,7 +30,7 @@ const (
 var ErrInvalidDeck = errors.New("the deck has no usable slides")
 
 // Layouts a client knows how to draw.
-var layouts = map[string]bool{"title": true, "bullets": true, "table": true, "code": true, "steps": true, "comparison": true}
+var layouts = map[string]bool{"title": true, "bullets": true, "table": true, "code": true, "steps": true, "comparison": true, "diagram": true}
 
 // Column is one side of a comparison slide.
 type Column struct {
@@ -50,6 +50,75 @@ type Code struct {
 	Source   string `json:"source"`
 }
 
+// DiagramNode is one box in a flowchart or block diagram.
+type DiagramNode struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Shape string `json:"shape"` // rect, diamond, pill or cylinder
+}
+
+// DiagramEdge is a directed arrow between nodes, optionally labelled.
+type DiagramEdge struct {
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Label string `json:"label,omitempty"`
+}
+
+// Diagram is a flowchart, state machine or system block diagram the client lays out itself.
+type Diagram struct {
+	Nodes []DiagramNode `json:"nodes"`
+	Edges []DiagramEdge `json:"edges"`
+}
+
+const (
+	maxDiagramNodes = 14
+	maxDiagramEdges = 24
+)
+
+var diagramShapes = map[string]bool{"rect": true, "diamond": true, "pill": true, "cylinder": true}
+
+// cleanDiagram keeps nodes with unique ids and edges between known nodes.
+func cleanDiagram(d *Diagram) *Diagram {
+	if d == nil {
+		return nil
+	}
+	out := &Diagram{Nodes: []DiagramNode{}, Edges: []DiagramEdge{}}
+	seen := map[string]bool{}
+	for _, n := range d.Nodes {
+		id := clip(n.ID, 24)
+		label := clip(n.Label, 60)
+		if id == "" || seen[id] || label == "" {
+			continue
+		}
+		shape := strings.ToLower(strings.TrimSpace(n.Shape))
+		if !diagramShapes[shape] {
+			shape = "rect"
+		}
+		seen[id] = true
+		out.Nodes = append(out.Nodes, DiagramNode{ID: id, Label: label, Shape: shape})
+		if len(out.Nodes) == maxDiagramNodes {
+			break
+		}
+	}
+	pairs := map[string]bool{}
+	for _, e := range d.Edges {
+		from, to := clip(e.From, 24), clip(e.To, 24)
+		key := from + "\x00" + to
+		if !seen[from] || !seen[to] || pairs[key] {
+			continue
+		}
+		pairs[key] = true
+		out.Edges = append(out.Edges, DiagramEdge{From: from, To: to, Label: clip(e.Label, 30)})
+		if len(out.Edges) == maxDiagramEdges {
+			break
+		}
+	}
+	if len(out.Nodes) < 2 {
+		return nil
+	}
+	return out
+}
+
 // Slide is one slide. Only the fields its layout uses are kept.
 type Slide struct {
 	Layout   string   `json:"layout"`
@@ -61,6 +130,7 @@ type Slide struct {
 	Steps    []string `json:"steps,omitempty"`
 	Left     *Column  `json:"left,omitempty"`
 	Right    *Column  `json:"right,omitempty"`
+	Diagram  *Diagram `json:"diagram,omitempty"`
 	Notes    string   `json:"notes,omitempty"`
 }
 
@@ -163,10 +233,14 @@ func CleanSlide(in Slide) (Slide, bool) {
 		if out.Left != nil && out.Right != nil {
 			return out, true
 		}
+	case "diagram":
+		if out.Diagram = cleanDiagram(in.Diagram); out.Diagram != nil {
+			return out, true
+		}
 	}
 	// The layout's own content was missing; fall back to any bullets the slide has.
 	out.Layout = "bullets"
-	out.Table, out.Code, out.Steps, out.Left, out.Right = nil, nil, nil, nil, nil
+	out.Table, out.Code, out.Steps, out.Left, out.Right, out.Diagram = nil, nil, nil, nil, nil, nil
 	out.Bullets = clipList(in.Bullets, maxBullets, maxText)
 	return out, out.Title != "" && len(out.Bullets) > 0
 }

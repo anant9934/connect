@@ -26,12 +26,14 @@ Return only JSON, no prose and no code fence, matching:
     {"layout": "table", "title": "...", "table": {"headers": ["...", "..."], "rows": [["...", "..."]]}},
     {"layout": "comparison", "title": "...", "left": {"heading": "...", "bullets": ["..."]}, "right": {"heading": "...", "bullets": ["..."]}},
     {"layout": "steps", "title": "...", "steps": ["first", "then", "finally"]},
-    {"layout": "code", "title": "...", "code": {"language": "cpp", "source": "..."}, "bullets": ["what to notice"]}
+    {"layout": "code", "title": "...", "code": {"language": "cpp", "source": "..."}, "bullets": ["what to notice"]},
+    {"layout": "diagram", "title": "...", "diagram": {"nodes": [{"id": "start", "label": "Start", "shape": "pill"}, {"id": "check", "label": "x > 0?", "shape": "diamond"}, {"id": "db", "label": "Database", "shape": "cylinder"}], "edges": [{"from": "start", "to": "check"}, {"from": "check", "to": "db", "label": "yes"}]}}
   ]
 }
 Rules: 4 to 8 slides. Start with a title slide. Choose layouts that fit the content: tables for
 comparisons of several items, steps for processes and algorithms, code only when the topic is
-programming. At most 6 bullets per slide, each under 20 words. Code under 25 lines. Every slide may
+programming, diagram for flowcharts, state machines, pipelines and system architecture (2 to 12
+nodes; shapes rect, diamond for decisions, pill for start/end, cylinder for storage). At most 6 bullets per slide, each under 20 words. Code under 25 lines. Every slide may
 add "notes" with one or two sentences for the teacher. Be accurate; prefer standard textbook content.`
 
 // GenerateLiveSlides turns a teacher's prompt into a cleaned deck. budgetKey groups spend and

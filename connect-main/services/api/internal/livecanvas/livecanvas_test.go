@@ -156,3 +156,22 @@ func TestNormalizeParams_TreeAndGraph(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanSlide_Diagram(t *testing.T) {
+	slide, ok := CleanSlide(Slide{Layout: "diagram", Title: "TCP handshake", Diagram: &Diagram{
+		Nodes: []DiagramNode{{ID: "a", Label: "Client", Shape: "pill"}, {ID: "b", Label: "Server", Shape: "cylinder"}, {ID: "a", Label: "dupe"}, {ID: "c", Label: "Check", Shape: "hexagon"}},
+		Edges: []DiagramEdge{{From: "a", To: "b", Label: "SYN"}, {From: "a", To: "b", Label: "again"}, {From: "b", To: "zzz"}, {From: "b", To: "c"}},
+	}})
+	if !ok || slide.Diagram == nil {
+		t.Fatalf("diagram dropped: %+v", slide)
+	}
+	if len(slide.Diagram.Nodes) != 3 || slide.Diagram.Nodes[2].Shape != "rect" {
+		t.Errorf("nodes: %+v", slide.Diagram.Nodes)
+	}
+	if len(slide.Diagram.Edges) != 2 || slide.Diagram.Edges[0].Label != "SYN" {
+		t.Errorf("edges: %+v", slide.Diagram.Edges)
+	}
+	if _, ok := CleanSlide(Slide{Layout: "diagram", Title: "x", Diagram: &Diagram{Nodes: []DiagramNode{{ID: "a", Label: "only"}}}}); ok {
+		t.Error("a one-node diagram with no bullets should be dropped")
+	}
+}
