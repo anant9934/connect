@@ -7,6 +7,7 @@ import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { login, loginMember } from '@/features/auth/api';
 import { createRoom } from '@/features/rooms/api';
 import { ApiError } from '@/lib/api/client';
+import { SsoOptions } from './SsoOptions';
 
 export const SignInForm: React.FC = () => {
   const router = useRouter();
@@ -189,6 +190,8 @@ export const SignInForm: React.FC = () => {
           )}
         </button>
       </form>
+
+      <SsoOptions redirect={redirectTarget} errorCode={searchParams.get('sso_error')} />
 
       <div className="mt-6 text-center text-sm text-[#686868]">
         Don&apos;t have an account?{' '}

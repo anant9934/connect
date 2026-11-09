@@ -78,3 +78,19 @@ export async function uploadAvatar(file: File): Promise<Profile> {
 }
 
 export const avatarSrc = (url?: string) => (url ? `${process.env.NEXT_PUBLIC_API_URL || ''}${url}` : '');
+
+export interface SsoProvider {
+  orgSlug: string;
+  label: string;
+}
+
+/** Universities that sign in through their own identity provider (empty when none are set up). */
+export async function listSsoProviders(): Promise<SsoProvider[]> {
+  const data = await apiFetch<{ providers: SsoProvider[] }>('/api/v1/auth/sso/providers');
+  return [...(data.providers ?? [])].sort((a, b) => (a.label || a.orgSlug).localeCompare(b.label || b.orgSlug));
+}
+
+export function ssoStartUrl(orgSlug: string, redirect: string | null): string {
+  const query = redirect && redirect.startsWith('/') && !redirect.startsWith('//') ? `?redirect=${encodeURIComponent(redirect)}` : '';
+  return `${process.env.NEXT_PUBLIC_API_URL || ''}/api/v1/auth/sso/${encodeURIComponent(orgSlug)}/start${query}`;
+}
