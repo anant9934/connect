@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tathastu/connect/services/api/internal/audit"
 	"github.com/tathastu/connect/services/api/internal/database"
+	"github.com/tathastu/connect/services/api/internal/runner"
 )
 
 var (
@@ -32,6 +33,8 @@ type Handler struct {
 	audit         *audit.Service
 	repo          *Repository
 	withAuthCtxFn withAuthContextFunc
+	// runner executes C++ and Java in an isolated service; nil when none is configured.
+	runner runner.Runner
 }
 
 // NewHandler constructs the lab handler.
@@ -59,6 +62,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		labRouter.Post("/submissions/{id}/grade", h.gradeSubmission)
 		labRouter.Get("/progress", h.getProgress)
 		labRouter.Get("/faculty/overview", h.getFacultyOverview)
+		h.routeExecution(labRouter)
 	})
 }
 
@@ -68,11 +72,11 @@ func (h *Handler) inOrg(r *http.Request, fn func(pgx.Tx, *database.AuthContext, 
 	if err != nil {
 		return errInvalidOrgID
 	}
-	runner := database.WithAuthContext
+	withAuth := database.WithAuthContext
 	if h.withAuthCtxFn != nil {
-		runner = h.withAuthCtxFn
+		withAuth = h.withAuthCtxFn
 	}
-	return runner(r.Context(), h.pool, database.SessionTokenHash(r.Context()), &orgStr, func(tx pgx.Tx, authCtx *database.AuthContext) error {
+	return withAuth(r.Context(), h.pool, database.SessionTokenHash(r.Context()), &orgStr, func(tx pgx.Tx, authCtx *database.AuthContext) error {
 		return fn(tx, authCtx, orgID)
 	})
 }
@@ -526,6 +530,11 @@ func (h *Handler) submitAssignment(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Language == "" {
 		writeError(w, http.StatusBadRequest, "language is required")
+		return
+	}
+	// With a runner, C++ and Java are graded on the server; otherwise results stay self-checks.
+	if h.runner != nil && serverRunLanguages[req.Language] {
+		h.submitAssignmentOnServer(w, r, assignID, req)
 		return
 	}
 

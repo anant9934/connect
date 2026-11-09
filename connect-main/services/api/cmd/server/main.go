@@ -31,6 +31,7 @@ import (
 	"github.com/tathastu/connect/services/api/internal/ratelimit"
 	"github.com/tathastu/connect/services/api/internal/redis"
 	"github.com/tathastu/connect/services/api/internal/room"
+	"github.com/tathastu/connect/services/api/internal/runner"
 	"github.com/tathastu/connect/services/api/internal/server"
 	"github.com/tathastu/connect/services/api/internal/worker"
 )
@@ -267,6 +268,11 @@ func main() {
 		interactionHandler.SetLiveGenerator(aiService)
 		if transcriber := ai.NewGroqTranscriber(ai.LoadKeyPoolsFromEnv()); transcriber != nil {
 			interactionHandler.SetTranscriber(transcriber)
+		}
+		// C++ and Java run only on an operator-provided Piston or Judge0 service (CODE_RUNNER_*).
+		if codeRunner := runner.FromEnv(); codeRunner != nil {
+			labHandler.SetRunner(codeRunner)
+			logger.Info("code_runner_configured", slog.String("kind", codeRunner.Kind()))
 		}
 	}
 	router := server.BuildRouter(cfg, logger, limiter, healthHandler, systemHandler, assertionHandler, authHandler, roomHandler, notesHandler, filesHandler, authService, p2pHandler, livekitWebhook, institutionHandler, interactionHandler, notificationsHandler, meetingsHandler, avatars.NewHandler(authService, filesStorage), labHandler, aiHandler)
