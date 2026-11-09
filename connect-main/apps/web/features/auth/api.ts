@@ -17,6 +17,24 @@ export async function login(dto: LoginDTO): Promise<User> {
   return res.user;
 }
 
+/** Signs in by institution (its short name, e.g. "anant-university") and registration number. */
+export async function loginMember(institution: string, registrationNumber: string, password: string): Promise<User> {
+  const res = await apiFetch<AuthResponse>('/api/v1/auth/login/member', {
+    method: 'POST',
+    body: JSON.stringify({ institution, registrationNumber, password }),
+  });
+  return res.user;
+}
+
+/** Starts a reset. delivery says how a code reaches the person: never by email yet. */
+export async function forgotPassword(email: string): Promise<{ delivery: 'administrator' | 'server-log'; message: string }> {
+  return apiFetch('/api/v1/auth/password/forgot', { method: 'POST', body: JSON.stringify({ email }) });
+}
+
+export async function resetPassword(code: string, newPassword: string): Promise<void> {
+  await apiFetch('/api/v1/auth/password/reset', { method: 'POST', body: JSON.stringify({ code, newPassword }) });
+}
+
 export async function logout(): Promise<void> {
   try {
     await apiFetch<LogoutResponse>('/api/v1/auth/logout', {

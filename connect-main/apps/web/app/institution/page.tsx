@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react';
 import { getSession } from '@/features/auth/api';
 import { ApiError } from '@/lib/api/client';
 import * as api from '@/features/institution/api';
+import { PeopleList } from '@/components/institution/PeopleList';
 
 const inputClass =
   'w-full px-3 py-2 rounded-xl border border-[#E9E9E5] bg-[#FCFCFA] text-[16px] sm:text-sm text-[#171717] focus:outline-none focus:ring-2 focus:ring-[#7258E8] min-h-[44px]';
@@ -511,8 +512,9 @@ export default function InstitutionPage() {
         {tab === 'people' && isAdmin && (
           <section className={cardClass}>
             <h2 className="text-base font-semibold text-[#171717]">People</h2>
-            <form id="add-member" className="grid sm:grid-cols-3 gap-3 items-end" onSubmit={submit((f) => api.addMember(orgId, text(f, 'email'), text(f, 'role')))}>
+            <form id="add-member" className="grid sm:grid-cols-4 gap-3 items-end" onSubmit={submit((f) => api.addMember(orgId, text(f, 'email'), text(f, 'role'), text(f, 'identifier')))}>
               <Field id="member-email" label="Account email"><input id="member-email" name="email" type="email" required className={inputClass} /></Field>
+              <Field id="member-identifier" label="Registration number (optional)"><input id="member-identifier" name="identifier" maxLength={64} className={inputClass} /></Field>
               <Field id="member-role" label="Role">
                 <select id="member-role" name="role" required className={inputClass}>
                   {Object.entries(ROLE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -520,7 +522,7 @@ export default function InstitutionPage() {
               </Field>
               <button type="submit" className={buttonClass}>Add person</button>
             </form>
-            <SimpleList empty="Nobody here yet." items={members.map((m) => `${m.displayName} · ${m.email} · ${ROLE_LABELS[m.role] ?? m.role}${m.status === 'active' ? '' : ` · ${m.status}`}`)} />
+            <PeopleList orgId={orgId} members={members} roleLabels={ROLE_LABELS} />
           </section>
         )}
       </div>

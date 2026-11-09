@@ -2,7 +2,7 @@ import { apiFetch } from '@/lib/api/client';
 import { AttendanceCalculation } from '@/features/rooms/meetings';
 
 export interface Organization { id: string; slug: string; name: string; role: string }
-export interface Member { userId: string; displayName: string; email: string; role: string; status: string }
+export interface Member { userId: string; displayName: string; email: string; role: string; status: string; memberIdentifier?: string | null }
 export interface Department { id: string; code: string; name: string }
 export interface Course { id: string; departmentId: string; code: string; title: string }
 export interface Batch { id: string; courseId: string; name: string; academicTerm: string; startDate: string; endDate: string }
@@ -131,7 +131,11 @@ export const listOrganizations = async () =>
   (await apiFetch<{ organizations: Organization[] }>('/api/v1/organizations', { method: 'GET' })).organizations;
 export const listMembers = async (org: string) =>
   (await apiFetch<{ members: Member[] }>(orgPath(org, '/members'), { method: 'GET' })).members;
-export const addMember = (org: string, email: string, role: string) => post(orgPath(org, '/members'), { email, role });
+export const addMember = (org: string, email: string, role: string, memberIdentifier = '') =>
+  post(orgPath(org, '/members'), { email, role, memberIdentifier });
+/** A one-time reset code to give the member in person. Shown once; valid for 24 hours. */
+export const issuePasswordReset = (org: string, userId: string) =>
+  apiFetch<{ code: string; expiresAt: string }>(orgPath(org, `/members/${encodeURIComponent(userId)}/password-reset`), { method: 'POST', body: '{}' });
 export const listDepartments = async (org: string) =>
   (await apiFetch<{ departments: Department[] }>(orgPath(org, '/departments'), { method: 'GET' })).departments;
 export const createDepartment = (org: string, code: string, name: string) => post(orgPath(org, '/departments'), { code, name });
