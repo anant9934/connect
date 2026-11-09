@@ -54,11 +54,11 @@ end to end (API, web, data) and has automated or browser evidence; it does not m
 
 - [x] **13. Duration-based attendance** — signed LiveKit webhook sessions, late and early-leave rules, automatic finalisation (`000010`, `000032`)
 - [x] **14. Reconnection tracking** — multiple sessions per class, crashed sessions closed by the sweep
-- [~] **15. Engagement telemetry** — chat, reactions, hands, doubts, polls, quizzes and coding feed a live score; no Q&A upvotes
+- [x] **15. Engagement telemetry** — chat, reactions, hands, doubts, polls, quizzes and coding feed a live score; Q&A upvotes (`000040`)
 - [x] **16. Tab focus tracking** — `useBrowserActivity` (Page Visibility) and `browser_activity` (`000025`), with disclosure
-- [~] **17. Attendance dashboard** — engagement on `/attendance` and `/admin`; not yet the 3-card Duration / Engagement / Focus layout
+- [x] **17. Attendance dashboard** — three pillar cards (duration with join/leave/reconnections/late-early, engagement breakdown, tab focus) with the rule's weighted formula, for the student in meeting history and for staff from `/attendance` (`000039`); unfinalised classes say no rule has been applied yet
 - [~] **18. Attendance rules** — versioned rules and audited corrections; weight formula partly configurable
-- [~] **19. Polls, quizzes and doubts** — single/multiple choice, timed quizzes, scoring, doubt queue with resolve; no leaderboard or upvotes
+- [x] **19. Polls, quizzes and doubts** — single/multiple choice, timed quizzes, scoring, doubt queue sorted by upvotes (no self-votes), top-5 quiz leaderboard shown when a quiz closes (`000040`)
 - [~] **20. Breakouts and whiteboard** — breakout open/assign/close (`000028`); board with pen, highlighter, text, rectangles, circles, arrows and draggable pastel sticky notes (`000036`); no LaTeX, live cursors or infinite canvas
 
 ## Domain 4: Practical learning platform
@@ -66,18 +66,18 @@ end to end (API, web, data) and has automated or browser evidence; it does not m
 - [~] **21. Course workspaces** — lab courses, modules, exercises (`000030`, `/lab/course/[slug]`)
 - [~] **22. Coding IDE** — custom editor for C++, Python, Java, HTML, CSS, JS, SQL; not Monaco/CodeMirror
 - [~] **23. C++ OOP and DSA curriculum** — OOPS and DSA visualizers and templates; curriculum coverage not complete
-- [~] **24. Sandboxed execution** — Python (WASM), SQL (WASM), HTML preview in the browser; **BLOCKED**: C++/Java execution needs an isolated runner with no free host
+- [~] **24. Sandboxed execution** — Python (WASM), SQL (WASM), HTML preview in the browser; C++/Java run on an operator-provided Piston or Judge0 CE service (`CODE_RUNNER_KIND`, `CODE_RUNNER_URL`, `CODE_RUNNER_TOKEN`), with time limits and per-user rate limits. No runner is deployed yet; without one the editor says so and grades stay faculty-reviewed (no simulated results)
 - [~] **25. Visualizers and SQL lab** — `DSAVisualizer`, `OOPSVisualizer`, `SqlLab`, live HTML preview
-- [~] **26. Assignments and evaluation** — creator, test cases, submissions, evaluator; grading limited to languages that run
+- [~] **26. Assignments and evaluation** — creator, test cases, submissions, evaluator; with a runner, C++/Java submissions are graded on the server against every test case including hidden ones; other languages stay self-checks reviewed by faculty
 - [~] **27. Progress dashboard** — `/lab/dashboard`, `lab_student_progress`
 
 ## Domain 5: AI lecture intelligence
 
 - [~] **28. Speech-to-text** — host live captions from the browser's Web Speech API (Chrome/Edge send audio to their vendor's service; disclosed before starting), Groq free Whisper fallback for other browsers, captions to everyone over the data channel, transcript saved (`000038`). Not run against a real speech service here
 - [~] **29. Hinglish transcription** — caption languages en-IN (Indian English/Hinglish), hi-IN and en-US; Whisper is left to auto-detect for en-IN so code-switching is not forced into one language. Accuracy not measured
-- [~] **30. Lecture summaries** — `/ai/summaries/generate` and background jobs from supplied text
-- [~] **31. Study materials** — quizzes and flashcards generation; no revision-notes UI
-- [ ] **32. Doubt extraction from transcripts** — needs 28
-- [~] **33. Timestamp-linked navigation** — replay timeline merges slide markers and transcript lines at MM:SS; clicking seeks the video (browser-checked). AI summaries, flashcards and doubts not yet linked to times
-- [~] **34. Faculty review gate** — `/ai/artifacts/{id}/review` (approve/publish); review UI partial
-- [~] **35. LLM infrastructure** — provider routing (Gemini, Groq, OpenRouter free), budgets, usage ledger, rate limits, retries; no response cache or accuracy evaluation
+- [~] **30. Lecture summaries** — notes from a class's saved captions and Q&A (`/ai/summaries/from-meeting`) with topics in order at MM:SS, definitions and key concepts; Hinglish transcripts summarised in English. Long classes are cut at 60k characters (no chunking yet)
+- [x] **31. Study materials** — revision sheet, MCQs with explanations and flip flashcards in the study vault (`/study`)
+- [~] **32. Doubt extraction from transcripts** — summaries list student questions with the teacher's answer and time, and unresolved follow-ups. Extraction quality not measured against real lectures
+- [~] **33. Timestamp-linked navigation** — replay timeline merges slide markers and transcript lines at MM:SS; summary topics and questions link to `/history/{meeting}?t=…` which seeks once the local file is opened. Flashcards have no times
+- [x] **34. Faculty review gate** — study vault: notes stay faculty-only, faculty edit (validated server-side; editing published notes returns them to review), then Approve & publish; students see only published material (RLS)
+- [~] **35. LLM infrastructure** — provider routing (Gemini, Groq, OpenRouter free), budgets, usage ledger, rate limits, retries, Groq Whisper, and an in-process SHA-256 response cache per organization (500 entries, 24 h; not shared across instances or restarts). No semantic chunking or accuracy evaluation
