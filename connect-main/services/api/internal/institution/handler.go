@@ -46,6 +46,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		o.Get("/admin/overview", h.overview)
 		o.Get("/admin/audit", h.auditLog)
 		o.Get("/admin/engagement", h.adminEngagement)
+		o.Get("/admin/health", h.systemHealth)
 		o.Get("/members", h.listMembers)
 		o.Post("/members", h.addMember)
 		o.Patch("/members/{user}", h.updateMember)

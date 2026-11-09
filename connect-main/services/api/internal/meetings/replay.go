@@ -154,3 +154,16 @@ func (h *Handler) pillars(w http.ResponseWriter, r *http.Request) {
 	}
 	model.SendJSON(w, http.StatusOK, map[string]any{"pillars": json.RawMessage(raw)})
 }
+
+// summary handles GET /meetings/summary: the caller's own counts for the history page.
+func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
+	var raw []byte
+	err := database.WithAuthContext(r.Context(), h.pool, database.SessionTokenHash(r.Context()), nil, func(tx pgx.Tx, _ *database.AuthContext) error {
+		return tx.QueryRow(r.Context(), `SELECT connect_auth.my_meeting_summary()`).Scan(&raw)
+	})
+	if err != nil {
+		model.SendJSONError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not load your summary.")
+		return
+	}
+	model.SendJSON(w, http.StatusOK, map[string]any{"summary": json.RawMessage(raw)})
+}
