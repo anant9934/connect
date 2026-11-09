@@ -127,7 +127,17 @@ func (h *Handler) pillars(w http.ResponseWriter, r *http.Request) {
 		if target == "" {
 			target = auth.UserID
 		}
-		return tx.QueryRow(r.Context(), `SELECT connect_auth.attendance_pillars($1::UUID, $2::UUID)`, id, target).Scan(&raw)
+		room := id
+		// The attendance pages know class sessions; a session's main room holds its meeting.
+		if r.URL.Query().Get("session") == "1" {
+			if err := tx.QueryRow(r.Context(), `SELECT id::text FROM rooms WHERE class_session_id = $1 AND parent_room_id IS NULL ORDER BY created_at LIMIT 1`, id).Scan(&room); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return nil // raw stays nil: not found
+				}
+				return err
+			}
+		}
+		return tx.QueryRow(r.Context(), `SELECT connect_auth.attendance_pillars($1::UUID, $2::UUID)`, room, target).Scan(&raw)
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "42501" || errors.Is(err, database.ErrMembershipDenied) {
