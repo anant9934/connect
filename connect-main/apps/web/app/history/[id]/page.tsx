@@ -11,6 +11,7 @@ import { getNotes } from '@/features/notes/api';
 import { getDownloadUrl, listFiles } from '@/features/files/api';
 import { MeetingNote } from '@/features/notes/types';
 import { MeetingFile } from '@/features/files/types';
+import { SavedDecks } from '@/components/meeting/SavedDecks';
 
 const when = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -146,6 +147,8 @@ export default function MeetingDetailPage() {
             <p className="text-sm text-[#404040] whitespace-pre-wrap break-words">{notes.content}</p>
           </section>
         )}
+
+        <SavedDecks meetingId={meeting.id} />
 
         {files.length > 0 && (
           <section className="p-4 rounded-2xl border border-[#E9E9E5] bg-white space-y-2">

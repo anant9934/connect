@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Download, Pencil, Play, Presentation, RotateCcw, Send, Sparkles, Users, X } from 'lucide-react';
+import { Archive, ChevronLeft, ChevronRight, Download, Pencil, Play, Presentation, RotateCcw, Send, Sparkles, Users, X } from 'lucide-react';
 import { ApiError } from '@/lib/api/client';
 import * as api from '@/features/classroom/liveCanvas';
 import type { CanvasState, LiveDeck, LiveSimulation, LiveSlide, SimAnswer, SimParams } from '@/features/classroom/liveCanvas';
@@ -112,7 +112,7 @@ function SlideBody({ slide }: { slide: LiveSlide }) {
   }
 }
 
-function SlideCard({ slide }: { slide: LiveSlide }) {
+export function SlideCard({ slide }: { slide: LiveSlide }) {
   return (
     <div data-testid="live-slide" className="w-full aspect-video max-h-full bg-white rounded-3xl border border-[rgba(23,23,26,0.06)] shadow-card p-[clamp(1rem,3vw,2.5rem)] flex flex-col gap-4 overflow-hidden">
       {slide.layout !== 'title' && (
@@ -128,7 +128,7 @@ function SlideCard({ slide }: { slide: LiveSlide }) {
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
 
 /** A printable page of every slide; the browser's print dialog saves it as PDF. */
-function printDeck(deck: LiveDeck) {
+export function printDeck(deck: LiveDeck) {
   const items = (xs?: string[]) => (xs ?? []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const body = deck.slides.map((s) => {
     let inner = '';
@@ -360,6 +360,7 @@ export const LiveCanvas: React.FC<LiveCanvasProps> = ({ roomCode, syncTick, onCh
   const [params, setParams] = useState<SimParams | null>(null);
   const [answers, setAnswers] = useState<SimAnswer[]>([]);
   const [viewing, setViewing] = useState<SimAnswer | null>(null);
+  const [savedNotice, setSavedNotice] = useState(false);
   const lastFrameSent = useRef(0);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingSave = useRef<SimParams | null>(null);
@@ -395,6 +396,7 @@ export const LiveCanvas: React.FC<LiveCanvasProps> = ({ roomCode, syncTick, onCh
       setOpen(true);
       setEditing(false);
       setViewing(null);
+      setSavedNotice(false);
       setParams(sim ? normalizeParams(sim.engine, state.simParams) : null);
     }
     if (!state?.kind) {
@@ -581,6 +583,12 @@ export const LiveCanvas: React.FC<LiveCanvasProps> = ({ roomCode, syncTick, onCh
               {canManage && <button type="button" aria-label="Next slide" className={pill} disabled={busy || slideIndex >= deck.slides.length - 1} onClick={() => act(() => api.updateCanvas(roomCode, { slide: slideIndex + 2 }), 'Could not move the slide.')}><ChevronRight className="w-4 h-4" /></button>}
               {canManage && !editing && <button type="button" data-testid="edit-slide" className={pill} disabled={busy} onClick={() => setEditing(true)}><Pencil className="w-3.5 h-3.5" aria-hidden="true" /> Edit</button>}
               <button type="button" className={pill} onClick={() => printDeck(deck)}><Download className="w-3.5 h-3.5" aria-hidden="true" /> PDF</button>
+              {canManage && (
+                <button type="button" data-testid="save-deck" className={pill} disabled={busy}
+                  onClick={async () => { if (await act(() => api.saveDeck(roomCode), 'Could not save the deck.')) setSavedNotice(true); }}>
+                  <Archive className="w-3.5 h-3.5" aria-hidden="true" /> {savedNotice ? 'Saved to vault' : 'Save to vault'}
+                </button>
+              )}
             </>
           )}
           {canManage && state.kind && (

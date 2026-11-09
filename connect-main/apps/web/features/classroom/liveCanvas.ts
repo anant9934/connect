@@ -57,3 +57,12 @@ export const submitAnswer = (code: string, params: SimParams) =>
 
 export const listAnswers = async (code: string) =>
   (await apiFetch<{ answers: SimAnswer[] }>(path(code, '/submissions'), { method: 'GET' })).answers;
+
+/** Copies the live deck to the class vault (host or co-host). */
+export const saveDeck = (code: string) => apiFetch<{ id: string }>(path(code, '/save'), { method: 'POST', body: '{}' });
+
+export interface SavedDeckSummary { id: string; title: string; slideCount: number; createdAt: string }
+export const listSavedDecks = async (meetingId: string) =>
+  (await apiFetch<{ decks: SavedDeckSummary[] }>(`/api/v1/meetings/${encodeURIComponent(meetingId)}/decks`, { method: 'GET' })).decks;
+export const getSavedDeck = async (meetingId: string, deckId: string) =>
+  (await apiFetch<{ deck: SavedDeckSummary & { content: LiveDeck } }>(`/api/v1/meetings/${encodeURIComponent(meetingId)}/decks/${encodeURIComponent(deckId)}`, { method: 'GET' })).deck;
