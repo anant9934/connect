@@ -110,6 +110,9 @@ func BuildRouter(
 				authRouter.With(appmw.CSRFProtection(cfg.CORSAllowedOrigins)).Post("/google", authHandler.GoogleAuth)
 				authRouter.With(appmw.CSRFProtection(cfg.CORSAllowedOrigins)).Post("/logout", authHandler.Logout)
 				authRouter.Get("/session", authHandler.Session)
+				authRouter.Get("/sso/providers", authHandler.SSOProviders)
+				authRouter.Get("/sso/{org}/start", authHandler.SSOStart)
+				authRouter.Get("/sso/{org}/callback", authHandler.SSOCallback)
 			}
 		})
 

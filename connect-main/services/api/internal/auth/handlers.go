@@ -17,6 +17,8 @@ type Handlers struct {
 	service      *Service
 	limiter      ratelimit.Limiter
 	isProduction bool
+	// sso is university single sign-on; nil when not configured.
+	sso *SSO
 }
 
 // NewHandlers constructs authentication endpoints.
@@ -25,6 +27,7 @@ func NewHandlers(service *Service, limiter ratelimit.Limiter, isProduction bool)
 		service:      service,
 		limiter:      limiter,
 		isProduction: isProduction,
+		sso:          LoadSSOFromEnv(isProduction),
 	}
 }
 

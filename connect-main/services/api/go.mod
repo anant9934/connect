@@ -8,6 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.7
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.1
 	github.com/go-chi/chi/v5 v5.3.2
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.11.0
@@ -46,7 +47,6 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/gammazero/deque v1.2.1 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/cel-go v0.30.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect

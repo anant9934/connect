@@ -68,6 +68,7 @@ type Repository interface {
 	IssueSelfPasswordReset(ctx context.Context, emailNormalized, tokenHash string, minutes int) (bool, error)
 	ResetPasswordWithToken(ctx context.Context, tokenHash, passwordHash string) (string, error)
 	EmailByMemberIdentifier(ctx context.Context, orgSlug, identifier string) (string, error)
+	UserIDForSSO(ctx context.Context, orgSlug, email string) (string, error)
 }
 
 // PgxRepository implements Repository using PostgreSQL connection pool.
@@ -377,15 +378,26 @@ func (r *PgxRepository) EmailByMemberIdentifier(ctx context.Context, orgSlug, id
 	return *email, nil
 }
 
+// UserIDForSSO returns the active member of the institution with this email, or "".
+func (r *PgxRepository) UserIDForSSO(ctx context.Context, orgSlug, email string) (string, error) {
+	var id *string
+	err := r.pool.QueryRow(ctx, `SELECT connect_auth.auth_sso_member($1, $2)::text`, orgSlug, email).Scan(&id)
+	if err != nil || id == nil {
+		return "", err
+	}
+	return *id, nil
+}
+
 // MemoryRepository provides a concurrent-safe in-memory store for tests and offline development.
 type MemoryRepository struct {
 	mu              sync.RWMutex
 	usersByID       map[string]*User
 	usersByEmail    map[string]*User
 	usersByGoogleID map[string]*User
-	sessions        map[string]*Session // key: tokenHash
+	sessions        map[string]*Session    // key: tokenHash
 	resets          map[string]memoryReset // key: tokenHash
 	memberEmails    map[string]string      // key: orgSlug + "\x00" + identifier
+	ssoMembers      map[string]bool        // key: orgSlug + "\x00" + email
 }
 
 type memoryReset struct {
@@ -403,6 +415,7 @@ func NewMemoryRepository() *MemoryRepository {
 		sessions:        make(map[string]*Session),
 		resets:          make(map[string]memoryReset),
 		memberEmails:    make(map[string]string),
+		ssoMembers:      make(map[string]bool),
 	}
 }
 
@@ -451,6 +464,25 @@ func (m *MemoryRepository) ResetPasswordWithToken(_ context.Context, tokenHash, 
 		}
 	}
 	return u.ID, nil
+}
+
+// SetSSOMember marks an email as an active member of an institution, for tests.
+func (m *MemoryRepository) SetSSOMember(orgSlug, email string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ssoMembers[strings.ToLower(orgSlug)+"\x00"+strings.ToLower(email)] = true
+}
+
+func (m *MemoryRepository) UserIDForSSO(_ context.Context, orgSlug, email string) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.ssoMembers[strings.ToLower(orgSlug)+"\x00"+strings.ToLower(email)] {
+		return "", nil
+	}
+	if u, ok := m.usersByEmail[strings.ToLower(email)]; ok && u.Status == "active" {
+		return u.ID, nil
+	}
+	return "", nil
 }
 
 func (m *MemoryRepository) EmailByMemberIdentifier(_ context.Context, orgSlug, identifier string) (string, error) {

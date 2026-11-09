@@ -256,6 +256,31 @@ func (s *Service) Login(ctx context.Context, req LoginDTO, clientIP, requestID s
 	}, nil
 }
 
+// StartSessionForUser signs in an active user who proved their identity another way (single
+// sign-on), with the same session rules as a password sign-in.
+func (s *Service) StartSessionForUser(ctx context.Context, userID, clientIP, requestID string) (*SessionResult, error) {
+	user, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, ErrInvalidCredentials
+	}
+	if user.Status != "active" {
+		return nil, ErrAccountDisabled
+	}
+	sessionToken, err := GenerateSessionToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate session: %w", err)
+	}
+	now := time.Now().UTC()
+	expiresAt := now.Add(s.absoluteTimeout)
+	if err := s.repo.CreateSession(ctx, &Session{UserID: user.ID, TokenHash: HashSessionToken(sessionToken), CreatedAt: now, LastSeenAt: now, ExpiresAt: expiresAt}); err != nil {
+		return nil, fmt.Errorf("failed to persist session: %w", err)
+	}
+	if s.auditService != nil {
+		s.auditService.Record(ctx, audit.AuditParams{EventType: audit.EventType("auth.sso_login_success"), Severity: "INFO", ActorID: user.ID, ClientIP: clientIP, RequestID: requestID})
+	}
+	return &SessionResult{Token: sessionToken, ExpiresAt: expiresAt, User: ToUserDTO(user)}, nil
+}
+
 // Logout revokes the session on the server.
 func (s *Service) Logout(ctx context.Context, sessionToken, clientIP, requestID string) error {
 	if sessionToken == "" {
