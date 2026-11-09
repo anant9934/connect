@@ -534,7 +534,7 @@ export const LiveCanvas: React.FC<LiveCanvasProps> = ({ roomCode, syncTick, onCh
       </header>
       {error && <p role="alert" className="text-xs text-[#9F1D1D] bg-[#FFE9E9] px-3 py-1.5">{error}</p>}
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 p-3 overflow-auto">
-        <main className="lg:basis-3/4 min-w-0 min-h-[260px] flex items-center justify-center">{stage}</main>
+        <main className={`lg:basis-3/4 min-w-0 shrink-0 lg:shrink lg:min-h-0 flex items-center justify-center ${sim ? 'min-h-[480px]' : 'min-h-[260px]'}`}>{stage}</main>
         <aside className="lg:basis-1/4 min-w-0 lg:min-w-[280px] space-y-4 lg:overflow-y-auto">
           {commandBar}
           {sim && (
