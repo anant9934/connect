@@ -523,6 +523,11 @@ func (s *Service) GetMyRole(ctx context.Context, code, identity string) (*MyRole
 	return result, nil
 }
 
+// CodeByMeetingNumber resolves an 11-digit meeting number to the room's public code.
+func (s *Service) CodeByMeetingNumber(ctx context.Context, number int64) (string, error) {
+	return s.repo.CodeByMeetingNumber(ctx, number)
+}
+
 // GetRoomForInteraction returns the room whatever its status, for reading its history.
 func (s *Service) GetRoomForInteraction(ctx context.Context, code string) (*Room, error) {
 	return s.repo.GetRoomByCode(ctx, NormalizeCode(code))

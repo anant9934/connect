@@ -196,6 +196,9 @@ func BuildRouter(
 					appmw.RequireAuth(authService),
 				).Get("/upcoming", roomHandler.Upcoming)
 
+				// An 11-digit meeting number resolves to the room's code; rate-limited per address.
+				roomsRouter.Get("/by-number/{number}", roomHandler.ResolveMeetingNumber)
+
 				roomsRouter.Route("/{code}", func(roomDetail chi.Router) {
 					// Room status lookup
 					roomDetail.Get("/", roomHandler.Get)

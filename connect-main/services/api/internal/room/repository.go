@@ -40,6 +40,8 @@ type Room struct {
 	CoHostPermissions  map[string]bool
 	// ParticipantsCanPublish is false in classrooms where only promoted speakers may publish.
 	ParticipantsCanPublish bool
+	// MeetingNumber is the 11-digit number that resolves to PublicCode.
+	MeetingNumber int64
 }
 
 // Participant represents a connected user or guest in a room.
@@ -98,6 +100,7 @@ type MeetingHistoryItem struct {
 type Repository interface {
 	CreateRoom(ctx context.Context, r *Room) error
 	GetRoomByCode(ctx context.Context, code string) (*Room, error)
+	CodeByMeetingNumber(ctx context.Context, number int64) (string, error)
 	GetRoomByID(ctx context.Context, id string) (*Room, error)
 	CanEnterRoom(ctx context.Context, roomID, identity string) (bool, error)
 	SetRoomLocked(ctx context.Context, roomID string, locked bool, lockedAt *time.Time) error
@@ -199,25 +202,44 @@ func (r *PgxRepository) CreateRoom(ctx context.Context, rm *Room) error {
 
 	query := `
 		INSERT INTO rooms (id, public_code, host_user_id, status, is_locked, waiting_room_enabled, max_participants, created_at, started_at, workspace_type,
-		                   title, scheduled_start, scheduled_end, time_zone, passcode_hash)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'personal_commons', NULLIF($10, ''), $11, $12, NULLIF($13, ''), NULLIF($14, ''))
+		                   title, scheduled_start, scheduled_end, time_zone, passcode_hash, meeting_number)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'personal_commons', NULLIF($10, ''), $11, $12, NULLIF($13, ''), NULLIF($14, ''), $15)
 	`
+	if rm.MeetingNumber == 0 {
+		number, err := GenerateMeetingNumber()
+		if err != nil {
+			return err
+		}
+		rm.MeetingNumber = number
+	}
 	rm.CoHostPermissions = DefaultCoHostPermissions()
 	rm.ParticipantsCanPublish = true
 	_, err := r.exec(ctx, "", query, rm.ID, rm.PublicCode, rm.HostUserID, rm.Status, rm.IsLocked, rm.WaitingRoomEnabled, rm.MaxParticipants, rm.CreatedAt, rm.StartedAt,
-		rm.Title, rm.ScheduledStart, rm.ScheduledEnd, rm.TimeZone, rm.PasscodeHash)
+		rm.Title, rm.ScheduledStart, rm.ScheduledEnd, rm.TimeZone, rm.PasscodeHash, rm.MeetingNumber)
 	return err
+}
+
+// CodeByMeetingNumber returns the public code of the room with this meeting number.
+func (r *PgxRepository) CodeByMeetingNumber(ctx context.Context, number int64) (string, error) {
+	var code *string
+	if err := r.pool.QueryRow(ctx, `SELECT connect_auth.room_code_by_number($1)`, number).Scan(&code); err != nil {
+		return "", err
+	}
+	if code == nil {
+		return "", ErrRoomNotFound
+	}
+	return *code, nil
 }
 
 const roomColumns = `id, public_code, host_user_id, status, is_locked, waiting_room_enabled, max_participants, created_at, started_at, ended_at, locked_at,
 	COALESCE(title, ''), scheduled_start, scheduled_end, COALESCE(time_zone, ''), COALESCE(passcode_hash, ''),
-	cohost_permissions::text, participants_can_publish`
+	cohost_permissions::text, participants_can_publish, meeting_number`
 
 func scanRoom(row pgx.Row) (*Room, error) {
 	var rm Room
 	var coHost string
 	err := row.Scan(&rm.ID, &rm.PublicCode, &rm.HostUserID, &rm.Status, &rm.IsLocked, &rm.WaitingRoomEnabled, &rm.MaxParticipants, &rm.CreatedAt, &rm.StartedAt, &rm.EndedAt, &rm.LockedAt,
-		&rm.Title, &rm.ScheduledStart, &rm.ScheduledEnd, &rm.TimeZone, &rm.PasscodeHash, &coHost, &rm.ParticipantsCanPublish)
+		&rm.Title, &rm.ScheduledStart, &rm.ScheduledEnd, &rm.TimeZone, &rm.PasscodeHash, &coHost, &rm.ParticipantsCanPublish, &rm.MeetingNumber)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrRoomNotFound
@@ -1111,6 +1133,13 @@ func (m *MemoryRepository) CreateRoom(_ context.Context, r *Room) error {
 	if r.MaxParticipants <= 0 {
 		r.MaxParticipants = 50
 	}
+	if r.MeetingNumber == 0 {
+		number, err := GenerateMeetingNumber()
+		if err != nil {
+			return err
+		}
+		r.MeetingNumber = number
+	}
 
 	copied := *r
 	m.roomsByID[r.ID] = &copied
@@ -1128,6 +1157,17 @@ func (m *MemoryRepository) GetRoomByCode(_ context.Context, code string) (*Room,
 	}
 	copied := *rm
 	return &copied, nil
+}
+
+func (m *MemoryRepository) CodeByMeetingNumber(_ context.Context, number int64) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, rm := range m.roomsByID {
+		if rm.MeetingNumber == number {
+			return rm.PublicCode, nil
+		}
+	}
+	return "", ErrRoomNotFound
 }
 
 func (m *MemoryRepository) GetRoomByID(_ context.Context, id string) (*Room, error) {

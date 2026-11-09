@@ -69,6 +69,7 @@ type TokenRequest struct {
 type RoomDTO struct {
 	ID                     string          `json:"id"`
 	PublicCode             string          `json:"publicCode"`
+	MeetingNumber          string          `json:"meetingNumber"`
 	Status                 string          `json:"status"`
 	IsLocked               bool            `json:"isLocked"`
 	WaitingRoomEnabled     bool            `json:"waitingRoomEnabled"`
@@ -118,6 +119,7 @@ func toRoomDTO(r *Room) RoomDTO {
 	dto := RoomDTO{
 		ID:                     r.ID,
 		PublicCode:             r.PublicCode,
+		MeetingNumber:          FormatMeetingNumber(r.MeetingNumber),
 		Status:                 r.Status,
 		IsLocked:               r.IsLocked,
 		WaitingRoomEnabled:     r.WaitingRoomEnabled,
