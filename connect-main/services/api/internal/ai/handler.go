@@ -59,6 +59,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 		// Synchronous generative endpoints
 		aiRouter.Post("/summaries/generate", h.generateSummary)
+		aiRouter.Post("/summaries/from-meeting", h.summariseMeeting)
 		aiRouter.Post("/quizzes/generate", h.generateQuiz)
 		aiRouter.Post("/flashcards/generate", h.generateFlashcards)
 
@@ -70,6 +71,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		aiRouter.Get("/artifacts", h.listArtifacts)
 		aiRouter.Get("/artifacts/{id}", h.getArtifact)
 		aiRouter.Post("/artifacts/{id}/review", h.reviewArtifact)
+		aiRouter.Put("/artifacts/{id}", h.updateArtifact)
 
 		// Policy and usage reporting
 		aiRouter.Get("/policy", h.getPolicy)
