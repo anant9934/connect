@@ -120,6 +120,8 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
   const [drag, setDrag] = useState<{ id: string; point: Point } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [laserVisible, setLaserVisible] = useState(false);
+  const draftRef = useRef<HTMLTextAreaElement | null>(null);
+  const draftOpen = draft !== null;
 
   const widthFor = (t: api.BoardTool) => (t === 'highlighter' ? HIGHLIGHTER_WIDTH : t === 'pen' ? PEN_WIDTH : SHAPE_WIDTH);
   const drawColor = (t: api.BoardTool) => (t === 'note' ? noteColor : color);
@@ -189,6 +191,12 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
     return () => observer.disconnect();
   }, [paint]);
 
+  useEffect(() => {
+    if (!draftOpen) return;
+    const frame = requestAnimationFrame(() => draftRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [draftOpen]);
+
   // The presenter's laser shows for a moment after each move, then fades.
   useEffect(() => {
     if (!laser) return;
@@ -233,6 +241,8 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
     }
     if (!state.canDraw) return;
     if (tool === 'text' || tool === 'note') {
+      // Without this the click moves focus off the new text box, which would close it at once.
+      e.preventDefault();
       setDraft({ tool, point: pointFrom(e), text: '' });
       return;
     }
@@ -353,6 +363,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
         {draft && (
           <div className="absolute z-10" style={{ left: `${Math.min(draft.point[0], 0.7) * 100}%`, top: `${Math.min(draft.point[1], 0.8) * 100}%` }}>
             <textarea
+              ref={draftRef}
               autoFocus
               data-testid="board-draft"
               aria-label={draft.tool === 'note' ? 'Sticky note text' : 'Text'}
