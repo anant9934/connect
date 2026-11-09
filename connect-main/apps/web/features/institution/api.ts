@@ -3,8 +3,10 @@ import { AttendanceCalculation } from '@/features/rooms/meetings';
 
 export interface Organization { id: string; slug: string; name: string; role: string }
 export interface Member { userId: string; displayName: string; email: string; role: string; status: string; memberIdentifier?: string | null }
-export interface Department { id: string; code: string; name: string }
-export interface Course { id: string; departmentId: string; code: string; title: string }
+export interface School { id: string; code: string; name: string; status: string }
+export interface DegreeProgram { id: string; departmentId: string; code: string; name: string; level: string; durationYears: number; status: string }
+export interface Department { id: string; code: string; name: string; schoolId?: string | null }
+export interface Course { id: string; departmentId: string; code: string; title: string; degreeProgramId?: string | null }
 export interface Batch { id: string; courseId: string; name: string; academicTerm: string; startDate: string; endDate: string }
 export interface Allocation { id: string; courseId: string; facultyUserId: string; role: string; status: string }
 export interface Enrollment { id: string; batchId: string; studentUserId: string; status: string }
@@ -138,11 +140,17 @@ export const issuePasswordReset = (org: string, userId: string) =>
   apiFetch<{ code: string; expiresAt: string }>(orgPath(org, `/members/${encodeURIComponent(userId)}/password-reset`), { method: 'POST', body: '{}' });
 export const listDepartments = async (org: string) =>
   (await apiFetch<{ departments: Department[] }>(orgPath(org, '/departments'), { method: 'GET' })).departments;
-export const createDepartment = (org: string, code: string, name: string) => post(orgPath(org, '/departments'), { code, name });
+export const createDepartment = (org: string, code: string, name: string, schoolId = '') => post(orgPath(org, '/departments'), { code, name, schoolId });
+export const listSchools = async (org: string) =>
+  (await apiFetch<{ schools: School[] }>(orgPath(org, '/schools'), { method: 'GET' })).schools;
+export const createSchool = (org: string, code: string, name: string) => post(orgPath(org, '/schools'), { code, name });
+export const listPrograms = async (org: string) =>
+  (await apiFetch<{ programs: DegreeProgram[] }>(orgPath(org, '/programs'), { method: 'GET' })).programs;
+export const createProgram = (org: string, p: { departmentId: string; code: string; name: string; level: string; durationYears: number }) => post(orgPath(org, '/programs'), p);
 export const listCourses = async (org: string) =>
   (await apiFetch<{ courses: Course[] }>(orgPath(org, '/courses'), { method: 'GET' })).courses;
-export const createCourse = (org: string, departmentId: string, code: string, title: string) =>
-  post(orgPath(org, '/courses'), { departmentId, code, title });
+export const createCourse = (org: string, departmentId: string, code: string, title: string, degreeProgramId = '') =>
+  post(orgPath(org, '/courses'), { departmentId, code, title, degreeProgramId });
 export const listBatches = async (org: string) =>
   (await apiFetch<{ batches: Batch[] }>(orgPath(org, '/batches'), { method: 'GET' })).batches;
 export const createBatch = (org: string, courseId: string, name: string, academicTerm: string, startDate: string, endDate: string) =>

@@ -55,6 +55,8 @@ export default function InstitutionPage() {
 
   const [members, setMembers] = useState<api.Member[]>([]);
   const [departments, setDepartments] = useState<api.Department[]>([]);
+  const [schools, setSchools] = useState<api.School[]>([]);
+  const [programs, setPrograms] = useState<api.DegreeProgram[]>([]);
   const [courses, setCourses] = useState<api.Course[]>([]);
   const [batches, setBatches] = useState<api.Batch[]>([]);
   const [allocations, setAllocations] = useState<api.Allocation[]>([]);
@@ -89,6 +91,10 @@ export default function InstitutionPage() {
         allowed ? api.listMembers(id) : Promise.resolve([]),
       ]);
       setDepartments(d);
+      // Schools and programs are optional levels; a server without them still works.
+      const [sc, pr] = await Promise.all([api.listSchools(id).catch(() => []), api.listPrograms(id).catch(() => [])]);
+      setSchools(sc);
+      setPrograms(pr);
       setCourses(c);
       setBatches(b);
       setAllocations(a);
@@ -417,11 +423,87 @@ export default function InstitutionPage() {
 
         {tab === 'structure' && (
           <section className="grid md:grid-cols-2 gap-4">
+            <div className={`${cardClass} md:col-span-2`} data-testid="structure-map">
+              <h2 className="text-base font-semibold text-[#171717]">University structure</h2>
+              <p className="text-xs text-[#686868]">School, then department, degree program, course and batch.</p>
+              {departments.length === 0 && schools.length === 0 ? <p className="text-sm text-[#686868]">Nothing set up yet.</p> : (
+                <ul className="space-y-2 text-sm">
+                  {[...schools, { id: '', code: '', name: 'Not in a school', status: 'active' }].map((school) => {
+                    const depts = departments.filter((d) => (d.schoolId ?? '') === school.id);
+                    if (!school.id && depts.length === 0) return null;
+                    return (
+                      <li key={school.id || 'none'}>
+                        <p className="font-semibold text-[#5A2FC7]">{school.code ? `${school.code} · ` : ''}{school.name}</p>
+                        <ul className="pl-4 border-l-2 border-[#F1EBFF] space-y-1 mt-1">
+                          {depts.map((d) => (
+                            <li key={d.id}>
+                              <p className="font-medium text-[#171717]">{d.code} · {d.name}</p>
+                              <ul className="pl-4 text-xs text-[#5F5F68] space-y-0.5">
+                                {programs.filter((p) => p.departmentId === d.id).map((p) => (
+                                  <li key={p.id}>{p.name} ({p.level}, {p.durationYears} yrs): {courses.filter((c) => c.degreeProgramId === p.id).map((c) => c.code).join(', ') || 'no courses yet'}</li>
+                                ))}
+                                {courses.some((c) => c.departmentId === d.id && !c.degreeProgramId) && (
+                                  <li>Other courses: {courses.filter((c) => c.departmentId === d.id && !c.degreeProgramId).map((c) => c.code).join(', ')}</li>
+                                )}
+                              </ul>
+                            </li>
+                          ))}
+                          {depts.length === 0 && <li className="text-xs text-[#686868]">No departments yet.</li>}
+                        </ul>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+
+            <div className={cardClass}>
+              <h2 className="text-base font-semibold text-[#171717]">Schools</h2>
+              <SimpleList empty="No schools yet." items={schools.map((s) => `${s.code} · ${s.name}`)} />
+              {isAdmin && (
+                <form id="add-school" className="space-y-2" onSubmit={submit((f) => api.createSchool(orgId, text(f, 'code'), text(f, 'name')))}>
+                  <Field id="school-code" label="Code"><input id="school-code" name="code" required className={inputClass} /></Field>
+                  <Field id="school-name" label="Name"><input id="school-name" name="name" required placeholder="School of Computer Science and Engineering" className={inputClass} /></Field>
+                  <button type="submit" className={buttonClass}>Add school</button>
+                </form>
+              )}
+            </div>
+
+            <div className={cardClass}>
+              <h2 className="text-base font-semibold text-[#171717]">Degree programs</h2>
+              <SimpleList empty="No degree programs yet." items={programs.map((p) => `${p.code} · ${p.name} · ${p.level}, ${p.durationYears} years`)} />
+              {isAdmin && (
+                <form id="add-program" className="space-y-2" onSubmit={submit((f) => api.createProgram(orgId, { departmentId: text(f, 'department'), code: text(f, 'code'), name: text(f, 'name'), level: text(f, 'level'), durationYears: Number(text(f, 'years')) }))}>
+                  <Field id="program-department" label="Department">
+                    <select id="program-department" name="department" required className={inputClass}>
+                      <option value="">Choose a department</option>
+                      {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                  </Field>
+                  <Field id="program-code" label="Code"><input id="program-code" name="code" required placeholder="BTECH-AIML" className={inputClass} /></Field>
+                  <Field id="program-name" label="Name"><input id="program-name" name="name" required placeholder="B.Tech AI & ML" className={inputClass} /></Field>
+                  <Field id="program-level" label="Level">
+                    <select id="program-level" name="level" defaultValue="undergraduate" className={inputClass}>
+                      {['certificate', 'diploma', 'undergraduate', 'postgraduate', 'doctoral'].map((l) => <option key={l} value={l}>{l}</option>)}
+                    </select>
+                  </Field>
+                  <Field id="program-years" label="Years"><input id="program-years" name="years" type="number" min="1" max="7" defaultValue="4" required className={inputClass} /></Field>
+                  <button type="submit" className={buttonClass}>Add degree program</button>
+                </form>
+              )}
+            </div>
+
             <div className={cardClass}>
               <h2 className="text-base font-semibold text-[#171717]">Departments</h2>
               <SimpleList empty="No departments yet." items={departments.map((d) => `${d.code} · ${d.name}`)} />
               {isAdmin && (
-                <form id="add-department" className="space-y-2" onSubmit={submit((f) => api.createDepartment(orgId, text(f, 'code'), text(f, 'name')))}>
+                <form id="add-department" className="space-y-2" onSubmit={submit((f) => api.createDepartment(orgId, text(f, 'code'), text(f, 'name'), text(f, 'school')))}>
+                  <Field id="dept-school" label="School (optional)">
+                    <select id="dept-school" name="school" className={inputClass}>
+                      <option value="">No school</option>
+                      {schools.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </Field>
                   <Field id="dept-code" label="Code"><input id="dept-code" name="code" required className={inputClass} /></Field>
                   <Field id="dept-name" label="Name"><input id="dept-name" name="name" required className={inputClass} /></Field>
                   <button type="submit" className={buttonClass}>Add department</button>
@@ -433,7 +515,13 @@ export default function InstitutionPage() {
               <h2 className="text-base font-semibold text-[#171717]">Courses</h2>
               <SimpleList empty="No courses yet." items={courses.map((c) => `${c.code} · ${c.title}`)} />
               {isAdmin && (
-                <form id="add-course" className="space-y-2" onSubmit={submit((f) => api.createCourse(orgId, text(f, 'department'), text(f, 'code'), text(f, 'title')))}>
+                <form id="add-course" className="space-y-2" onSubmit={submit((f) => api.createCourse(orgId, text(f, 'department'), text(f, 'code'), text(f, 'title'), text(f, 'program')))}>
+                  <Field id="course-program" label="Degree program (optional)">
+                    <select id="course-program" name="program" className={inputClass}>
+                      <option value="">No program</option>
+                      {programs.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </Field>
                   <Field id="course-department" label="Department">
                     <select id="course-department" name="department" required className={inputClass}>
                       <option value="">Choose a department</option>
