@@ -4,7 +4,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, Video, AlertTriangle, VolumeX, Sparkles } from 'lucide-react';
-import { getRoom, joinRoom } from '@/features/rooms/api';
+import { getRoom, joinRoom, resolveMeetingNumber } from '@/features/rooms/api';
+import { isMeetingNumber } from '@/features/rooms/joinTarget';
 import { getSession } from '@/features/auth/api';
 import { Room } from '@/features/rooms/types';
 import { User } from '@/features/auth/types';
@@ -89,6 +90,19 @@ export default function RoomPreviewPage() {
     let isMounted = true;
 
     async function init() {
+      // A meeting number in the link resolves to the room's code, which everything else uses.
+      if (isMeetingNumber(roomCode)) {
+        try {
+          const code = await resolveMeetingNumber(roomCode);
+          if (isMounted) router.replace(`/room/${code}/preview`);
+        } catch {
+          if (isMounted) {
+            setRoomError('No meeting has that number.');
+            setLoading(false);
+          }
+        }
+        return;
+      }
       try {
         const [roomData, sessionUser] = await Promise.all([
           getRoom(roomCode),

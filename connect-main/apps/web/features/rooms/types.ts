@@ -1,6 +1,8 @@
 export interface Room {
   id: string;
   publicCode: string;
+  /** 11 digits grouped 3-4-4, e.g. "842 9103 8417". */
+  meetingNumber?: string;
   status: string;
   isLocked: boolean;
   waitingRoomEnabled?: boolean;

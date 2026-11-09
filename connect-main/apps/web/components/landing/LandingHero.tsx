@@ -2,6 +2,8 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { resolveMeetingNumber } from '@/features/rooms/api';
+import { parseJoinInput } from '@/features/rooms/joinTarget';
 
 export function LandingHero({
   onStartMeeting,
@@ -11,13 +13,29 @@ export function LandingHero({
   isCreating?: boolean;
 }) {
   const [code, setCode] = useState('');
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(false);
   const router = useRouter();
 
-  const handleJoin = (e: React.FormEvent) => {
+  // Accepts a room code, an 11-digit meeting number, or a pasted meeting link.
+  const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = code.trim().toUpperCase();
-    if (clean) {
-      router.push(`/room/${clean}`);
+    setJoinError(null);
+    const target = parseJoinInput(code);
+    if (target.kind === 'invalid') {
+      setJoinError('Enter a room code like abcd-efgh-jk, or an 11-digit meeting number.');
+      return;
+    }
+    if (target.kind === 'code') {
+      router.push(`/room/${target.code}`);
+      return;
+    }
+    setResolving(true);
+    try {
+      router.push(`/room/${await resolveMeetingNumber(target.number)}`);
+    } catch {
+      setJoinError('No meeting has that number. Check it and try again.');
+      setResolving(false);
     }
   };
 
@@ -55,13 +73,15 @@ export function LandingHero({
               htmlFor="room-code-input"
               className="text-[#6B675C] text-[14px] sm:text-[15px] font-medium whitespace-nowrap cursor-text shrink-0"
             >
-              Room code
+              Code or ID
             </label>
             <input
               id="room-code-input"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="abc-defg-hij"
+              aria-describedby={joinError ? 'join-error' : undefined}
+              aria-invalid={joinError ? true : undefined}
               autoCapitalize="characters"
               autoComplete="off"
               spellCheck={false}
@@ -69,11 +89,17 @@ export function LandingHero({
             />
             <button
               type="submit"
+              disabled={resolving}
               className="border-0 rounded-full px-5 sm:px-[22px] min-h-[44px] font-sans font-semibold text-[15px] sm:text-[16px] cursor-pointer bg-[#7444E8] text-white hover:bg-[#6537D6] transition-all transform active:scale-95 shrink-0 shadow-xs"
             >
-              Join
+              {resolving ? 'Finding…' : 'Join'}
             </button>
           </form>
+          {joinError && (
+            <p id="join-error" role="alert" className="mt-2 text-[13px] text-[#9B2C2C] text-left sm:text-center px-4">
+              {joinError}
+            </p>
+          )}
         </div>
       </div>
 

@@ -85,3 +85,21 @@ describe('logic and perceptron', () => {
     assert.ok(Number.isNaN(engines.evaluateFunction('logarithm', 1, 1, 0, -1)));
   });
 });
+
+describe('join input', async () => {
+  const { parseJoinInput, isMeetingNumber } = await import('../features/rooms/joinTarget.ts');
+  test('accepts codes, numbers and links', () => {
+    assert.deepStrictEqual(parseJoinInput(' abcd efgh jk '), { kind: 'code', code: 'ABCD-EFGH-JK' });
+    assert.deepStrictEqual(parseJoinInput('ABCD-EFGH-JO'), { kind: 'code', code: 'ABCD-EFGH-J0' });
+    assert.deepStrictEqual(parseJoinInput('842 9103 8417'), { kind: 'number', number: '84291038417' });
+    assert.deepStrictEqual(parseJoinInput('842-9103-8417'), { kind: 'number', number: '84291038417' });
+    assert.deepStrictEqual(parseJoinInput('https://connect-alpha-seven.vercel.app/room/ABCD-EFGH-JK/preview?x=1'), { kind: 'code', code: 'ABCD-EFGH-JK' });
+    assert.deepStrictEqual(parseJoinInput('https://x.app/room/84291038417'), { kind: 'number', number: '84291038417' });
+  });
+  test('rejects junk', () => {
+    for (const bad of ['', '   ', '<script>', 'abc', 'ÄÖÜ-1234']) assert.strictEqual(parseJoinInput(bad).kind, 'invalid', bad);
+    assert.ok(isMeetingNumber('84291038417'));
+    assert.ok(!isMeetingNumber('ABCD-EFGH-JK'));
+    assert.ok(!isMeetingNumber('1234567890'));
+  });
+});

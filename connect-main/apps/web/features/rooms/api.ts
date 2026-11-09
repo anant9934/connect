@@ -27,6 +27,14 @@ export async function getRoom(code: string): Promise<Room> {
   return res.room;
 }
 
+/** Resolves an 11-digit meeting number to the room's public code. */
+export async function resolveMeetingNumber(number: string): Promise<string> {
+  const res = await apiFetch<{ publicCode: string }>(`/api/v1/rooms/by-number/${encodeURIComponent(number.replace(/\D/g, ''))}`, {
+    method: 'GET',
+  });
+  return res.publicCode;
+}
+
 export interface ScheduleMeetingInput {
   title: string;
   scheduledStart: string;

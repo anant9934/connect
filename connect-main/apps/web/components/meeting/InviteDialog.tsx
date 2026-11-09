@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Copy, Check, X, Link as LinkIcon, Hash } from 'lucide-react';
 import { getMeetingInviteUrl } from '@/lib/utils/canonical';
+import { getRoom } from '@/features/rooms/api';
 
 interface InviteDialogProps {
   roomCode: string;
@@ -13,8 +14,32 @@ interface InviteDialogProps {
 export const InviteDialog: React.FC<InviteDialogProps> = ({ roomCode, isOpen, onClose }) => {
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [meetingNumber, setMeetingNumber] = useState<string | null>(null);
+  const [copiedNumber, setCopiedNumber] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen || meetingNumber) return;
+    let current = true;
+    getRoom(roomCode)
+      .then((room) => current && setMeetingNumber(room.meetingNumber || null))
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [isOpen, roomCode, meetingNumber]);
 
   if (!isOpen) return null;
+
+  const handleCopyNumber = async () => {
+    if (!meetingNumber) return;
+    try {
+      await navigator.clipboard.writeText(meetingNumber.replace(/\s/g, ''));
+      setCopiedNumber(true);
+      setTimeout(() => setCopiedNumber(false), 2500);
+    } catch {
+      // Fallback
+    }
+  };
 
   const inviteUrl = getMeetingInviteUrl(roomCode);
 
@@ -126,6 +151,30 @@ export const InviteDialog: React.FC<InviteDialogProps> = ({ roomCode, isOpen, on
             </button>
           </div>
         </div>
+
+        {meetingNumber && (
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-[#4A4A48] flex items-center gap-1.5">
+              <Hash className="w-3.5 h-3.5 text-[#7658E8]" /> Meeting ID
+            </label>
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#FAFAF8] border border-[#E5E5E3]">
+              <span data-testid="meeting-number" className="font-mono text-sm tracking-wider font-semibold text-[#1C1C1C] px-1">
+                {meetingNumber}
+              </span>
+              <button
+                onClick={handleCopyNumber}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 shrink-0 ${
+                  copiedNumber
+                    ? 'bg-[#DFF5E8] text-[#1E7E45] border border-[#BDE6CE]'
+                    : 'bg-white hover:bg-[#F2F2F0] text-[#1C1C1C] border border-[#E5E5E3]'
+                }`}
+              >
+                {copiedNumber ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedNumber ? 'Copied' : 'Copy ID'}</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="pt-1 border-t border-[#F2F2F0] text-center">
           <p className="text-[11px] text-[#888886]">
