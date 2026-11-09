@@ -7,6 +7,7 @@ import * as api from '@/features/classroom/liveCanvas';
 import type { CanvasState, LiveDeck, LiveSimulation, LiveSlide, SimAnswer, SimParams } from '@/features/classroom/liveCanvas';
 import { drawSimulation, type Readout } from '@/features/classroom/simulations/engines';
 import { ENGINE_SPECS, normalizeParams, RUN_KEY } from '@/features/classroom/simulations/specs';
+import { tokenize, TOKEN_COLORS } from '@/features/classroom/highlight';
 
 const POLL_INTERVAL_MS = 4000;
 const FRAME_INTERVAL_MS = 33;
@@ -84,7 +85,11 @@ function SlideBody({ slide }: { slide: LiveSlide }) {
         <div className="space-y-3">
           <div className="rounded-2xl bg-[#17171A] text-[#F8F8F5] p-4 overflow-auto">
             {slide.code?.language && <p className="text-[10px] uppercase tracking-wider text-[#FFC93C] font-bold mb-2">{slide.code.language}</p>}
-            <pre className="font-mono text-[clamp(0.7rem,1.2vw,0.95rem)] leading-relaxed whitespace-pre">{slide.code?.source}</pre>
+            <pre data-testid="code-slide" className="font-mono text-[clamp(0.7rem,1.2vw,0.95rem)] leading-relaxed whitespace-pre">
+              {tokenize(slide.code?.source ?? '', slide.code?.language ?? '').map((t, i) => (
+                <span key={i} style={{ color: TOKEN_COLORS[t.kind] }} className={t.kind === 'comment' ? 'italic' : undefined}>{t.text}</span>
+              ))}
+            </pre>
           </div>
           {list(slide.bullets)}
         </div>

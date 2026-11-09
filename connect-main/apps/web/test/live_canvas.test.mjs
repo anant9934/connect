@@ -103,3 +103,21 @@ describe('join input', async () => {
     assert.ok(!isMeetingNumber('1234567890'));
   });
 });
+
+describe('code slide colouring', async () => {
+  const { tokenize } = await import('../features/classroom/highlight.ts');
+  const kinds = (src, lang) => tokenize(src, lang).filter((t) => t.kind !== 'plain').map((t) => `${t.kind}:${t.text}`);
+  test('C++ keywords, strings, numbers and comments', () => {
+    assert.deepStrictEqual(kinds('int x = 42; // answer\nstd::string s = "hi";', 'cpp'),
+      ['keyword:int', 'number:42', 'comment:// answer', 'keyword:std', 'keyword:string', 'string:"hi"']);
+  });
+  test('Python comments use #, SQL is case-insensitive', () => {
+    assert.deepStrictEqual(kinds('def f(): # x', 'python'), ['keyword:def', 'comment:# x']);
+    assert.deepStrictEqual(kinds('SELECT id FROM t -- note', 'sql'), ['keyword:SELECT', 'keyword:FROM', 'comment:-- note']);
+  });
+  test('text round-trips exactly and unterminated strings stop at the line end', () => {
+    const src = 'printf("unterminated\nnext line); /* open';
+    assert.strictEqual(tokenize(src, 'c').map((t) => t.text).join(''), src);
+    assert.strictEqual(tokenize('x1 = 2', 'js').find((t) => t.kind === 'number').text, '2');
+  });
+});
