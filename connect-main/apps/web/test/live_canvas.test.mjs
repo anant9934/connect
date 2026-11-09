@@ -162,3 +162,19 @@ describe('trees and graphs', async () => {
     assert.match(st.graphFrames(4, [{ from: 0, to: 1, weight: 1 }], 'dijkstra', 0, 3).at(-1).caption, /cannot be reached/);
   });
 });
+
+describe('recording offsets', async () => {
+  const { formatOffset, offsetInRecording } = await import('../features/meeting/offset.ts');
+  test('MM:SS and H:MM:SS', () => {
+    assert.strictEqual(formatOffset(0), '00:00');
+    assert.strictEqual(formatOffset(65_400), '01:05');
+    assert.strictEqual(formatOffset(3_725_000), '1:02:05');
+    assert.strictEqual(formatOffset(-50), '00:00');
+  });
+  test('only moments inside the recording get an offset', () => {
+    const s = '2026-11-09T10:00:00Z', e = '2026-11-09T10:30:00Z';
+    assert.strictEqual(offsetInRecording('2026-11-09T10:01:30Z', s, e), 90_000);
+    assert.strictEqual(offsetInRecording('2026-11-09T09:59:59Z', s, e), null);
+    assert.strictEqual(offsetInRecording('2026-11-09T10:30:01Z', s, e), null);
+  });
+});
