@@ -13,33 +13,37 @@ end to end (API, web, data) and has automated or browser evidence; it does not m
 
 - [~] **1. Instant and scheduled meetings**
   - [x] Instant rooms, room kinds (instant, research, project, mentor, community), scheduled meetings (`room`, `000017`, `/schedule`)
-  - [~] Joining by URL, `abc-defg-hij` code and passcode works; no numeric 9–11 digit meeting ID
+  - [x] Joining by URL, pasted link, `ABCD-EFGH-JK` code, 11-digit meeting ID (`842 9103 8417`, `000034`, rate-limited resolver) and passcode
   - [~] Calendar: `.ics` export (`/meetings/calendar.ics`) and recurrence/reschedule/cancel in `institution`; no two-way Google/Outlook sync
 - [~] **2. Audio, video and media**
   - [x] Camera, mic, device selector, host mute (`DeviceSelector`, `InMeetingDeviceModal`, `room` mute)
-  - [~] Screen share via LiveKit; system audio depends on the browser; no listen-only mode
+  - [~] Screen share via LiveKit; system audio depends on the browser
+  - [x] Listen-only mode before joining and from the dock: sends nothing, receives audio, slides and class activity only (browser-checked from pre-join; in-meeting toggle not run against LiveKit here)
   - [~] Bandwidth control and transport diagnostics exist; reconnect regressions in `e2e_media_stability.mjs`
 - [x] **3. Host, co-host and governance** — roles, waiting room, lock, remove, co-host and host transfer (`000018`), publish permission per room
 - [~] **4. Authentication and identity**
-  - [~] Signup, login, logout, sessions, Google; **BLOCKED**: password reset/OTP and email verification (no email provider approved); no ERP/SSO
+  - [x] Signup, login, logout, sessions, Google, and sign-in by institution + registration number (`member_identifier`)
+  - [x] Password reset without email: an institution admin issues a one-time 12-character code (24 h, hashed, single use; admins cannot reset admins); self-service codes are logged only outside production (`000035`)
+  - [ ] Email verification and emailed resets (**BLOCKED**: no email provider); university SSO (SAML/OIDC)
   - [x] Profile editing and avatars (`/profile`, `avatars`)
 - [~] **5. Cross-platform apps**
-  - [~] Responsive web and `manifest.json`; no service worker, so not installable offline
+  - [x] Responsive web, manifest and service worker: static shell cached, offline page when the network is gone; never caches API responses or page HTML
   - [~] Expo/React Native Android app in `apps/mobile`; owner deferred Android, emulator never reached meeting screens
 
 ## Domain 2: Classroom, live generative canvas and admin
 
-- [~] **6. Presentation and annotation** — PDF (pdf.js) and approximate PPTX rendered client-side, page sync, pen and highlighter strokes (`000027`, `ClassroomBoard`); no laser pointer or text tool
+- [x] **6. Presentation and annotation** — PDF (pdf.js) and approximate PPTX rendered client-side, page sync, pen, highlighter, text, shapes, sticky notes (`000027`, `000036`) and a presenter-only laser pointer over the data channel
 - [~] **7. Live AI slide generation (teacher)** — built 2026-11-09 (`000033`, `livecanvas`, `LiveCanvas.tsx`)
   - [x] Host/co-host command bar in class; prompt plus optional pasted lecture context; students cannot generate (checked before the model is called)
   - [x] Structured JSON decks (title, bullets, table, comparison, steps, code), validated and size-limited server-side, synced to every screen, late joiners land on the current slide
   - [x] Inline slide editing by the teacher; PDF export through the browser print dialog
-  - [ ] Voice-transcript context (needs 28); Mermaid diagrams (steps layout instead); code syntax colouring; PPTX export; saving to a class vault
+  - [x] Code slides coloured by a token highlighter; decks saved to the class vault (`000037`) and opened from meeting history after class
+  - [ ] Voice-transcript context (needs 28); Mermaid diagrams (steps layout instead); PPTX export
   - [ ] <5 s target not yet measured against a real free-tier provider
-- [~] **8. Live simulation generator (teacher)** — built 2026-11-09; the model picks one of 7 built-in engines (projectile, pendulum, function graph, CPU scheduling, sorting, logic circuits, perceptron) and its settings. It never writes code that runs in students' browsers
+- [~] **8. Live simulation generator (teacher)** — the model picks one of 9 built-in engines (projectile, pendulum, function graph, CPU scheduling, sorting, logic circuits, perceptron, BST/AVL tree, BFS/DFS/Dijkstra graph) and its settings. It never writes code that runs in students' browsers
   - [x] Presenter mode: slider frames over the LiveKit data channel (about 30 a second, accepted only from the stored presenter), each screen animating locally at display rate; settings saved for late joiners
   - [x] Sandbox mode: students change their own copy and send it; the teacher lists and previews answers; answers are private to each student
-  - [ ] Free-form WebGL or arbitrary sandboxes; multi-layer neural networks; trees and graphs engines
+  - [ ] Free-form WebGL or arbitrary sandboxes; multi-layer neural networks
 - [ ] **9. Cloud recording and playback** — **BLOCKED**: LiveKit free tier allows 60 shared minutes; token grant only
 - [~] **10. Meeting history** — history list and detail with search (`/history`, `000023`); summary cards partial
 - [~] **11. Institution hierarchy** — organization, courses, batches, enrollment, faculty allocation (`000007`, `000019`); no school/department/degree levels
@@ -54,7 +58,7 @@ end to end (API, web, data) and has automated or browser evidence; it does not m
 - [~] **17. Attendance dashboard** — engagement on `/attendance` and `/admin`; not yet the 3-card Duration / Engagement / Focus layout
 - [~] **18. Attendance rules** — versioned rules and audited corrections; weight formula partly configurable
 - [~] **19. Polls, quizzes and doubts** — single/multiple choice, timed quizzes, scoring, doubt queue with resolve; no leaderboard or upvotes
-- [~] **20. Breakouts and whiteboard** — breakout open/assign/close (`000028`), shared pen board; no shapes, sticky notes, LaTeX or live cursors
+- [~] **20. Breakouts and whiteboard** — breakout open/assign/close (`000028`); board with pen, highlighter, text, rectangles, circles, arrows and draggable pastel sticky notes (`000036`); no LaTeX, live cursors or infinite canvas
 
 ## Domain 4: Practical learning platform
 
