@@ -2,12 +2,14 @@ package meetings
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tathastu/connect/services/api/internal/database"
 	"github.com/tathastu/connect/services/api/internal/model"
 )
@@ -93,4 +95,52 @@ func (h *Handler) recordings(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		model.SendJSON(w, http.StatusOK, map[string]any{"recordings": list})
 	}
+}
+
+// pillars handles GET /meetings/{id}/pillars?student=&org=: one student's attendance as
+// duration, engagement and focus. Without student it is the caller's own. Institution
+// overseers pass org so their role there is checked; the database decides who may see whom.
+func (h *Handler) pillars(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if _, err := uuid.Parse(id); err != nil {
+		model.SendJSONError(w, r, http.StatusNotFound, "NOT_FOUND", "This meeting is unavailable.")
+		return
+	}
+	student := r.URL.Query().Get("student")
+	if student != "" {
+		if _, err := uuid.Parse(student); err != nil {
+			model.SendJSONError(w, r, http.StatusBadRequest, "INVALID_QUERY", "Unknown student.")
+			return
+		}
+	}
+	var org *string
+	if raw := r.URL.Query().Get("org"); raw != "" {
+		if _, err := uuid.Parse(raw); err != nil {
+			model.SendJSONError(w, r, http.StatusBadRequest, "INVALID_QUERY", "Unknown organization.")
+			return
+		}
+		org = &raw
+	}
+	var raw []byte
+	err := database.WithAuthContext(r.Context(), h.pool, database.SessionTokenHash(r.Context()), org, func(tx pgx.Tx, auth *database.AuthContext) error {
+		target := student
+		if target == "" {
+			target = auth.UserID
+		}
+		return tx.QueryRow(r.Context(), `SELECT connect_auth.attendance_pillars($1::UUID, $2::UUID)`, id, target).Scan(&raw)
+	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "42501" || errors.Is(err, database.ErrMembershipDenied) {
+		model.SendJSONError(w, r, http.StatusForbidden, "FORBIDDEN", "You cannot see this attendance.")
+		return
+	}
+	if err != nil {
+		model.SendJSONError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not load the attendance.")
+		return
+	}
+	if raw == nil {
+		model.SendJSONError(w, r, http.StatusNotFound, "NOT_FOUND", "This meeting is unavailable.")
+		return
+	}
+	model.SendJSON(w, http.StatusOK, map[string]any{"pillars": json.RawMessage(raw)})
 }
