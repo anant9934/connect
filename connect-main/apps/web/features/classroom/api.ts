@@ -96,7 +96,7 @@ export interface ClassroomState {
   presenter: string | null;
   version: number;
 }
-export type BoardTool = 'pen' | 'highlighter' | 'text' | 'rect' | 'circle' | 'arrow' | 'note';
+export type BoardTool = 'pen' | 'highlighter' | 'text' | 'rect' | 'circle' | 'arrow' | 'note' | 'math';
 export interface Stroke {
   id: string;
   seq: number;

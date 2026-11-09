@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Circle, Highlighter, MousePointer2, PenLine, Square, StickyNote, Type } from 'lucide-react';
+import { ArrowUpRight, Circle, Hand, Highlighter, Minus, MousePointer2, PenLine, Plus, Sigma, Square, StickyNote, Type } from 'lucide-react';
+import { MathBlock } from './MathBlock';
 import { ApiError } from '@/lib/api/client';
 import * as api from '@/features/classroom/api';
 
@@ -19,7 +20,15 @@ const LASER_INTERVAL_MS = 33;
 const LASER_FADE_MS = 1200;
 
 type Point = [number, number];
-type Tool = api.BoardTool | 'laser';
+type Tool = api.BoardTool | 'laser' | 'pan';
+
+/** The whiteboard's visible area: zoom, and the world point at the top-left corner. */
+interface View { zoom: number; x: number; y: number }
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2;
+/** Whiteboard coordinates the API accepts; the first view shows 0-1. */
+const WORLD_MIN = -4;
+const WORLD_MAX = 5;
 
 /** A laser pointer position from the presenter, in board coordinates. */
 export interface LaserFrame { x: number; y: number; at: number }
@@ -50,7 +59,7 @@ const drawArrowHead = (context: CanvasRenderingContext2D, from: Point, to: Point
 };
 
 function drawStroke(context: CanvasRenderingContext2D, stroke: Pick<api.Stroke, 'tool' | 'color' | 'width' | 'points' | 'body'>, width: number, height: number) {
-  if (stroke.points.length === 0 || stroke.tool === 'note') return; // notes are cards, drawn as HTML
+  if (stroke.points.length === 0 || stroke.tool === 'note' || stroke.tool === 'math') return; // drawn as HTML
   const pts = stroke.points.map(([x, y]) => [x * width, y * height] as Point);
   context.save();
   context.lineCap = 'round';
@@ -99,6 +108,7 @@ const TOOLS: { tool: Tool; label: string; icon: React.ReactNode }[] = [
   { tool: 'circle', label: 'Circle', icon: <Circle className="w-4 h-4" /> },
   { tool: 'arrow', label: 'Arrow', icon: <ArrowUpRight className="w-4 h-4" /> },
   { tool: 'note', label: 'Sticky note', icon: <StickyNote className="w-4 h-4" /> },
+  { tool: 'math', label: 'Math formula', icon: <Sigma className="w-4 h-4" /> },
 ];
 
 // Draws what is stored and sends each finished item. Others pick items up from the server, on a
@@ -116,7 +126,16 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
   const [tool, setTool] = useState<Tool>('pen');
   const [strokeCount, setStrokeCount] = useState(0);
   const [notes, setNotes] = useState<api.Stroke[]>([]);
-  const [draft, setDraft] = useState<{ tool: 'text' | 'note'; point: Point; text: string } | null>(null);
+  const [draft, setDraft] = useState<{ tool: 'text' | 'note' | 'math'; point: Point; text: string } | null>(null);
+  // Only the whiteboard pans and zooms; a slide's annotations stay on its page.
+  const zoomable = !transparent;
+  const [view, setView] = useState<View>({ zoom: 1, x: 0, y: 0 });
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const panRef = useRef<{ x: number; y: number; view: View } | null>(null);
+  const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchRef = useRef<{ distance: number; view: View; cx: number; cy: number } | null>(null);
+  const spaceRef = useRef(false);
   const [drag, setDrag] = useState<{ id: string; point: Point } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [laserVisible, setLaserVisible] = useState(false);
@@ -130,16 +149,53 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
     const canvas = canvasRef.current;
     const context = canvas?.getContext('2d');
     if (!canvas || !context) return;
+    context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, canvas.width, canvas.height);
+    const v = viewRef.current;
+    context.setTransform(v.zoom, 0, 0, v.zoom, -v.x * canvas.width * v.zoom, -v.y * canvas.height * v.zoom);
+    if (zoomable) {
+      // A light dot grid shows that the board continues beyond the screen.
+      const step = 0.05;
+      context.fillStyle = '#E4E1D8';
+      const x0 = Math.floor(v.x / step) * step, y0 = Math.floor(v.y / step) * step;
+      for (let gx = x0; gx < v.x + 1 / v.zoom; gx += step) {
+        for (let gy = y0; gy < v.y + 1 / v.zoom; gy += step) context.fillRect(gx * canvas.width - 1, gy * canvas.height - 1, 2 / v.zoom, 2 / v.zoom);
+      }
+    }
     for (const stroke of strokesRef.current) drawStroke(context, stroke, canvas.width, canvas.height);
     for (const stroke of pendingRef.current.values()) drawStroke(context, stroke, canvas.width, canvas.height);
     const current = currentRef.current;
-    if (current && tool !== 'laser' && tool !== 'text' && tool !== 'note') {
+    if (current && tool !== 'laser' && tool !== 'pan' && tool !== 'text' && tool !== 'note' && tool !== 'math') {
       drawStroke(context, { tool, color, width: widthFor(tool), points: current }, canvas.width, canvas.height);
     }
+    context.setTransform(1, 0, 0, 1, 0, 0);
     setStrokeCount(strokesRef.current.length + pendingRef.current.size);
-    setNotes(strokesRef.current.filter((s) => s.tool === 'note'));
-  }, [color, tool]); // eslint-disable-line react-hooks/exhaustive-deps
+    setNotes(strokesRef.current.filter((s) => s.tool === 'note' || s.tool === 'math'));
+  }, [color, tool, zoomable]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    paint();
+  }, [view, paint]);
+
+  // Space held down turns any tool into panning, as in drawing apps.
+  useEffect(() => {
+    if (!zoomable) return;
+    const typing = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.('input, textarea, select, [contenteditable]');
+    const down = (e: KeyboardEvent) => { if (e.code === 'Space' && !typing(e.target)) { spaceRef.current = true; e.preventDefault(); } };
+    const up = (e: KeyboardEvent) => { if (e.code === 'Space') spaceRef.current = false; };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
+  }, [zoomable]);
+
+  /** Zooms to z keeping the point at screen fraction (fx, fy) still. */
+  const zoomTo = useCallback((z: number, fx = 0.5, fy = 0.5) => {
+    setView((v) => {
+      const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(z * 100) / 100));
+      const wx = v.x + fx / v.zoom, wy = v.y + fy / v.zoom;
+      return { zoom, x: wx - fx / zoom, y: wy - fy / zoom };
+    });
+  }, []);
 
   const sync = useCallback(async (reset: boolean) => {
     // A redraw outdates anything still on its way, which could bring back a removed line.
@@ -205,10 +261,78 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
     return () => clearTimeout(timer);
   }, [laser]);
 
+  /** The board point under the pointer: screen position through the view, within the board's bounds. */
   const pointFrom = (e: React.PointerEvent<HTMLElement>, element: HTMLElement = e.currentTarget): Point => {
     const rect = element.getBoundingClientRect();
-    const clamp = (v: number) => Math.min(1, Math.max(0, v));
-    return [Number(clamp((e.clientX - rect.left) / rect.width).toFixed(4)), Number(clamp((e.clientY - rect.top) / rect.height).toFixed(4))];
+    const v = viewRef.current;
+    const [lo, hi] = zoomable ? [WORLD_MIN, WORLD_MAX] : [0, 1];
+    const clamp = (n: number) => Math.min(hi, Math.max(lo, n));
+    const fx = (e.clientX - rect.left) / rect.width, fy = (e.clientY - rect.top) / rect.height;
+    return [Number(clamp(v.x + fx / v.zoom).toFixed(4)), Number(clamp(v.y + fy / v.zoom).toFixed(4))];
+  };
+
+  /** Where a board point appears, as CSS percentages of the surface. */
+  const screenOf = (p: Point) => ({ left: `${(p[0] - view.x) * view.zoom * 100}%`, top: `${(p[1] - view.y) * view.zoom * 100}%` });
+
+  // Panning (hand tool or Space) and two-finger pinch. Returns true when the event was used.
+  const panStart = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!zoomable) return false;
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (pointersRef.current.size === 2) {
+      const [a, b] = [...pointersRef.current.values()];
+      currentRef.current = null; // a second finger cancels the line the first had started
+      pinchRef.current = { distance: Math.hypot(a.x - b.x, a.y - b.y), view: viewRef.current, cx: ((a.x + b.x) / 2 - rect.left) / rect.width, cy: ((a.y + b.y) / 2 - rect.top) / rect.height };
+      return true;
+    }
+    if (tool === 'pan' || spaceRef.current) {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      panRef.current = { x: e.clientX, y: e.clientY, view: viewRef.current };
+      return true;
+    }
+    return false;
+  };
+
+  const panMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!zoomable) return false;
+    if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pinch = pinchRef.current;
+    if (pinch && pointersRef.current.size === 2) {
+      const [a, b] = [...pointersRef.current.values()];
+      const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, pinch.view.zoom * (Math.hypot(a.x - b.x, a.y - b.y) / Math.max(pinch.distance, 1))));
+      const cx = ((a.x + b.x) / 2 - rect.left) / rect.width, cy = ((a.y + b.y) / 2 - rect.top) / rect.height;
+      const wx = pinch.view.x + pinch.cx / pinch.view.zoom, wy = pinch.view.y + pinch.cy / pinch.view.zoom;
+      setView({ zoom, x: wx - cx / zoom, y: wy - cy / zoom });
+      return true;
+    }
+    const pan = panRef.current;
+    if (pan) {
+      setView({ zoom: pan.view.zoom, x: pan.view.x - (e.clientX - pan.x) / rect.width / pan.view.zoom, y: pan.view.y - (e.clientY - pan.y) / rect.height / pan.view.zoom });
+      return true;
+    }
+    return false;
+  };
+
+  const panEnd = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size < 2) pinchRef.current = null;
+    if (panRef.current) {
+      panRef.current = null;
+      return true;
+    }
+    return false;
+  };
+
+  const onWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    if (!zoomable) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (e.ctrlKey || e.metaKey) {
+      zoomTo(viewRef.current.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1), (e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height);
+    } else {
+      const v = viewRef.current;
+      setView({ ...v, x: v.x + e.deltaX / rect.width / v.zoom, y: v.y + e.deltaY / rect.height / v.zoom });
+    }
   };
 
   const save = async (stroke: api.NewStroke) => {
@@ -234,13 +358,14 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (panStart(e)) return;
     if (tool === 'laser') {
       e.currentTarget.setPointerCapture(e.pointerId);
       currentRef.current = [pointFrom(e)];
       return;
     }
     if (!state.canDraw) return;
-    if (tool === 'text' || tool === 'note') {
+    if (tool === 'text' || tool === 'note' || tool === 'math') {
       // Without this the click moves focus off the new text box, which would close it at once.
       e.preventDefault();
       setDraft({ tool, point: pointFrom(e), text: '' });
@@ -252,6 +377,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (panMove(e)) return;
     const point = pointFrom(e);
     if (tool === 'laser') {
       const now = performance.now();
@@ -274,10 +400,11 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
     paint();
   };
 
-  const onPointerUp = async () => {
+  const onPointerUp = async (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (panEnd(e)) return;
     const points = currentRef.current;
     currentRef.current = null;
-    if (!points || tool === 'laser' || tool === 'text' || tool === 'note') return;
+    if (!points || tool === 'laser' || tool === 'pan' || tool === 'text' || tool === 'note' || tool === 'math') return;
     if ((tool === 'rect' || tool === 'circle' || tool === 'arrow') && points.length < 2) {
       paint();
       return; // a click without a drag makes no shape
@@ -328,7 +455,8 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
           data-testid="board-canvas"
           data-strokes={strokeCount}
           aria-label={state.canDraw ? 'Drawing board' : 'Drawing board, view only'}
-          className={`w-full h-full block touch-none ${state.canDraw || tool === 'laser' ? 'cursor-crosshair' : ''}`}
+          className={`w-full h-full block touch-none ${tool === 'pan' ? 'cursor-grab active:cursor-grabbing' : state.canDraw || tool === 'laser' ? 'cursor-crosshair' : ''}`}
+          onWheel={onWheel}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -336,13 +464,14 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
         />
         {notes.map((note) => {
           const at = drag?.id === note.id ? drag.point : note.points[0];
+          const isMath = note.tool === 'math';
           return (
             <div
               key={note.id}
-              data-testid="sticky-note"
-              role="note"
-              style={{ left: `${at[0] * 100}%`, top: `${at[1] * 100}%`, backgroundColor: note.color }}
-              className={`absolute w-36 min-h-[72px] p-2 rounded-xl text-xs text-[#17171A] whitespace-pre-wrap break-words shadow-[4px_4px_12px_rgba(23,23,26,0.12)] border border-[rgba(23,23,26,0.06)] ${canMove(note) ? 'cursor-grab active:cursor-grabbing touch-none' : ''}`}
+              data-testid={isMath ? 'math-block' : 'sticky-note'}
+              role={isMath ? undefined : 'note'}
+              style={{ ...screenOf(at), backgroundColor: isMath ? 'rgba(255,255,255,0.92)' : note.color, transform: `scale(${view.zoom})`, transformOrigin: 'top left' }}
+              className={`absolute ${isMath ? 'px-3 py-2 rounded-xl text-xl text-[#17171A] border border-[#ECECE6] whitespace-nowrap' : 'w-36 min-h-[72px] p-2 rounded-xl text-xs text-[#17171A] whitespace-pre-wrap break-words shadow-[4px_4px_12px_rgba(23,23,26,0.12)] border border-[rgba(23,23,26,0.06)]'} ${canMove(note) ? 'cursor-grab active:cursor-grabbing touch-none' : ''}`}
               onPointerDown={(e) => {
                 if (!canMove(note)) return;
                 e.currentTarget.setPointerCapture(e.pointerId);
@@ -356,17 +485,17 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
             >
-              {note.body}
+              {isMath ? <MathBlock source={note.body ?? ''} /> : note.body}
             </div>
           );
         })}
         {draft && (
-          <div className="absolute z-10" style={{ left: `${Math.min(draft.point[0], 0.7) * 100}%`, top: `${Math.min(draft.point[1], 0.8) * 100}%` }}>
+          <div className="absolute z-10 space-y-1" style={screenOf([Math.min(draft.point[0], view.x + 0.7 / view.zoom), Math.min(draft.point[1], view.y + 0.75 / view.zoom)])}>
             <textarea
               ref={draftRef}
               autoFocus
               data-testid="board-draft"
-              aria-label={draft.tool === 'note' ? 'Sticky note text' : 'Text'}
+              aria-label={draft.tool === 'note' ? 'Sticky note text' : draft.tool === 'math' ? 'Formula in LaTeX' : 'Text'}
               value={draft.text}
               maxLength={500}
               rows={draft.tool === 'note' ? 3 : 1}
@@ -376,10 +505,13 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
                 if (e.key === 'Escape') setDraft(null);
               }}
               onBlur={commitDraft}
-              placeholder={draft.tool === 'note' ? 'Note… (Enter to place)' : 'Type, then Enter'}
+              placeholder={draft.tool === 'note' ? 'Note… (Enter to place)' : draft.tool === 'math' ? '\\frac{n(n+1)}{2}, then Enter' : 'Type, then Enter'}
               style={{ backgroundColor: draft.tool === 'note' ? noteColor : '#FFFFFF' }}
-              className="w-44 rounded-xl border-2 border-[#7444E8] p-2 text-xs text-[#17171A] outline-none shadow-card"
+              className={`${draft.tool === 'math' ? 'w-64 font-mono' : 'w-44'} rounded-xl border-2 border-[#7444E8] p-2 text-xs text-[#17171A] outline-none shadow-card`}
             />
+            {draft.tool === 'math' && draft.text.trim() && (
+              <div data-testid="math-preview" className="rounded-xl bg-white border border-[#ECECE6] px-3 py-2 text-lg text-[#17171A] shadow-card"><MathBlock source={draft.text} /></div>
+            )}
           </div>
         )}
         {laser && laserVisible && (
@@ -387,7 +519,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
             data-testid="laser-dot"
             aria-hidden="true"
             className="absolute w-4 h-4 -ml-2 -mt-2 rounded-full bg-[#FF3B30] shadow-[0_0_12px_4px_rgba(255,59,48,0.55)] pointer-events-none transition-[left,top] duration-75"
-            style={{ left: `${laser.x * 100}%`, top: `${laser.y * 100}%` }}
+            style={screenOf([laser.x, laser.y])}
           />
         )}
       </div>
@@ -403,6 +535,12 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
             <button type="button" aria-label="Laser pointer" title="Laser pointer" data-testid="laser-tool" aria-pressed={tool === 'laser'} onClick={() => setTool('laser')}
               className={`${toolButton} ${tool === 'laser' ? 'neu-pressed bg-[#FFE9E9] text-[#C2261C]' : ''}`}>
               <MousePointer2 className="w-4 h-4" />
+            </button>
+          )}
+          {zoomable && (
+            <button type="button" aria-label="Move around the board (or hold Space)" title="Move around the board (or hold Space)" data-testid="pan-tool" aria-pressed={tool === 'pan'} onClick={() => setTool('pan')}
+              className={`${toolButton} ${tool === 'pan' ? 'neu-pressed bg-[#F1EBFF] text-[#5A2FC7]' : ''}`}>
+              <Hand className="w-4 h-4" />
             </button>
           )}
           {state.canDraw && <span className="w-px h-6 bg-[#E5E7EB] mx-0.5" aria-hidden="true" />}
@@ -423,6 +561,13 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ roomCode, board, state
               )}
             </>
           )}
+        </div>
+      )}
+      {zoomable && (
+        <div className="absolute right-2 bottom-2 neu-pill flex items-center gap-0.5 px-1 py-1" data-testid="zoom-control">
+          <button type="button" aria-label="Zoom out" disabled={view.zoom <= MIN_ZOOM} onClick={() => zoomTo(view.zoom - 0.25)} className="w-8 h-8 rounded-full flex items-center justify-center disabled:opacity-40"><Minus className="w-4 h-4" /></button>
+          <button type="button" data-testid="zoom-level" title="Back to the start" onClick={() => setView({ zoom: 1, x: 0, y: 0 })} className="min-w-[3.5rem] text-xs font-bold text-[#17171A] tabular-nums">{Math.round(view.zoom * 100)}%</button>
+          <button type="button" aria-label="Zoom in" disabled={view.zoom >= MAX_ZOOM} onClick={() => zoomTo(view.zoom + 0.25)} className="w-8 h-8 rounded-full flex items-center justify-center disabled:opacity-40"><Plus className="w-4 h-4" /></button>
         </div>
       )}
       {error && <p role="alert" className="absolute left-2 top-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1">{error}</p>}

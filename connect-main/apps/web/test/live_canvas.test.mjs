@@ -266,3 +266,29 @@ describe('pptx export', async () => {
     assert.strictEqual(xmlEscape(`a<b>&"'\u0001`), 'a&lt;b&gt;&amp;&quot;&apos;');
   });
 });
+
+describe('board math', async () => {
+  const { parseMath, mathToText } = await import('../features/classroom/math.ts');
+  const read = (s) => mathToText(parseMath(s));
+  test('common formulas', () => {
+    assert.strictEqual(read('\\frac{a}{b}'), '(a)/(b)');
+    assert.strictEqual(read('x^2 + y_i^{n+1}'), 'x^2+y_i^n+1');
+    assert.strictEqual(read('\\sqrt{x}'), '√(x)');
+    assert.strictEqual(read('\\sqrt[3]{8}'), 'root3(8)');
+    assert.strictEqual(read('O(n \\log n)'), 'O(nlog n)');
+    // Spaces are insignificant in LaTeX math, as here.
+    assert.strictEqual(read('\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}'), '∑_i=1^ni=(n(n+1))/(2)');
+    assert.strictEqual(read('\\int_0^\\infty e^{-x} dx'), '∫_0^∞e^−xdx');
+    assert.strictEqual(read('\\alpha + \\Omega \\leq \\pi'), 'α+Ω≤π');
+    assert.strictEqual(read('\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}'), '(a, b; c, d)');
+    assert.strictEqual(read('\\text{if } x \\neq 0'), 'if x≠0');
+    assert.strictEqual(read('a \\quad b'), 'a\u2003b');
+  });
+  test('unknown commands and broken input do not throw', () => {
+    assert.strictEqual(read('\\foo{x}'), 'foox');
+    for (const bad of ['\\frac{', '}}}{{{', '^_^', '\\begin{pmatrix} a & b', '\\', '{'.repeat(200) + 'x']) assert.doesNotThrow(() => read(bad));
+  });
+  test('input is bounded', () => {
+    assert.ok(read('x'.repeat(2000)).length <= 500);
+  });
+});
