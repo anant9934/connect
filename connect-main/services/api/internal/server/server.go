@@ -430,6 +430,7 @@ func BuildRouter(
 
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/polls", interactionHandler.ListPolls)
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/doubts", interactionHandler.ListDoubts)
+						roomDetail.With(appmw.OptionalAuth(authService)).Get("/leaderboard", interactionHandler.Leaderboard)
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/polls/{id}/scores", interactionHandler.PollScores)
 						roomDetail.With(appmw.OptionalAuth(authService)).Get("/engagement", interactionHandler.RoomEngagement)
 						for path, handler := range map[string]http.HandlerFunc{
@@ -440,6 +441,7 @@ func BuildRouter(
 							"/doubts/{id}/assign":  interactionHandler.AssignDoubt,
 							"/doubts/{id}/answer":  interactionHandler.AnswerDoubt,
 							"/doubts/{id}/resolve": interactionHandler.ResolveDoubt,
+							"/doubts/{id}/vote":    interactionHandler.VoteDoubt,
 						} {
 							roomDetail.With(
 								appmw.CSRFProtection(cfg.CORSAllowedOrigins),

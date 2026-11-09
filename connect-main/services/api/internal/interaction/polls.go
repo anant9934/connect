@@ -301,8 +301,12 @@ func (h *Handler) ListDoubts(w http.ResponseWriter, r *http.Request) {
 	err := database.InCallerContext(c.r.Context(), h.pool, c.roomID, func(tx pgx.Tx) error {
 		return tx.QueryRow(c.r.Context(), `
 			SELECT COALESCE(json_agg(t), '[]'::json) FROM (
-				SELECT `+doubtColumns+` FROM meeting_doubts WHERE room_id = $1
-				ORDER BY (status = 'resolved'), created_at
+				SELECT `+doubtColumns+`,
+				       (SELECT count(*) FROM doubt_votes v WHERE v.doubt_id = d.id)::int AS votes,
+				       EXISTS (SELECT 1 FROM doubt_votes v WHERE v.doubt_id = d.id AND v.identity = connect_auth.current_room_identity()) AS "myVote"
+				FROM meeting_doubts d WHERE room_id = $1
+				-- Unresolved first, most upvoted first, then oldest first.
+				ORDER BY (status = 'resolved'), votes DESC, created_at
 			) t
 		`, c.roomID).Scan(&raw)
 	})
@@ -440,4 +444,73 @@ func (h *Handler) ResolveDoubt(w http.ResponseWriter, r *http.Request) {
 	if h.updateDoubt(w, c, chi.URLParam(r, "id"), `UPDATE meeting_doubts SET status = 'resolved', resolved_at = clock_timestamp() WHERE id = $1 AND room_id = $2 AND status <> 'resolved'`) {
 		model.SendJSON(w, http.StatusOK, map[string]any{"status": "resolved"})
 	}
+}
+
+// VoteDoubt handles POST /rooms/{code}/doubts/{id}/vote: adds or removes the caller's upvote.
+func (h *Handler) VoteDoubt(w http.ResponseWriter, r *http.Request) {
+	c, ok := h.resolve(w, r)
+	if !ok {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !uuidPattern.MatchString(id) {
+		model.SendJSONError(w, c.r, http.StatusBadRequest, "INVALID_PAYLOAD", "Unknown question.")
+		return
+	}
+	if !h.allow(w, c, "doubt-vote", 60, time.Minute) {
+		return
+	}
+	var voted bool
+	var votes int
+	err := database.InCallerContext(c.r.Context(), h.pool, c.roomID, func(tx pgx.Tx) error {
+		return tx.QueryRow(c.r.Context(), `SELECT voted, votes FROM connect_auth.toggle_doubt_vote($1::UUID)`, id).Scan(&voted, &votes)
+	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "CN422" {
+		model.SendJSONError(w, c.r, http.StatusUnprocessableEntity, "CANNOT_VOTE", pgErr.Message)
+		return
+	}
+	if err != nil {
+		sendPollError(w, c.r, err, "Could not record the vote.")
+		return
+	}
+	model.SendJSON(w, http.StatusOK, map[string]any{"voted": voted, "votes": votes})
+}
+
+// LeaderboardRow is one place on the quiz leaderboard.
+type LeaderboardRow struct {
+	Rank        int     `json:"rank"`
+	DisplayName string  `json:"displayName"`
+	Points      float64 `json:"points"`
+	Answered    int     `json:"answered"`
+	IsMe        bool    `json:"isMe"`
+}
+
+// Leaderboard handles GET /rooms/{code}/leaderboard: top five by quiz points, and the caller.
+func (h *Handler) Leaderboard(w http.ResponseWriter, r *http.Request) {
+	c, ok := h.resolve(w, r)
+	if !ok {
+		return
+	}
+	rows := []LeaderboardRow{}
+	err := database.InCallerContext(c.r.Context(), h.pool, c.roomID, func(tx pgx.Tx) error {
+		res, err := tx.Query(c.r.Context(), `SELECT rank, display_name, points::float8, answered, is_me FROM connect_auth.quiz_leaderboard($1::UUID)`, c.roomID)
+		if err != nil {
+			return err
+		}
+		defer res.Close()
+		for res.Next() {
+			var row LeaderboardRow
+			if err := res.Scan(&row.Rank, &row.DisplayName, &row.Points, &row.Answered, &row.IsMe); err != nil {
+				return err
+			}
+			rows = append(rows, row)
+		}
+		return res.Err()
+	})
+	if err != nil {
+		sendPollError(w, c.r, err, "Could not load the leaderboard.")
+		return
+	}
+	model.SendJSON(w, http.StatusOK, map[string]any{"leaderboard": rows})
 }
