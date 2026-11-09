@@ -12,6 +12,8 @@ const csp = (scriptSrc) =>
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com",
     "font-src 'self' https://fonts.gstatic.com data:",
     "img-src 'self' data: blob: https: http://localhost:8080",
+    // Local recordings are opened from the viewer's own disk as blob: URLs.
+    "media-src 'self' blob:",
     "connect-src 'self' http://localhost:8080 ws://localhost:8080 http://localhost:7880 ws://localhost:7880 wss://localhost:7880 https: wss: data: blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
     "frame-ancestors 'none'",
     "object-src 'none'",
