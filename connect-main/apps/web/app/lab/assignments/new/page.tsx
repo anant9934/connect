@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { AssignmentCreator } from '@/features/lab/components/AssignmentCreator';
 import { PILOT_COURSES } from '@/features/lab/runtimes/starterTemplates';
 import { getSession } from '@/features/auth/api';
@@ -73,14 +72,6 @@ export default function NewAssignmentPage() {
 
   return (
     <div className="min-h-screen bg-[#FAF9FC]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
-        <Link
-          href="/lab/assignments"
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#5E5A50] hover:text-[#17151F] transition-colors"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to Assignments
-        </Link>
-      </div>
       <AssignmentCreator orgId={orgId} courses={courses} />
     </div>
   );

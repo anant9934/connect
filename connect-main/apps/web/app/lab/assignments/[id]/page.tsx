@@ -2,8 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import Link from 'next/link';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { AssignmentSolver } from '@/features/lab/components/AssignmentSolver';
 import type { LabAssignment } from '@/features/lab/types';
 import { getSession } from '@/features/auth/api';
@@ -132,14 +131,6 @@ export default function AssignmentPage() {
 
   return (
     <div className="min-h-screen bg-[#FAF9FC]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
-        <Link
-          href="/lab/assignments"
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#5E5A50] hover:text-[#17151F] transition-colors"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to Assignments
-        </Link>
-      </div>
       <AssignmentSolver assignment={assignment} orgId={orgId} />
     </div>
   );
