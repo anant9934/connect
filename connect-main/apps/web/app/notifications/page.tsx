@@ -110,7 +110,12 @@ export default function NotificationsPage() {
           )}
         </div>
         {error && <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{error}</p>}
-        {items.length === 0 && !error && <p className="text-sm text-[#686868]">Nothing yet. Class changes and reminders appear here.</p>}
+        {items.length === 0 && !error && (
+          <div data-testid="notifications-empty" className="neu-card p-6 text-center space-y-1">
+            <p className="text-sm font-semibold text-[#171717]">You are all caught up</p>
+            <p className="text-xs text-[#686868]">Class changes, reminders and attendance corrections appear here.</p>
+          </div>
+        )}
         <ul className="space-y-2">
           {items.map((item) => (
             <li

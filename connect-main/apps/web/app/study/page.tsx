@@ -118,7 +118,12 @@ export default function StudyPage() {
 
         <div className="grid gap-4 lg:grid-cols-[18rem_1fr]">
           <aside className="space-y-2" data-testid="artifact-list">
-            {sorted.length === 0 && <p className="text-sm text-[#5F5F68]">{isStaff ? 'Nothing yet. Summarise a class to start.' : 'Nothing has been published yet.'}</p>}
+            {sorted.length === 0 && (
+              <div data-testid="study-empty" className="neu-card p-5 text-center space-y-1">
+                <p className="text-sm font-semibold text-[#17171A]">{isStaff ? 'No notes yet' : 'Nothing published yet'}</p>
+                <p className="text-xs text-[#5F5F68]">{isStaff ? 'Summarise a finished class to create notes, then review and publish them.' : 'Notes, revision sheets, quizzes and flashcards appear here once your teachers publish them.'}</p>
+              </div>
+            )}
             {sorted.map((a) => (
               <button key={a.id} type="button" onClick={() => { setSelected(a); setEditing(false); }} aria-pressed={selected?.id === a.id}
                 className={`w-full text-left neu-card !rounded-2xl p-3 space-y-1 ${selected?.id === a.id ? 'ring-2 ring-[#7444E8]' : ''}`}>
@@ -133,7 +138,7 @@ export default function StudyPage() {
           </aside>
 
           <section className="min-w-0">
-            {!selected ? <p className="text-sm text-[#5F5F68]">Choose something on the left.</p> : (
+            {!selected ? (sorted.length === 0 ? null : <p className="neu-card p-5 text-sm text-[#5F5F68]"><span className="hidden lg:inline">Choose notes, a quiz or flashcards from the list to open them.</span><span className="lg:hidden">Choose notes, a quiz or flashcards above to open them.</span></p>) : (
               <div className="space-y-3" data-testid="artifact-view">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="font-heading text-xl font-bold text-[#17171A]">{selected.title}</h2>
