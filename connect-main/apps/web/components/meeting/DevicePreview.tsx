@@ -101,7 +101,7 @@ export const DevicePreview: React.FC<DevicePreviewProps> = ({
     <div
       id="device-preview-container"
       data-testid="device-preview-container"
-      className="relative w-full aspect-video max-h-[320px] sm:max-h-[380px] rounded-2xl bg-[#171717] overflow-hidden flex items-center justify-center border border-[#262626] shadow-sm select-none"
+      className="relative w-full aspect-[4/3] sm:aspect-video max-h-[320px] sm:max-h-[380px] rounded-2xl bg-[#171717] overflow-hidden flex items-center justify-center border border-[#262626] shadow-sm select-none"
     >
       {/* Live Video Element */}
       {videoEnabled && stream ? (
@@ -118,7 +118,7 @@ export const DevicePreview: React.FC<DevicePreviewProps> = ({
         />
       ) : (
         /* Video Off Fallback Avatar & Clean Status */
-        <div className="flex flex-col items-center justify-center text-center p-6 space-y-2.5">
+        <div className="flex flex-col items-center justify-center text-center px-6 pt-6 pb-16 space-y-2.5">
           <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-[#2A2A2A] text-white flex items-center justify-center text-xl sm:text-2xl font-bold border border-[#404040]">
             {initials}
           </div>
