@@ -23,7 +23,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ progressList
   const totalCompleted = progressList.reduce((acc, p) => acc + p.exercises_completed, 0);
   const totalAssignments = progressList.reduce((acc, p) => acc + p.assignments_submitted, 0);
   const totalScore = progressList.reduce((acc, p) => acc + p.total_points, 0);
-  const maxStreak = progressList.reduce((acc, p) => Math.max(acc, p.current_streak_days), 5); // default mock streak 5
+  const maxStreak = progressList.reduce((acc, p) => Math.max(acc, p.current_streak_days), 0);
+  const progressFor = (slug: string) => progressList.find((p) => p.course_slug === slug);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -34,7 +35,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ progressList
             <Flame className="w-6 h-6 fill-current" />
           </div>
           <div>
-            <div className="text-2xl font-extrabold text-[#17151F]">{maxStreak} Days</div>
+            <div className="text-2xl font-extrabold text-[#17151F]">{maxStreak} {maxStreak === 1 ? 'Day' : 'Days'}</div>
             <div className="text-xs text-[#5E5A50] font-medium">Active Learning Streak</div>
           </div>
         </div>
@@ -44,7 +45,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ progressList
             <CheckCircle2 className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-2xl font-extrabold text-[#17151F]">{totalCompleted || 14}</div>
+            <div className="text-2xl font-extrabold text-[#17151F]">{totalCompleted}</div>
             <div className="text-xs text-[#5E5A50] font-medium">Exercises Mastered</div>
           </div>
         </div>
@@ -54,7 +55,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ progressList
             <Award className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-2xl font-extrabold text-[#17151F]">{totalAssignments || 3}</div>
+            <div className="text-2xl font-extrabold text-[#17151F]">{totalAssignments}</div>
             <div className="text-xs text-[#5E5A50] font-medium">Assignments Submitted</div>
           </div>
         </div>
@@ -64,7 +65,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ progressList
             <Trophy className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-2xl font-extrabold text-[#17151F]">{totalScore || 280} pts</div>
+            <div className="text-2xl font-extrabold text-[#17151F]">{totalScore} pts</div>
             <div className="text-xs text-[#5E5A50] font-medium">Practical XP Earned</div>
           </div>
         </div>
@@ -75,7 +76,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ progressList
         <h2 className="text-xl font-bold text-[#17151F]">Enrolled Practical Courses</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {PILOT_COURSES.map((course) => (
+          {PILOT_COURSES.map((course) => {
+            const progress = progressFor(course.slug);
+            return (
             <div
               key={course.slug}
               className="p-6 rounded-3xl bg-[#FFFFFF] border border-[#E4E2DB] shadow-sm flex flex-col justify-between space-y-4 hover:border-[#7444E8] transition-all"
@@ -95,27 +98,26 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ progressList
               </div>
 
               <div className="space-y-3 pt-2 border-t border-[#F0EEE8]">
-                <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center justify-between text-xs" data-testid={`course-progress-${course.slug}`}>
                   <span className="text-[#5E5A50]">Progress</span>
-                  <span className="font-bold text-[#17151F]">65%</span>
-                </div>
-                <div className="w-full bg-[#FAF9FC] border border-[#E4E2DB] h-2 rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{ width: '65%', backgroundColor: course.accentColor }}
-                  />
+                  <span className="font-bold text-[#17151F]">
+                    {progress
+                      ? `${progress.exercises_completed} ${progress.exercises_completed === 1 ? 'exercise' : 'exercises'} · ${progress.total_points} pts`
+                      : 'Not started yet'}
+                  </span>
                 </div>
 
                 <Link
                   href={`/lab/course/${course.slug}`}
                   className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-[#FAF9FC] hover:bg-[#F1EBFF] text-[#7444E8] text-xs font-bold rounded-xl transition-colors cursor-pointer"
                 >
-                  <span>Continue Course</span>
+                  <span>{progress ? 'Continue Course' : 'Start Course'}</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
