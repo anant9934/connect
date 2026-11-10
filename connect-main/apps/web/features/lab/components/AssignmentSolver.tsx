@@ -40,10 +40,14 @@ export const AssignmentSolver: React.FC<AssignmentSolverProps> = ({ assignment, 
     if (selectedLanguage === 'python') preloadPython();
   }, [selectedLanguage]);
 
-  const initialStarter =
-    typeof assignment.starter_code === 'object' && assignment.starter_code !== null
-      ? ('code' in assignment.starter_code ? (assignment.starter_code as { code: string }).code : '')
-      : '';
+  // Starter code is either one snippet ({ code }) or one per language ({ cpp: ..., python: ... }).
+  const starterFor = (lang: SupportedLanguage): string => {
+    const sc = assignment.starter_code as Record<string, unknown> | null | undefined;
+    if (!sc || typeof sc !== 'object') return '';
+    if (typeof sc.code === 'string') return sc.code;
+    return typeof sc[lang] === 'string' ? (sc[lang] as string) : '';
+  };
+  const initialStarter = starterFor(allowed[0]);
 
   const [code, setCode] = useState<string>(initialStarter);
   const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
@@ -248,6 +252,8 @@ export const AssignmentSolver: React.FC<AssignmentSolverProps> = ({ assignment, 
             initialCode={code}
             allowedLanguages={allowed}
             onCodeChange={setCode}
+            onLanguageChange={setSelectedLanguage}
+            starterFor={starterFor}
             height="560px"
             orgId={orgId}
           />

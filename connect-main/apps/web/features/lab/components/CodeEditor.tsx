@@ -31,6 +31,10 @@ interface CodeEditorProps {
   initialCode?: string;
   allowedLanguages?: SupportedLanguage[];
   onCodeChange?: (code: string) => void;
+  /** Told when the student switches language, so a parent can run or submit in that language. */
+  onLanguageChange?: (language: SupportedLanguage) => void;
+  /** Starter code for a language (for example an assignment's own); falls back to the built-in template. */
+  starterFor?: (language: SupportedLanguage) => string | undefined;
   onExecute?: (result: { stdout: string; stderr: string; durationMs: number; status: string }) => void;
   showStdin?: boolean;
   showPreview?: boolean;
@@ -45,6 +49,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   initialCode,
   allowedLanguages = ['cpp', 'python', 'java', 'html', 'css', 'javascript', 'sql'],
   onCodeChange,
+  onLanguageChange,
+  starterFor,
   onExecute,
   showStdin = true,
   showPreview = true,
@@ -102,7 +108,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
 
   const handleLanguageChange = (newLang: SupportedLanguage) => {
     setLanguage(newLang);
-    const starter = STARTER_CODE_BY_LANGUAGE[newLang] || '';
+    onLanguageChange?.(newLang);
+    const starter = starterFor?.(newLang) || STARTER_CODE_BY_LANGUAGE[newLang] || '';
     setCode(starter);
     onCodeChange?.(starter);
     setStdout('');
@@ -116,7 +123,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
   };
 
   const handleResetCode = () => {
-    const starter = STARTER_CODE_BY_LANGUAGE[language] || '';
+    const starter = starterFor?.(language) || STARTER_CODE_BY_LANGUAGE[language] || '';
     handleCodeChange(starter);
     setStdout('');
     setStderr('');
