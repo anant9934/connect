@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronUp, GraduationCap, Loader2, Trophy, X } from 'lucide-react';
+import { useEscapeKey } from '@/lib/accessibility/useEscapeKey';
 import { ApiError } from '@/lib/api/client';
 import * as api from '@/features/classroom/api';
 
@@ -184,6 +185,7 @@ export const ClassroomPanel: React.FC<ClassroomPanelProps> = ({ roomCode, selfId
   const [doubtText, setDoubtText] = useState('');
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [board, setBoard] = useState<api.LeaderboardRow[] | null>(null);
+  useEscapeKey(board !== null, () => setBoard(null));
   const closedQuizzes = useRef<Set<string> | null>(null);
 
   const openBoard = useCallback(async () => {

@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, BarChart3, Code2, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { useEscapeKey } from '@/lib/accessibility/useEscapeKey';
 import { ApiError } from '@/lib/api/client';
 import * as classroomApi from '@/features/classroom/api';
 import type { Poll } from '@/features/classroom/api';
@@ -293,7 +294,9 @@ const LiveEngagementView: React.FC<{ roomCode: string; syncTick: number }> = ({ 
 
 // ---------- Building blocks ----------
 
-const Popup: React.FC<{ ariaLabel: string; onClose: () => void; children: React.ReactNode }> = ({ ariaLabel, onClose, children }) => (
+const Popup: React.FC<{ ariaLabel: string; onClose: () => void; children: React.ReactNode }> = ({ ariaLabel, onClose, children }) => {
+  useEscapeKey(true, onClose);
+  return (
   <div className="fixed inset-x-0 top-20 z-[60] flex justify-center px-4 pointer-events-none">
     <div role="dialog" aria-label={ariaLabel} className="pointer-events-auto w-full max-w-md rounded-2xl bg-white border border-[#E4E2DB] shadow-2xl p-5 relative animate-in fade-in slide-in-from-top-2 duration-200">
       <button type="button" onClick={onClose} aria-label="Dismiss" className="absolute top-3 right-3 p-1 rounded-md text-[#9C988D] hover:bg-[#F2F2F0]">
@@ -302,9 +305,12 @@ const Popup: React.FC<{ ariaLabel: string; onClose: () => void; children: React.
       {children}
     </div>
   </div>
-);
+  );
+};
 
-const Drawer: React.FC<{ title: string; subtitle: string; onClose: () => void; children: React.ReactNode }> = ({ title, subtitle, onClose, children }) => (
+const Drawer: React.FC<{ title: string; subtitle: string; onClose: () => void; children: React.ReactNode }> = ({ title, subtitle, onClose, children }) => {
+  useEscapeKey(true, onClose);
+  return (
   <div className="fixed inset-0 z-[55] flex justify-end bg-black/20" onClick={onClose}>
     <aside
       role="dialog"
@@ -324,7 +330,8 @@ const Drawer: React.FC<{ title: string; subtitle: string; onClose: () => void; c
       <div className="flex-1 overflow-y-auto">{children}</div>
     </aside>
   </div>
-);
+  );
+};
 
 const PollPopup: React.FC<{ roomCode: string; poll: Poll; onAnswered: () => void; onLater: () => void }> = ({ roomCode, poll, onAnswered, onLater }) => {
   const [selected, setSelected] = useState<string[]>([]);
@@ -499,6 +506,7 @@ const LANGUAGES: { id: SupportedLanguage; label: string }[] = [
 ];
 
 const AssignCodingModal: React.FC<{ orgId: string | null; onClose: () => void; onAssigned: (p: CodingAnnouncement) => Promise<void> }> = ({ orgId, onClose, onAssigned }) => {
+  useEscapeKey(true, onClose);
   const [courses, setCourses] = useState<LabCourse[] | null>(null);
   const [courseId, setCourseId] = useState('');
   const [title, setTitle] = useState('');

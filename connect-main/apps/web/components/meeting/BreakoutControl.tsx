@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Users, X } from 'lucide-react';
+import { useEscapeKey } from '@/lib/accessibility/useEscapeKey';
 import { ApiError } from '@/lib/api/client';
 import * as api from '@/features/classroom/api';
 
@@ -23,6 +24,7 @@ interface BreakoutControlProps {
 export const BreakoutControl: React.FC<BreakoutControlProps> = ({ roomCode, syncTick, onChanged, onMainCode }) => {
   const [state, setState] = useState<api.BreakoutState | null>(null);
   const [open, setOpen] = useState(false);
+  useEscapeKey(open, () => setOpen(false));
   const [groups, setGroups] = useState('2');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

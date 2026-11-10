@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, FileText, PenLine, X } from 'lucide-react';
+import { useEscapeKey } from '@/lib/accessibility/useEscapeKey';
 import { ApiError } from '@/lib/api/client';
 import * as api from '@/features/classroom/api';
 import { Deck, loadDeck, PPTX_TYPE } from '@/features/classroom/deck';
@@ -39,6 +40,7 @@ export const ClassroomBoard: React.FC<ClassroomBoardProps> = ({ roomCode, selfId
   const [aspect, setAspect] = useState(16 / 9);
   const [files, setFiles] = useState<MeetingFile[]>([]);
   const [choosing, setChoosing] = useState(false);
+  useEscapeKey(choosing, () => setChoosing(false));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pageRef = useRef<HTMLCanvasElement | null>(null);

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Captions, CaptionsOff } from 'lucide-react';
+import { useEscapeKey } from '@/lib/accessibility/useEscapeKey';
 import { CAPTION_LANGS, type CaptionLang, useLiveSpeechTranscription } from '@/features/meeting/useLiveSpeechTranscription';
 
 export interface IncomingCaption { text: string; final: boolean; from: string; at: number }
@@ -25,6 +26,7 @@ export const LiveCaptions: React.FC<LiveCaptionsProps> = ({ roomCode, canCaption
   const [interim, setInterim] = useState('');
   const [hidden, setHidden] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  useEscapeKey(confirming, () => setConfirming(false));
   const lastInterim = useRef(0);
 
   const show = (text: string, final: boolean) => {
