@@ -8,6 +8,7 @@ import { ApiError } from '@/lib/api/client';
 import * as api from '@/features/institution/api';
 import { EngagementExplainer, ScoreBadge, engagementBand } from '@/components/engagement/Engagement';
 import { SystemHealth } from '@/components/dashboard/SystemHealth';
+import { PasswordResetControl, canResetPassword } from '@/components/institution/PeopleList';
 
 const AUDIT_PAGE_SIZE = 25;
 const AUDIT_REFRESH_MS = 5000;
@@ -320,6 +321,7 @@ export default function AdminPage() {
                       <select aria-label={`Status of ${member.displayName}`} value={member.status} onChange={(e) => changeMember(member, member.role, e.target.value)} className={`${inputClass} !w-auto`}>
                         {Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                       </select>
+                      {canResetPassword(member) && <PasswordResetControl orgId={orgId} member={member} />}
                     </div>
                   ) : (
                     <p className="text-xs text-[#404040]">{ROLE_LABELS[member.role]} · {STATUS_LABELS[member.status]}</p>
